@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Tooling
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.import_linter_cache/
+.coverage
+htmlcov/
+
+# Local dev stack: a private Postgres cluster, a private Redis, and the
+# filesystem artifact store. Created by scripts/devstack.sh, never committed.
+.devstack/
+
+# Local configuration
+.env

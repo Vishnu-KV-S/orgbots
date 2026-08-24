@@ -1,0 +1,13 @@
+# $30 a month for the whole company, $20 of it inside growth. Small on purpose: a
+# test company that can overspend is a test of the vendor's invoice, not the runtime.
+apiVersion: agent-platform/v1
+kind: BudgetPolicy
+metadata:
+  name: default
+spec:
+  actors: {}
+  departments:
+    growth: 2000
+  organization: 3000
+  oversubscription: 0.3
+  period: month

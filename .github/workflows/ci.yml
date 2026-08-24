@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  RUNTIME_DATABASE_URL: postgresql+psycopg://runtime:runtime@127.0.0.1:5432/runtime
+  RUNTIME_REDIS_URL: redis://127.0.0.1:6379/0
+  RUNTIME_ARTIFACT_BACKEND: fs
+  RUNTIME_ARTIFACT_FS_ROOT: /tmp/runtime-artifacts
+
+jobs:
+  static:
+    name: lint · types · import contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv venv --python 3.12
+      - run: uv pip install -e ".[dev]"
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - name: import-linter
+        # I3 and I4 made mechanical. This catches the violation here instead of in
+        # a postmortem.
+        run: uv run lint-imports
+
+      - name: mypy strict
+        run: uv run mypy
+
+      - name: spec validate
+        # M4 §12. `validate` is a pure function of the files, so the config plane is
+        # checked in the *static* job rather than the test one: a pull request that
+        # breaks `config/org` fails the build without needing a Postgres, and it fails
+        # on the malformed document rather than three minutes later on a deploy.
+        run: uv run python -m runtime.cli spec validate --path config/org
+
+  test:
+    name: tests (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The definition of done requires both. Framework replay semantics are
+          # host-dependent, and the journal exists to make that irrelevant — so it
+          # has to be proven where the difference would show.
+          - runner: 16-core
+            os: ubuntu-latest-16-core
+            iterations: 50
+          - runner: 1-vcpu
+            os: ubuntu-latest
+            iterations: 50
+    runs-on: ${{ matrix.os }}
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: runtime
+          POSTGRES_PASSWORD: runtime
+          POSTGRES_DB: runtime
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U runtime -d runtime"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv venv --python 3.12
+      - run: uv pip install -e ".[dev]"
+      - run: mkdir -p /tmp/runtime-artifacts
+
+      - name: T0 — migrations up, down, up
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      - name: T1–T43 except the chaos loops
+        run: uv run pytest -q -m "not slow" --timeout=600
+
+      - name: T42 — the injection corpus results are current
+        # §9 requires the corpus results documented. The test regenerates the file;
+        # if it differs from what is committed, the security posture changed and the
+        # diff belongs in review rather than in a surprise.
+        run: |
+          uv run pytest -q tests/test_m2_injection.py --timeout=600
+          git diff --exit-code docs/INJECTION_RESULTS.md
+
+      - name: M4 §8 — the config plane changed nothing
+        # The round-trip: export the Python-defined department to YAML, compile it
+        # back, assert every spec_hash is byte-identical. If this is green, runtime
+        # behaviour is unchanged by construction — which is the only claim M4 makes and
+        # the only milestone that can make it. Also asserts `config/org` is not a stale
+        # export, which is the way it would rot.
+        run: uv run pytest -q tests/test_m4_roundtrip.py --timeout=600
+
+      - name: M4 §12 — apply is transactional under SIGKILL
+        run: uv run pytest -q tests/test_m4_chaos.py --timeout=600
+
+      - name: T7 — kill during tool call, ×${{ matrix.iterations }}, both durability modes
+        env:
+          RUNTIME_CHAOS_ITERATIONS: ${{ matrix.iterations }}
+        run: uv run pytest -q tests/test_exactly_once.py --timeout=3000
+
+  compose:
+    name: docker compose up
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: healthy in under 60s from a clean clone
+        run: |
+          docker compose up -d --wait --wait-timeout 60
+          docker compose ps
+          docker compose down -v

@@ -1,0 +1,136 @@
+[project]
+name = "agent-org-runtime"
+version = "0.1.0"
+description = "Agent org runtime — M0: runtime correctness"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "psycopg[binary,pool]>=3.2",
+    "alembic>=1.14",
+    "redis>=5.2",
+    "httpx>=0.27",
+    "boto3>=1.35",
+    "structlog>=24.4",
+    "opentelemetry-api>=1.28",
+    "opentelemetry-sdk>=1.28",
+    "langgraph>=0.2.50",
+    "langgraph-checkpoint-postgres>=2.0.7",
+    # The DeepSeek client. DeepSeek publishes an Anthropic-compatible endpoint, so the
+    # provider is a base URL and a capability set over this SDK rather than a second
+    # one — which is why this stays a dependency with no `anthropic` provider
+    # registered. Dropping it would mean writing the Messages protocol, its streaming
+    # and its error taxonomy by hand to keep talking to DeepSeek.
+    "anthropic>=1.0",
+    # The agents config (config/agents.example.yaml). Already present transitively;
+    # declared because `runtime.org.agents_config` imports it directly.
+    "pyyaml>=6.0",
+    # M2. AES-256-GCM for the credentials table (migration 022). The standard
+    # library has no AEAD, and rolling one is the kind of thing that looks fine
+    # until it is a CVE with our name on it.
+    "cryptography>=43",
+]
+
+[project.optional-dependencies]
+# M3. Mem0 is the production memory store and it is **optional**, for two reasons that
+# are both about not making the milestone's hard gates depend on it. It needs the
+# pgvector extension, which stock Postgres does not have (docs/M3_LIBRARY_FACTS.md fact
+# 3); and it pulls in `openai`, `qdrant-client` and `posthog`, none of which the runtime
+# otherwise wants. `RUNTIME_MEMORY_STORE=native` is the default and needs none of it.
+#
+# Pinned to a minor range on purpose. §13 risk 3: scope filtering is a security boundary
+# implemented by a third-party library, and T46-T49 must be re-run on every upgrade.
+memory = [
+    "mem0ai>=2.0.18,<3",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
+    "hypothesis>=6.115",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "import-linter>=2.1",
+    "types-boto3",
+    "types-PyYAML",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/runtime"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "TID", "RUF", "ASYNC", "S"]
+ignore = [
+    "S101",  # assert — used in tests and internal invariants
+    "S608",  # SQL string construction is reviewed by hand here
+    "B008",  # FastAPI Depends() in defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "N806"]
+# The error taxonomy is named by the architecture document (IncoherentEffectPolicy,
+# StaleFence, BudgetExceeded...). Renaming them to carry an -Error suffix would make
+# the code stop matching the spec it implements, which is the more expensive kind of
+# inconsistency.
+"src/runtime/domain/errors.py" = ["N801", "N818"]
+# M4's config-plane errors are named for what an operator did, not for the fact that
+# they are exceptions: `RenameRefused`, `PlanStale`, `ApplyConflict`. They appear in CLI
+# output, so `RenameRefusedError` would be a worse message for a suffix nobody reads.
+"src/runtime/spec/errors.py" = ["N818"]
+# `spec` is an operator CLI: it prints, it prompts, and it writes a file the operator
+# asked for. The verbs are `async` only because the dispatcher awaits them.
+"src/runtime/cli/spec.py" = ["ASYNC240", "ASYNC250"]
+"src/runtime/persistence/migrations/*" = ["N999", "E501", "I001"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["runtime"]
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+disallow_any_generics = true
+
+[[tool.mypy.overrides]]
+module = ["langgraph.*", "langgraph_checkpoint.*", "boto3.*", "botocore.*"]
+ignore_missing_imports = true
+
+# M3. `mem0ai` is an optional extra, so it is absent from the default dev install and
+# from CI's type check. Listing it here rather than installing it means the type check
+# runs in the configuration the test suite runs in — which is the one where
+# `RUNTIME_MEMORY_STORE=native` and `mem0_store` is never imported.
+[[tool.mypy.overrides]]
+module = ["mem0.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["runtime.persistence.migrations.*"]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# One event loop for the whole session. The engine pool is process-global and a
+# connection created on one loop cannot be awaited on another, so per-test loops
+# would mean disposing and rebuilding the pool between every test.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+timeout = 120
+markers = [
+    "integration: requires Postgres/Redis/object store",
+    "chaos: forks and kills processes; slow",
+    "slow: long-running soak or repetition test",
+]
+filterwarnings = ["ignore::DeprecationWarning"]

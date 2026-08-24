@@ -1,0 +1,116 @@
+# Four employees. The names are not free: the shipped graphs (`marketing_head@1`,
+# `research@1`, `content@1`) address each other by the constants in
+# `runtime.org.department`, so a new company reuses these four seats and changes
+# everything around them — department, models, ceilings, budget, schedule.
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: marketing-head
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 60
+    maxDepth: 4
+    maxLlmCalls: 8
+    maxToolCalls: 4
+    maxWallClockS: 600.0
+  delegation: null
+  department: growth
+  graph: marketing_head@1
+  handler: null
+  kind: llm_agent
+  memory: null
+  memoryProfile: null
+  modelProfiles:
+    coordination: ds-flash-work
+    evaluation: ds-flash-work
+    summarization: ds-flash
+  reportsTo: null
+  role: head
+  tools:
+  - publish.external@1
+---
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: research
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 80
+    maxDepth: 4
+    maxLlmCalls: 6
+    maxToolCalls: 24
+    maxWallClockS: 900.0
+  delegation: null
+  department: growth
+  graph: research@1
+  handler: null
+  kind: llm_agent
+  memory: null
+  memoryProfile: null
+  modelProfiles:
+    summarization: ds-flash
+    work: ds-pro-search
+  reportsTo: marketing-head
+  role: ic
+  tools:
+  - web.fetch@1
+  - web.search@1
+---
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: content
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 60
+    maxDepth: 4
+    maxLlmCalls: 6
+    maxToolCalls: 8
+    maxWallClockS: 600.0
+  delegation: null
+  department: growth
+  graph: content@1
+  handler: null
+  kind: llm_agent
+  memory: null
+  memoryProfile: null
+  modelProfiles:
+    summarization: ds-flash
+    work: ds-pro-work
+  reportsTo: marketing-head
+  role: ic
+  tools:
+  - web.fetch@1
+---
+# The control. No model profiles and maxLlmCalls 0, so the gateway refuses twice
+# over — which is why the go/no-go numbers get read off this one.
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: analytics
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 0
+    maxDepth: 4
+    maxLlmCalls: 0
+    maxToolCalls: 0
+    maxWallClockS: 120.0
+  delegation: null
+  department: growth
+  graph: null
+  handler: analytics@1
+  kind: deterministic_worker
+  memory: null
+  memoryProfile: null
+  modelProfiles: {}
+  reportsTo: marketing-head
+  role: ic
+  tools: []

@@ -1,0 +1,47 @@
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: publish-gate
+spec:
+  actor: marketing-head
+  catchup: skip
+  cron: 0 16 * * 4
+  input: {}
+  mode: publish_gate
+  timezone: UTC
+---
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: weekly-metrics
+spec:
+  actor: analytics
+  catchup: skip
+  cron: 0 16 * * 5
+  input: {}
+  mode: weekly_metrics
+  timezone: UTC
+---
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: weekly-plan
+spec:
+  actor: marketing-head
+  catchup: skip
+  cron: 0 8 * * 1
+  input: {}
+  mode: weekly_plan
+  timezone: UTC
+---
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: weekly-summary
+spec:
+  actor: marketing-head
+  catchup: skip
+  cron: 0 17 * * 5
+  input: {}
+  mode: weekly_summary
+  timezone: UTC

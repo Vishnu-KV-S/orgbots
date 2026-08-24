@@ -1,0 +1,81 @@
+apiVersion: agent-platform/v1
+kind: ToolGrant
+metadata:
+  name: actor-content-web-fetch-1
+spec:
+  connection: null
+  subject:
+    actor: content
+    role: null
+  tool: web.fetch@1
+---
+apiVersion: agent-platform/v1
+kind: ToolGrant
+metadata:
+  name: actor-marketing-head-publish-external-1
+spec:
+  connection: publish-staging
+  subject:
+    actor: marketing-head
+    role: null
+  tool: publish.external@1
+---
+apiVersion: agent-platform/v1
+kind: ToolGrant
+metadata:
+  name: actor-research-web-fetch-1
+spec:
+  connection: null
+  subject:
+    actor: research
+    role: null
+  tool: web.fetch@1
+---
+apiVersion: agent-platform/v1
+kind: ToolGrant
+metadata:
+  name: actor-research-web-search-1
+spec:
+  connection: search-primary
+  subject:
+    actor: research
+    role: null
+  tool: web.search@1
+---
+apiVersion: agent-platform/v1
+kind: Connection
+metadata:
+  name: publish-staging
+spec:
+  credentials:
+    secretRef: publish_api_key
+  provider: publisher
+  scopes:
+  - publish:write
+  status: ACTIVE
+---
+apiVersion: agent-platform/v1
+kind: Connection
+metadata:
+  name: search-primary
+spec:
+  credentials:
+    secretRef: search_api_key
+  provider: serper
+  scopes:
+  - search:read
+  status: ACTIVE
+---
+apiVersion: agent-platform/v1
+kind: AuthorityPolicy
+metadata:
+  name: department-marketing-publish-external
+spec:
+  action: publish_external
+  approverRole: director
+  level: human
+  maxEscalations: 1
+  onExpiry: deny
+  scope: department
+  target: marketing
+  ttlSeconds: 86400

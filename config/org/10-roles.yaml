@@ -1,0 +1,47 @@
+apiVersion: agent-platform/v1
+kind: Role
+metadata:
+  name: director
+spec:
+  approver: director
+  approverDailyBudget: 6
+  baseAuthority: {}
+  department: marketing
+  parent: operator
+  rank: 5
+---
+apiVersion: agent-platform/v1
+kind: Role
+metadata:
+  name: head
+spec:
+  approver: null
+  approverDailyBudget: 10
+  baseAuthority: {}
+  department: marketing
+  parent: director
+  rank: 10
+---
+apiVersion: agent-platform/v1
+kind: Role
+metadata:
+  name: ic
+spec:
+  approver: null
+  approverDailyBudget: 10
+  baseAuthority: {}
+  department: marketing
+  parent: head
+  rank: 20
+---
+apiVersion: agent-platform/v1
+kind: Role
+metadata:
+  name: operator
+spec:
+  approver: operator
+  approverDailyBudget: 10
+  baseAuthority: {}
+  department: null
+  parent: null
+  rank: 0

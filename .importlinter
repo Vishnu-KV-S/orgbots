@@ -1,0 +1,165 @@
+[importlinter]
+root_package = runtime
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = Layered architecture
+type = layers
+layers =
+    runtime.cli
+    runtime.api
+    runtime.worker
+    runtime.spec
+    runtime.runtime
+    runtime.graphs | runtime.handlers
+    runtime.memory
+    runtime.gateway
+    runtime.org
+    runtime.effects | runtime.budget | runtime.artifacts | runtime.events
+    runtime.persistence
+    runtime.domain
+
+# `runtime.spec` (M4) sits above `runtime.runtime` and below `runtime.worker`.
+#
+# *Above the runtime*, because compiling a document set needs `runtime.runtime.scheduler`
+# to parse a cron and the graph and handler registries to check an entrypoint exists —
+# the same imports `department_boot` makes for the same reason.
+#
+# *Below the worker and the API*, because nothing that executes a run may reach the
+# config plane. A run executes under its frozen RunSpec; a worker that could import the
+# compiler could be made to consult live configuration, which is the one property M0
+# built the RunSpec to prevent. The CLI is the only caller, plus seeding.
+
+# `runtime.memory` (M3) sits between the graphs and the gateway, and both edges are
+# load-bearing.
+#
+# *Below the graphs*, because a graph node is what asks for context — `ContextPlanner`
+# hands back a rendered block and `graphs.common.context` puts it in the template.
+#
+# *Above the gateway*, because every model call and every embedding the memory
+# subsystem makes has to go through one. That is I3 and I12 applied to the highest-
+# volume model call in M3: extraction, fusion and promotion review are all
+# `work_class=MEMORY` through `ModelGateway.complete_detached` and `EmbeddingGateway`.
+# Mem0 would otherwise construct its own clients (docs/M3_LIBRARY_FACTS.md fact 7) and
+# the accounting M2 built would have a hole in it exactly where the new spend is.
+#
+# It imports `runtime.org.department` for the scope-id derivations, which is downward
+# and fine. `runtime.memory` is deliberately absent from `runtime.runtime`'s level:
+# `MemoryWorker` is imported by `runtime.worker.main`, above both.
+
+# `runtime.org` sits *below* the gateway on purpose. The tool gateway consults
+# authority and approvals before an irreversible call, so it must be able to import
+# them downwards; a gateway reaching upwards for policy would invert the stack. The
+# graphs above get the same services without a second copy of them.
+
+[importlinter:contract:gateway-only]
+name = No direct external calls outside gateways
+type = forbidden
+source_modules =
+    runtime.graphs
+    runtime.handlers
+    runtime.runtime
+    runtime.org
+    runtime.memory
+forbidden_modules =
+    httpx
+    openai
+    anthropic
+    boto3
+    redis
+# Direct imports only. A graph node reaches the outside world *through* the
+# gateway, so every one of these libraries is reachable transitively via
+# `runtime.gateway` — that path is the design, not a violation. What this contract
+# forbids is a node holding an httpx client of its own, which is a direct import
+# and is what it catches.
+#
+# M3 adds `runtime.memory` as a source. It is the layer with the most reason to hold a
+# client of its own — Mem0 ships one, and the path of least resistance is to let it —
+# so it is the layer most worth naming here. `HttpEmbedder` lives in
+# `runtime.gateway.embeddings` for exactly this reason.
+#
+# `mem0` is deliberately **not** in the forbidden list: `runtime.memory.mem0_store`
+# importing it is the point of that module. What keeps Mem0's own OpenAI client out of
+# the picture is not this contract but `mem0_store`'s provider registration, which
+# routes its LLM and embedder back through the gateways — and
+# `test_m3_store.py`'s Mem0 group is what holds that, without the library installed.
+allow_indirect_imports = True
+
+[importlinter:contract:budget-tables-are-private]
+name = Budget pool tables are reached only through budget/
+type = forbidden
+source_modules =
+    runtime.graphs
+    runtime.handlers
+    runtime.org
+    runtime.api
+    runtime.cli
+    runtime.worker
+    runtime.runtime
+    runtime.effects
+    runtime.artifacts
+    runtime.events
+    runtime.spec
+forbidden_modules =
+    runtime.persistence.repositories.budget
+# M2 §10, risk 2: "The single reservation function will get bypassed. Someone will
+# write a 'quick' direct UPDATE for a special case and reintroduce the deadlock. Make
+# the raw pool tables inaccessible outside `budget/` and enforce it with the existing
+# import-linter contract."
+#
+# `reserve_chain` is the only path that locks the pool chain in `depth ASC, id ASC`
+# order, and a second path that locked in any other order would deadlock against it
+# under exactly the concurrency T27 exercises. So everything above the budget layer
+# reaches pools through `runtime.budget.service` — which is importable — and nothing
+# outside it may hold the repository that owns the SQL.
+#
+# `runtime.gateway` is deliberately absent from the source list: it is the layer that
+# reserves, and it does so through the service. `runtime.persistence.uow` is absent
+# because binding the repository to a session is its whole job.
+#
+# The import graph is half the guard. `test_m2_governance.py` scans the source for raw
+# SQL against `budget_pools`, because a direct `session.execute(text(...))` needs no
+# import at all and is precisely the "quick UPDATE" the risk describes.
+allow_indirect_imports = True
+
+[importlinter:contract:domain-purity]
+name = Domain is pure
+type = forbidden
+source_modules =
+    runtime.domain
+forbidden_modules =
+    sqlalchemy
+    httpx
+    redis
+    boto3
+    fastapi
+    langgraph
+    runtime.persistence
+    runtime.gateway
+    runtime.effects
+    runtime.budget
+    runtime.artifacts
+    runtime.events
+    runtime.org
+    runtime.runtime
+    runtime.worker
+    runtime.api
+
+[importlinter:contract:observability-is-leaf]
+name = Observability imports nothing but domain
+type = forbidden
+source_modules =
+    runtime.observability
+forbidden_modules =
+    runtime.persistence
+    runtime.gateway
+    runtime.effects
+    runtime.budget
+    runtime.artifacts
+    runtime.events
+    runtime.runtime
+    runtime.worker
+    runtime.api
+    runtime.org
+    runtime.graphs
+    runtime.handlers

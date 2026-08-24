@@ -1,0 +1,156 @@
+/* `features/inspector`, plus the panel primitives it is built from. */
+
+.inspector {
+  flex: 0 0 380px;
+  border-left: 1px solid var(--line);
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Without this the panel is only *nominally* 380px: one unbreakable string —
+     an artifact's `file://` URI, a run id — grows the flex item and eats the
+     canvas. `min-width: 0` holds the width and lets the content wrap instead. */
+  min-width: 0;
+}
+
+.inspector-head {
+  padding: 13px 14px 13px 16px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+/* Takes the space, and lets a long id ellipsize instead of pushing the close
+   button off the edge. */
+.inspector-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.inspector-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.018em;
+}
+
+.inspector-head .node-kind {
+  margin-bottom: 4px;
+}
+
+/* A run id is an identifier, not a name. */
+.mono-title {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+}
+
+.inspector-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 16px 40px;
+}
+
+/* --- Section --- */
+
+.section {
+  margin-bottom: 22px;
+}
+
+.section > h3 {
+  margin: 0 0 10px;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 550;
+}
+
+.prose {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.prose + .kv {
+  margin-top: 12px;
+}
+
+/* --- KeyValue --- */
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) 1fr;
+  gap: 6px 12px;
+  font-size: 12.5px;
+}
+
+.kv dt {
+  color: var(--text-faint);
+}
+
+.kv dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+/* --- ListRow --- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.row {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  padding: 9px 11px;
+  background: var(--bg-raised);
+  font-size: 12px;
+  text-align: left;
+  width: 100%;
+  display: block;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+/* Only a row that does something highlights on hover. */
+.row.clickable:hover {
+  background: var(--bg-hover);
+  border-color: var(--line);
+}
+
+.row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.row-title {
+  font-weight: 520;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+/* A reason or a URI needs to wrap; a timestamp does not. */
+.row-meta.wrap {
+  margin-top: 4px;
+  white-space: normal;
+}

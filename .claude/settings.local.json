@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "WebFetch(domain:docs.claude.com)",
+      "WebSearch",
+      "WebFetch(domain:api-docs.deepseek.com)"
+    ]
+  }
+}

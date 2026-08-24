@@ -1,0 +1,87 @@
+# TestCo runs entirely on DeepSeek: it is the only provider with a key in .env, and
+# flash is the cheapest thing that can still follow an output schema. Prices are
+# DeepSeek's off-peak cents/Mtok — the usage ledger bills against these, so
+# `cost per accepted outcome` is only meaningful if they match the vendor's rate.
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: ds-flash
+spec:
+  effort: low
+  inputCentsPerMtok: 22
+  maxOutputTokens: 4000
+  model: deepseek-v4-flash
+  outputCentsPerMtok: 66
+  provider: deepseek
+  temperature: 0.0
+  thinking: false
+  webSearch: false
+---
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: ds-flash-work
+spec:
+  effort: medium
+  inputCentsPerMtok: 22
+  maxOutputTokens: 8000
+  model: deepseek-v4-flash
+  outputCentsPerMtok: 66
+  provider: deepseek
+  temperature: 0.0
+  thinking: false
+  webSearch: false
+---
+# The one profile allowed to search on DeepSeek's own server. Only `research` holds
+# `web.search@1`, and the gateway refuses this profile to anyone who does not.
+#
+# Pro rather than flash, and the search is the reason. Flash drives the server-side
+# tool loop badly: it narrates between rounds, and on a hard subject it spends its
+# whole search budget without ever writing the answer — the message comes back with
+# a search result as its last block and no trailing text at all. That reaches
+# `call_structured` as `not_json` on both attempts and fails the task on a schema
+# error that has nothing to do with the schema. `config/agents.example.yaml` puts
+# research's WORK on pro for this reason; this is the same call.
+#
+# 16000 rather than 8000 for the same run of evidence: ~45k tokens of search results
+# in, and a report written against them ran to 8624 output tokens on flash — over an
+# 8000 cap, truncated mid-string, `not_json` again. Above 8000 the request also
+# streams, which is what keeps a reply this long inside its timeout.
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: ds-pro-search
+spec:
+  effort: high
+  inputCentsPerMtok: 66
+  maxOutputTokens: 16000
+  model: deepseek-v4-pro
+  outputCentsPerMtok: 198
+  provider: deepseek
+  temperature: 0.0
+  # Off, and the continuation loop is why. Resuming a paused server-tool turn means
+  # handing the assistant blocks back, and a thinking block the endpoint wants signed
+  # is refused on the way in — the continuation then falls back to the partial answer
+  # and the search was for nothing. Nothing in a competitor report needs the thinking
+  # budget that WORK-class effort already buys.
+  thinking: false
+  webSearch: true
+---
+# `content` writes the deliverable and flash could not hold ContentDraft@1 — two
+# attempts, both `not_json`, on consecutive runs. Same call as research's: the WORK
+# output is what gets reviewed, so a model that drops the schema costs a rejected
+# task rather than a retry.
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: ds-pro-work
+spec:
+  effort: medium
+  inputCentsPerMtok: 66
+  maxOutputTokens: 16000
+  model: deepseek-v4-pro
+  outputCentsPerMtok: 198
+  provider: deepseek
+  temperature: 0.0
+  thinking: false
+  webSearch: false

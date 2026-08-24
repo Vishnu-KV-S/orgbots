@@ -1,0 +1,16 @@
+apiVersion: agent-platform/v1
+kind: Organization
+metadata:
+  name: testco
+spec:
+  description: A two-person-equivalent growth team, used to exercise the runtime end to end.
+  displayName: TestCo
+---
+apiVersion: agent-platform/v1
+kind: Department
+metadata:
+  name: growth
+spec:
+  description: 'Plan the week, research the field, draft one piece, gate it, measure it.'
+  head: marketing-head
+  parent: null

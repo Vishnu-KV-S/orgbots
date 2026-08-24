@@ -1,0 +1,68 @@
+/* `features/events`: the tail pinned to the bottom of the org screen. */
+
+.feed {
+  flex: 0 0 auto;
+  max-height: 220px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+}
+
+.feed-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.feed-body {
+  overflow: auto;
+  padding: 8px 16px 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.8;
+}
+
+.feed-line {
+  display: flex;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.feed-line .t {
+  color: var(--text-faint);
+  flex: 0 0 66px;
+}
+
+/* The topic is what the eye scans down. Being a step above the rest of the
+   line is all the emphasis it needs. */
+.feed-line .topic {
+  flex: 0 0 150px;
+  color: var(--accent);
+}
+
+.feed-line .who {
+  flex: 0 0 130px;
+  color: var(--text-dim);
+}
+
+.feed-line .rest {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-line.failed .topic {
+  color: var(--failed);
+}
+
+/* A completion is not news. It stays legible and stops there. */
+.feed-line.ok .topic {
+  color: var(--text-dim);
+}

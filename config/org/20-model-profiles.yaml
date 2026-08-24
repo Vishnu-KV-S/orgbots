@@ -1,0 +1,44 @@
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: deepseek-v4-flash
+spec:
+  effort: null
+  inputCentsPerMtok: 22
+  maxOutputTokens: 4000
+  model: deepseek-v4-flash
+  outputCentsPerMtok: 66
+  provider: deepseek
+  temperature: 0.0
+  thinking: true
+  webSearch: false
+---
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: deepseek-v4-pro
+spec:
+  effort: null
+  inputCentsPerMtok: 66
+  maxOutputTokens: 16000
+  model: deepseek-v4-pro
+  outputCentsPerMtok: 198
+  provider: deepseek
+  temperature: 0.0
+  thinking: true
+  webSearch: false
+---
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: deepseek-v4-pro-search-nothink
+spec:
+  effort: null
+  inputCentsPerMtok: 66
+  maxOutputTokens: 16000
+  model: deepseek-v4-pro
+  outputCentsPerMtok: 198
+  provider: deepseek
+  temperature: 0.0
+  thinking: false
+  webSearch: true

@@ -1,0 +1,16 @@
+apiVersion: agent-platform/v1
+kind: Organization
+metadata:
+  name: acme
+spec:
+  description: ''
+  displayName: acme
+---
+apiVersion: agent-platform/v1
+kind: Department
+metadata:
+  name: marketing
+spec:
+  description: 'The M1 marketing department: plan, research, draft, gate, measure.'
+  head: marketing-head
+  parent: null

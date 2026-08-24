@@ -1,0 +1,24 @@
+/**
+ * The whole stylesheet, in layers. Order matters: tokens, then document
+ * defaults, then primitives, then features.
+ *
+ * The class names are an implementation detail of the components in
+ * `components/ui` and `features/*` — nothing else writes them by hand, which is
+ * what makes it possible to move a layer onto CSS modules (or anything else)
+ * one file at a time.
+ */
+
+@import "../styles/tokens.css";
+@import "../styles/base.css";
+
+/* primitives — components/ui and components/layout */
+@import "../styles/layout.css";
+@import "../styles/controls.css";
+@import "../styles/badges.css";
+@import "../styles/cards.css";
+@import "../styles/feedback.css";
+
+/* features */
+@import "../styles/canvas.css";
+@import "../styles/inspector.css";
+@import "../styles/feed.css";

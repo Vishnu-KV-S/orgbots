@@ -1,0 +1,8 @@
+Durable Systems: positioning summary, retrieved 2026-08-20.
+
+Durable Systems sells exactly-once execution as the product rather than as a feature.
+Pricing is per seat and is published. Their documentation leads with a crash-recovery
+narrative and their changelog shows steady work on checkpointing.
+
+Ledgerly does not publish pricing and gates it behind a sales conversation, which is
+itself a positioning choice worth naming in the report.

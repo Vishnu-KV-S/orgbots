@@ -1,0 +1,11 @@
+apiVersion: agent-platform/v1
+kind: BudgetPolicy
+metadata:
+  name: default
+spec:
+  actors: {}
+  departments:
+    marketing: 60000
+  organization: 100000
+  oversubscription: 0.3
+  period: month

@@ -1,0 +1,109 @@
+# Agent model configuration.
+#
+# Point RUNTIME_AGENTS_CONFIG_PATH at a copy of this file to override which model
+# each actor runs per work class. Unset, the department uses the values in
+# src/runtime/org/department.py and this file does nothing.
+#
+# What is NOT here, on purpose: which actors exist, their kind, graph, tools and
+# ceilings. Those are the shape of the department and they live in code. This file
+# holds the one thing that is genuinely an operating decision — which model, at what
+# price — and it is read at `runtime.cli seed`, compiled into the actor spec and
+# hashed into spec_hash. Editing it changes nothing about a run already in flight.
+
+version: 1
+
+# Every field a profile takes:
+#
+#   provider               deepseek | fake — the two `build_providers` registers.
+#                          `anthropic` is not one: the Messages client is still what
+#                          talks to DeepSeek, but it is not reachable under its own
+#                          name, so a profile naming it fails at the first call.
+#   model                  the vendor's model id
+#   max_output_tokens      also decides whether the request streams (above 8000)
+#   temperature
+#   input_cents_per_mtok   integer cents per million tokens
+#   output_cents_per_mtok
+#   thinking               true | false — extended thinking, where the provider has it
+#   effort                 low | medium | high | max — overrides the work-class default
+#                          (WORK high, coordination/evaluation medium, summarization low)
+#   web_search             true | false — ask the provider to search on its own server
+#
+# `web_search` needs a second key the actor cannot grant itself: `web.search@1` in its
+# authority. Set here and not granted, it does nothing. The reason is that a provider-
+# side search never reaches the tool gateway — no journal row, no per-connection rate
+# limit, no approval — so it may not reach further than the front door would.
+#
+# Prices are what the usage ledger bills against, so they should match the vendor's
+# published rate: `cost per accepted outcome` is only defensible if these are right.
+models:
+  # DeepSeek's off-peak rates (peak, 01:00-04:00 and 06:00-10:00 UTC Mon-Fri, is
+  # exactly double). The ledger has one rate per profile, so these under-count a
+  # peak-hours run — which is the same direction the token rounding already errs in,
+  # and the wrong direction to be surprised by. Use the peak numbers if the weekly
+  # cron lands inside those windows.
+  deepseek-pro:
+    provider: deepseek
+    model: deepseek-v4-pro
+    max_output_tokens: 16000
+    temperature: 0.0
+    input_cents_per_mtok: 66       # $0.66 / Mtok off-peak
+    output_cents_per_mtok: 198     # $1.98 / Mtok off-peak
+
+  deepseek-flash:
+    provider: deepseek
+    model: deepseek-v4-flash
+    max_output_tokens: 8000
+    temperature: 0.0
+    input_cents_per_mtok: 22       # $0.22 / Mtok off-peak
+    output_cents_per_mtok: 66      # $0.66 / Mtok off-peak
+
+# An actor named here has its profiles REPLACED, not merged: the set of work classes
+# listed is exactly the set of calls it may make. An actor left out keeps the code's
+# defaults. `analytics` cannot appear at all — max_llm_calls=0 — and naming it is an
+# error rather than a no-op.
+agents:
+  marketing-head:
+    models:
+      coordination: deepseek-pro
+      evaluation: deepseek-pro
+      summarization: deepseek-flash
+
+  research:
+    models:
+      # The one actor holding `web.search@1`, so the one where asking for a
+      # provider-side search does anything. It is live on DeepSeek rather than inert:
+      # `RUNTIME_DEEPSEEK_WEB_SEARCH` decides whether the capability exists at all,
+      # and the grant decides who is offered it.
+      work:
+        provider: deepseek
+        model: deepseek-v4-pro
+        max_output_tokens: 16000
+        input_cents_per_mtok: 66
+        output_cents_per_mtok: 198
+        # Off, and the continuation loop is why: resuming a paused server-tool turn
+        # hands the assistant blocks back, and a thinking block the endpoint wants
+        # signed is refused on the way in — the continuation then falls back to the
+        # partial answer and the search was for nothing.
+        thinking: false
+        effort: high
+        web_search: true
+      summarization: deepseek-flash
+
+  content:
+    models:
+      # Pro rather than flash, and the schema is why: flash could not hold
+      # ContentDraft@1 — two attempts, both `not_json`, on consecutive runs. WORK
+      # output is the deliverable, SUMMARIZATION output never is, so a model weaker at
+      # following the output schema costs a rejected draft here and a retry there.
+      work: deepseek-pro
+      # Compressing history is mechanical, its output is never the artifact, and it
+      # is the highest-volume call in the department. Thinking off, effort low, no
+      # search — three dials in the one place they cost nothing to turn down.
+      summarization:
+        provider: deepseek
+        model: deepseek-v4-flash
+        max_output_tokens: 4000
+        input_cents_per_mtok: 22
+        output_cents_per_mtok: 66
+        thinking: false
+        effort: low

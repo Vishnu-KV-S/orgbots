@@ -1,0 +1,110 @@
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: analytics
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 0
+    maxDepth: 4
+    maxLlmCalls: 0
+    maxToolCalls: 0
+    maxWallClockS: 120.0
+  delegation: null
+  department: marketing
+  graph: null
+  handler: analytics@1
+  kind: deterministic_worker
+  memory: null
+  memoryProfile: null
+  modelProfiles: {}
+  reportsTo: marketing-head
+  role: ic
+  tools: []
+---
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: content
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 500
+    maxDepth: 4
+    maxLlmCalls: 6
+    maxToolCalls: 8
+    maxWallClockS: 600.0
+  delegation: null
+  department: marketing
+  graph: content@1
+  handler: null
+  kind: llm_agent
+  memory: null
+  memoryProfile: null
+  modelProfiles:
+    summarization: deepseek-v4-flash
+    work: deepseek-v4-pro
+  reportsTo: marketing-head
+  role: ic
+  tools:
+  - web.fetch@1
+---
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: marketing-head
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 400
+    maxDepth: 4
+    maxLlmCalls: 8
+    maxToolCalls: 4
+    maxWallClockS: 600.0
+  delegation: null
+  department: marketing
+  graph: marketing_head@1
+  handler: null
+  kind: llm_agent
+  memory: null
+  memoryProfile: null
+  modelProfiles:
+    coordination: deepseek-v4-pro
+    evaluation: deepseek-v4-pro
+    summarization: deepseek-v4-flash
+  reportsTo: null
+  role: head
+  tools:
+  - publish.external@1
+---
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: research
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 600
+    maxDepth: 4
+    maxLlmCalls: 6
+    maxToolCalls: 24
+    maxWallClockS: 900.0
+  delegation: null
+  department: marketing
+  graph: research@1
+  handler: null
+  kind: llm_agent
+  memory: null
+  memoryProfile: null
+  modelProfiles:
+    summarization: deepseek-v4-flash
+    work: deepseek-v4-pro-search-nothink
+  reportsTo: marketing-head
+  role: ic
+  tools:
+  - web.fetch@1
+  - web.search@1
