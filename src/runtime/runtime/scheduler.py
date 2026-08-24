@@ -82,11 +82,21 @@ class Scheduler:
         self._compiled: dict[str, CronExpr] = {}
         self.stats = ScheduleStats()
 
-    async def tick(self, now: dt.datetime | None = None) -> list[Fired]:
-        """Evaluate every active trigger once. Returns what it did."""
+    async def tick(
+        self,
+        now: dt.datetime | None = None,
+        *,
+        organization_id: OrganizationId | None = None,
+    ) -> list[Fired]:
+        """Evaluate every active trigger once. Returns what it did.
+
+        `organization_id` narrows the evaluation to one organization, which is what an
+        operator clicking *tick now* on one company means and what the repository has
+        always accepted. `None` — the loop's own call — evaluates everything.
+        """
         moment = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
         async with self._uow() as uow:
-            triggers = await uow.triggers.active()
+            triggers = await uow.triggers.active(organization_id)
 
         fired: list[Fired] = []
         for trigger in triggers:

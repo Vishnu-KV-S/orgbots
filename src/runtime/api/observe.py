@@ -227,6 +227,50 @@ def _ceilings(spec: dict[str, Any] | None) -> dict[str, Any]:
     return (spec or {}).get("ceilings") or {}
 
 
+def _modes(spec: dict[str, Any] | None) -> list[str]:
+    """The entry points this actor's graph or handler routes on.
+
+    Read from the registries, which is a fact about *this process* — so an API that has
+    not imported the graph packages reports `[]`, and a caller offering a choice falls
+    back to free text rather than to a wrong list. `app.py` imports them at startup for
+    exactly this reason.
+
+    Deliberately not `runtime.org.department.MODES`: that set is derived from the M1
+    schedule, so it names `weekly_metrics` for a graph that does not dispatch on it and
+    omits `task.submitted` for one that does.
+    """
+    from runtime.graphs.registry import modes_for as graph_modes
+    from runtime.handlers.registry import modes_for as handler_modes
+
+    body = spec or {}
+    graph_ref, handler_ref = body.get("graph_ref"), body.get("handler_ref")
+    if graph_ref:
+        return list(graph_modes(str(graph_ref)))
+    if handler_ref:
+        return list(handler_modes(str(handler_ref)))
+    return []
+
+
+def _department_state(
+    *,
+    stopped: bool,
+    has_active_trigger: bool,
+    runs_active: int,
+) -> str:
+    """Derived, never stored.
+
+    A stored state would be a second answer to a question the kill switches and the
+    triggers already answer between them, and the two would disagree the first time
+    somebody used the CLI. Precedence: a stop outranks everything, then anything that
+    will produce work, then nothing.
+    """
+    if stopped:
+        return "stopped"
+    if has_active_trigger or runs_active:
+        return "running"
+    return "paused"
+
+
 def _profiles(spec: dict[str, Any] | None) -> dict[str, str]:
     """Flatten the model profile block to `call site -> model`.
 
@@ -285,6 +329,10 @@ async def organization_graph(org_id: UUID, request: Request) -> dict[str, Any]:
         triggers_by_actor.setdefault(t.actor_name, []).append(
             {
                 "key": t.key,
+                # The actor is on the row even though this index is keyed by it: a
+                # department node shows its members' triggers pooled together, and a
+                # list of crons with no owner is a list nobody can act on.
+                "actor": t.actor_name,
                 "cron": t.cron,
                 "timezone": t.timezone,
                 "active": t.active,
@@ -327,6 +375,18 @@ async def organization_graph(org_id: UUID, request: Request) -> dict[str, Any]:
     dept_node = {d.id: f"dept:{d.id}" for d in departments}
     for d in departments:
         members = [a for a in actors if a.department_id == d.id or a.department == d.name]
+        member_triggers = [t for a in members for t in triggers_by_actor.get(a.name, [])]
+        # An org switch covers every department; a department switch covers the one it
+        # names. Both are reported as *this department's* stop, because from the
+        # canvas's point of view that is what they are.
+        covering = [
+            k
+            for k in kill_switches
+            if k.scope_type == "org" or (k.scope_type == "department" and k.scope_id == d.name)
+        ]
+        runs_active = sum(
+            int(runs_by_actor[a.id].active) for a in members if a.id in runs_by_actor
+        )
         nodes.append(
             {
                 "id": dept_node[d.id],
@@ -337,8 +397,24 @@ async def organization_graph(org_id: UUID, request: Request) -> dict[str, Any]:
                     "description": d.description or "",
                     "head": d.head_actor_name,
                     "members": len(members),
-                    "runs_active": sum(
-                        int(runs_by_actor[a.id].active) for a in members if a.id in runs_by_actor
+                    "runs_active": runs_active,
+                    "state": _department_state(
+                        stopped=bool(covering),
+                        has_active_trigger=any(t["active"] for t in member_triggers),
+                        runs_active=runs_active,
+                    ),
+                    "triggers": member_triggers,
+                    "kill_switch": (
+                        {
+                            "scope_type": covering[0].scope_type,
+                            "scope_id": covering[0].scope_id,
+                            "mode": covering[0].mode,
+                            "reason": covering[0].reason,
+                            "engaged_by": covering[0].engaged_by,
+                            "engaged_at": _iso(covering[0].engaged_at),
+                        }
+                        if covering
+                        else None
                     ),
                 },
             }
@@ -374,6 +450,10 @@ async def organization_graph(org_id: UUID, request: Request) -> dict[str, Any]:
                     "spec_hash": a.spec_hash,
                     "graph_ref": (a.spec or {}).get("graph_ref"),
                     "handler_ref": (a.spec or {}).get("handler_ref"),
+                    # What `input.mode` may be, so a caller can offer the choices
+                    # instead of asking somebody to remember them. `[]` means the
+                    # entrypoint declared none — fall back to free text.
+                    "modes": _modes(a.spec),
                     "tools": (a.spec or {}).get("allowed_tools") or [],
                     "model_profiles": _profiles(a.spec),
                     "ceilings": _ceilings(a.spec),

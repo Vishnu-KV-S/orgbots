@@ -28,7 +28,14 @@ layers =
 # *Below the worker and the API*, because nothing that executes a run may reach the
 # config plane. A run executes under its frozen RunSpec; a worker that could import the
 # compiler could be made to consult live configuration, which is the one property M0
-# built the RunSpec to prevent. The CLI is the only caller, plus seeding.
+# built the RunSpec to prevent.
+#
+# The layer already permitted `runtime.api -> runtime.spec` and nothing used it, so the
+# note here used to say the CLI was the only caller plus seeding. `runtime.api.control`
+# is now the second: `/v1/control` validates, plans and applies a document folder over
+# HTTP, through the same compiler the CLI uses rather than a second one. That does not
+# weaken the rule above — the API does not execute runs either, and the reason
+# `runtime.worker` sits above `runtime.spec` is unchanged.
 
 # `runtime.memory` (M3) sits between the graphs and the gateway, and both edges are
 # load-bearing.

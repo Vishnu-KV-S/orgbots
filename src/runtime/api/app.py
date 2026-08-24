@@ -1,10 +1,16 @@
 """FastAPI application.
 
-Four endpoints and one rule: the API never executes a run. `POST /v1/runs`
-resolves, admits, writes and returns in about 15ms; a worker picks the run up from
-the stream. Executing on the request path would put graph latency in front of the
-caller and, worse, would give the caller's connection ownership of a run that
-nobody else could recover if it dropped.
+Four endpoints here, plus two mounted routers, and one rule that holds across all of
+them: the API never executes a run. `POST /v1/runs` resolves, admits, writes and
+returns in about 15ms; a worker picks the run up from the stream. Executing on the
+request path would put graph latency in front of the caller and, worse, would give the
+caller's connection ownership of a run that nobody else could recover if it dropped.
+
+The two routers are deliberately separate modules. `/v1/observe` is read-only and says
+so in its first line; `/v1/control` writes, and every write it makes goes through the
+same `RunService`, the same kill switch and the same spec compiler the CLI uses. Two
+files rather than one so that "this module contains only SELECTs" stays a fact about
+`observe.py` rather than a convention somebody has to maintain.
 
 The SSE tail reads from the `events` table, not from Redis. A reconnecting client
 gets a complete ordered history from any point, and a Redis wipe costs it nothing.
@@ -23,6 +29,8 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
+from runtime.api.control import router as control_router
+from runtime.api.errors import http_errors
 from runtime.api.observe import router as observe_router
 from runtime.api.schemas import (
     ArtifactView,
@@ -31,13 +39,6 @@ from runtime.api.schemas import (
     RunView,
     StartRunBody,
     StartRunResponse,
-)
-from runtime.domain.errors import (
-    ApprovalRequired,
-    BudgetExceeded,
-    PolicyViolation,
-    SpecError,
-    UnknownActorError,
 )
 from runtime.domain.ids import OrganizationId, RunId, SessionId
 from runtime.domain.specs import StartRunRequest
@@ -74,6 +75,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    # Imported for the side effect: these modules register the graphs and handlers, and
+    # the API now reports what each entrypoint dispatches on (`observe._modes`) and
+    # validates document sets against the registries (`/v1/control/specs/validate`).
+    # An API process that skipped them would answer "this graph has no modes" and
+    # "no graph registered as marketing_head@1" — both wrong, and both wrong quietly.
+    # The same list `runtime.worker.main` imports, for the same reason.
+    import runtime.graphs.delegator
+    import runtime.graphs.department
+    import runtime.graphs.echo_agent
+    import runtime.handlers  # noqa: F401  registers analytics@1, hasher@1
+
     app = FastAPI(title="agent-org-runtime", version="0.1.0", lifespan=lifespan)
     if settings is not None:
         app.state.settings = settings
@@ -83,6 +95,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # the control surface does — a second process would be a second answer to
     # "what is the state right now".
     app.include_router(observe_router)
+
+    # Write. Mounted beside the reader rather than folded into it, because the whole
+    # value of `observe.py`'s first rule — *every statement here is a SELECT* — is that
+    # it is checkable by opening the file. A control endpoint added to that module
+    # would end that, and `test_api_observe.py`'s "the surface is read-only" test would
+    # start being about a convention instead of about a fact.
+    app.include_router(control_router)
 
     def uow_factory(request: Request) -> UnitOfWorkFactory:
         factory: UnitOfWorkFactory = request.app.state.uow
@@ -160,7 +179,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "scope and subtree-budget checks apply to it."
                 ),
             )
-        try:
+        # The mapping lives in `errors.py` because `/v1/control` needs the same one,
+        # and a second hand-written chain would eventually disagree with this one about
+        # a status. It is a superset of what this endpoint used to have: the added
+        # branches are config-plane errors `start_run` cannot raise.
+        with http_errors():
             result = await service.start_run(
                 StartRunRequest(
                     organization_id=org,
@@ -173,16 +196,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     durability=body.durability,
                 )
             )
-        except UnknownActorError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except NotImplementedError as exc:
-            raise HTTPException(status_code=501, detail=str(exc)) from exc
-        except BudgetExceeded as exc:
-            raise HTTPException(status_code=429, detail=str(exc)) from exc
-        except (ApprovalRequired, PolicyViolation) as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except SpecError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         return StartRunResponse(
             run_id=result.run_id,

@@ -108,6 +108,37 @@ class Settings(BaseSettings):
     deepseek_web_search_tool: str = "web_search_20250305"
     deepseek_web_search_max_uses: int = Field(default=5, ge=1)
 
+    # --- M4/M6: the config plane, over HTTP -----------------------------------------
+    spec_roots: str = "config"
+    """Comma-separated directories `/v1/control` may read and write spec files under.
+
+    A `str`, not a `tuple[str, ...]`, and that is not laziness: pydantic-settings v2
+    parses a complex-typed field from the environment as **JSON**, so
+    `RUNTIME_SPEC_ROOTS=config` would raise rather than produce `("config",)`. The
+    convention in this file is a comma-separated string — see `memory_injection_actors`
+    — and `runtime.api.control.spec_roots()` is the one place that splits it.
+
+    Every path the control surface touches is resolved against these roots, with
+    symlinks followed *before* the comparison, and refused if it lands outside. The
+    roots are a confinement boundary, not a search path."""
+
+    spec_editable: bool = True
+    """Whether `/v1/control` may write spec files at all.
+
+    The blunt instrument. `/v1/control` has no authentication of any kind: anything
+    that can reach it can stop a department, spend money and rewrite `config/`. That is
+    fine on a local devstack and must not be exposed on a network. Set this to `false`
+    and every write verb answers 403 while the reads keep working."""
+
+    spec_operator: str = "ui"
+    """The name recorded as `created_by` / `engaged_by` / `applied_by` for actions taken
+    through `/v1/control`.
+
+    There is no auth, so there is no caller identity to draw on. Recording a constant
+    that says *where* the action came from is honest; inventing a person would not be,
+    and `applied_by = "operator"` for both a CLI apply and a UI apply would make the
+    apply history unable to answer the one question it exists for."""
+
     # --- agents ----------------------------------------------------------------------
     agents_config_path: str | None = None
     """Optional YAML overlay for the department's model profiles. Unset means the
