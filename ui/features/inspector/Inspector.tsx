@@ -18,12 +18,24 @@ import type { InspectorContext } from "./types";
 
 export interface InspectorProps {
   node: GraphNode | null;
+  /** The organization on screen. The panels can act now, and every control-surface
+   * call is scoped by it — so it has to be threaded from the screen that knows it. */
+  orgId: string;
   tasks: TaskSummary[];
   onClose: () => void;
   onFocusActor: (name: string) => void;
+  /** Re-read the graph after an action, rather than patching state locally. */
+  onRefresh: () => void;
 }
 
-export function Inspector({ node, tasks, onClose, onFocusActor }: InspectorProps) {
+export function Inspector({
+  node,
+  orgId,
+  tasks,
+  onClose,
+  onFocusActor,
+  onRefresh,
+}: InspectorProps) {
   const [run, setRun] = useState<RunDetail | null>(null);
 
   // Selecting a different node drops back out of whatever run was open under
@@ -32,8 +44,8 @@ export function Inspector({ node, tasks, onClose, onFocusActor }: InspectorProps
 
   const openRun = useCallback((next: RunDetail) => setRun(next), []);
   const context = useMemo<InspectorContext>(
-    () => ({ tasks, onFocusActor, onOpenRun: openRun }),
-    [tasks, onFocusActor, openRun],
+    () => ({ orgId, tasks, onFocusActor, onOpenRun: openRun, onRefresh }),
+    [orgId, tasks, onFocusActor, openRun, onRefresh],
   );
 
   if (!node) return null;

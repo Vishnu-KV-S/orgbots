@@ -35,7 +35,7 @@ export function OrgGraphScreen({ orgId }: { orgId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const canvas = useRef<OrgCanvasHandle>(null);
 
-  const { graph, activity, error } = useOrgGraph(orgId, { live: flags.live });
+  const { graph, activity, error, refresh } = useOrgGraph(orgId, { live: flags.live });
 
   const filters = useMemo(
     () => ({ showPlan: flags.plan, showDelegation: flags.delegation }),
@@ -102,9 +102,11 @@ export function OrgGraphScreen({ orgId }: { orgId: string }) {
         />
         <Inspector
           node={selected}
+          orgId={orgId}
           tasks={activity?.tasks ?? []}
           onClose={() => setSelectedId(null)}
           onFocusActor={focusActor}
+          onRefresh={refresh}
         />
       </div>
     </AppShell>

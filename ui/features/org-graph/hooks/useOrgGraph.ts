@@ -18,6 +18,9 @@ export interface OrgGraphView {
   graph: OrgGraph | null;
   activity: Activity | null;
   error: string | null;
+  /** Re-read now, outside the interval. The inspector calls it after an action —
+   * `useResource` has always exposed it and nothing used to need it. */
+  refresh: () => void;
 }
 
 export function useOrgGraph(orgId: string, { live }: { live: boolean }): OrgGraphView {
@@ -32,9 +35,17 @@ export function useOrgGraph(orgId: string, { live }: { live: boolean }): OrgGrap
     [orgId],
   );
 
-  const { data, error } = useResource(fetcher, { intervalMs: REFRESH_MS, enabled: live });
+  const { data, error, refresh } = useResource(fetcher, {
+    intervalMs: REFRESH_MS,
+    enabled: live,
+  });
 
-  return { graph: data?.graph ?? null, activity: data?.activity ?? null, error };
+  return {
+    graph: data?.graph ?? null,
+    activity: data?.activity ?? null,
+    error,
+    refresh,
+  };
 }
 
 export { REFRESH_MS as ORG_REFRESH_MS };

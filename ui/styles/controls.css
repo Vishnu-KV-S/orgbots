@@ -81,3 +81,166 @@
 .linklike:hover {
   text-decoration-color: var(--text-dim);
 }
+
+/* --- form controls -------------------------------------------------------
+   New with the control surface. Until the UI could change something it had
+   buttons and nothing else — no input, no select, no textarea — so this is a
+   foundation rather than an adjustment. It follows the same rule as the rest:
+   surfaces and lines carry the state, because there is no hue to spend. */
+
+.input {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 5px 8px;
+  font-size: 12.5px;
+  font-family: var(--sans);
+  color: var(--text);
+  width: 100%;
+  min-width: 0;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.input.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.input:hover {
+  border-color: var(--line-strong);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-panel);
+}
+
+.input:disabled,
+.input[readonly] {
+  color: var(--text-faint);
+  background: var(--bg-panel);
+}
+
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+select.input {
+  appearance: none;
+  /* A caret drawn in a token colour rather than the platform's blue one. */
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% + 1px),
+    calc(100% - 9px) calc(50% + 1px);
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 26px;
+}
+
+/* label + control, stacked. A row would truncate a cron or a UUID at the width
+   an inspector panel actually has. */
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.field-row > span {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+  text-transform: lowercase;
+}
+
+.check-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin: 6px 0;
+}
+
+.check-row input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.action-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 8px 0;
+}
+
+/* A block of controls that appears only after somebody asked for it — the
+   drain/halt confirmation. Indented and outlined so it reads as a question
+   being asked rather than as more of the panel. */
+.confirm {
+  border-left: 2px solid var(--line-strong);
+  padding: 8px 0 4px 10px;
+  margin: 8px 0;
+}
+
+.hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  margin: 6px 0;
+}
+
+.hint.bad {
+  color: var(--failed);
+}
+
+/* The result of an action that worked. Not green — there is no green — so it is
+   carried by a left rule and slightly brighter text than a hint. */
+.ok-note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  border-left: 2px solid var(--line-strong);
+  padding-left: 10px;
+  margin: 8px 0;
+}
+
+.ok-note code {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+/* Derived department state. `stopped` is the one that must be unmissable. */
+.state-tag {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+}
+
+.state-tag.running {
+  color: var(--running);
+  border-color: var(--line-strong);
+}
+
+.state-tag.paused {
+  color: var(--idle);
+}
+
+.state-tag.stopped {
+  color: var(--halted);
+  border-color: var(--halted);
+}

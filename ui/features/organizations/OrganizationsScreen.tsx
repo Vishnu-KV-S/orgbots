@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { AppShell, Crumb, Page, Spacer, TopBar } from "@/components/layout";
 import { ApiUnreachable, CardGrid, Empty, Loading } from "@/components/ui";
 import { listOrganizations } from "@/lib/api";
@@ -22,6 +23,9 @@ export function OrganizationsScreen() {
           <Crumb>companies</Crumb>
           <Spacer />
           <Crumb>refreshing every {REFRESH_MS / 1000}s</Crumb>
+          <Crumb separator>
+            <Link href="/specs">specs</Link>
+          </Crumb>
         </TopBar>
       }
     >
@@ -35,7 +39,12 @@ export function OrganizationsScreen() {
 
         {error && <ApiUnreachable detail={error} />}
         {loading && <Loading />}
-        {orgs?.length === 0 && <Empty>No organizations yet. Apply a spec to create one.</Empty>}
+        {orgs?.length === 0 && (
+          <Empty>
+            No organizations yet. <Link href="/specs">Edit and apply a spec</Link> to create
+            one — a folder of YAML documents compiles into a company.
+          </Empty>
+        )}
 
         <CardGrid>
           {orgs?.map((org) => (

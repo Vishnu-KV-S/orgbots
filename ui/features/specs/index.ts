@@ -1,0 +1,1 @@
+export { SpecsScreen } from "./SpecsScreen";

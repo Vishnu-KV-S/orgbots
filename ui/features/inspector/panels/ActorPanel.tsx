@@ -19,6 +19,7 @@ import { fetchActor } from "@/lib/api";
 import { cents, relative } from "@/lib/format";
 import { useResource } from "@/lib/hooks/useResource";
 import type { ActorNodeData } from "@/lib/types";
+import { RunControl } from "../components/RunControl";
 import { RunRow } from "../runs/RunRow";
 import type { PanelProps } from "../types";
 
@@ -98,6 +99,14 @@ export function ActorPanel({ node, context }: PanelProps) {
           />
         </Section>
       )}
+
+      <RunControl
+        orgId={context.orgId}
+        actor={node.label}
+        modes={d.modes}
+        onOpenRun={context.onOpenRun}
+        onStarted={context.onRefresh}
+      />
 
       <Section title="throughput">
         <KeyValue>

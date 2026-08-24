@@ -1,4 +1,9 @@
-/** Wire types for `/v1/observe`. Hand-written to match `runtime/api/observe.py`. */
+/**
+ * Wire types for `/v1/observe` and `/v1/control`. Hand-written to match
+ * `runtime/api/observe.py` and `runtime/api/control.py` — if you change a payload
+ * there, change it here. There is no generator, and a mismatch shows up as
+ * `undefined` on a screen rather than as a build failure.
+ */
 
 export type OrgStatus = "running" | "idle" | "halted";
 
@@ -40,6 +45,9 @@ export interface Ceilings {
 
 export interface TriggerView {
   key: string;
+  /** The actor whose schedule this is. Present because a department node pools
+   * its members' triggers, and a list of crons with no owner is unusable. */
+  actor: string;
   cron: string;
   timezone: string;
   active: boolean;
@@ -58,6 +66,9 @@ export interface ActorNodeData {
   spec_hash: string | null;
   graph_ref: string | null;
   handler_ref: string | null;
+  /** What `input.mode` may be, read off the entrypoint's own branch. Empty means
+   * the graph or handler declared none — offer free text, not an empty select. */
+  modes: string[];
   tools: string[];
   model_profiles: Record<string, string>;
   ceilings: Ceilings;
@@ -69,12 +80,29 @@ export interface ActorNodeData {
   status: "running" | "queued" | "idle";
 }
 
+export type DepartmentState = "running" | "paused" | "stopped";
+
+export interface KillSwitchView {
+  scope_type: string;
+  scope_id: string | null;
+  mode: string;
+  reason: string | null;
+  engaged_by: string | null;
+  engaged_at: string | null;
+}
+
 export interface DepartmentNodeData {
   id: string;
   description: string;
   head: string | null;
   members: number;
   runs_active: number;
+  /** Derived, never stored: stopped beats running beats paused. See
+   * `observe._department_state`. */
+  state: DepartmentState;
+  triggers: TriggerView[];
+  /** The switch that stops this department, org-scoped or department-scoped. */
+  kill_switch: KillSwitchView | null;
 }
 
 export interface OrganizationNodeData {
@@ -84,14 +112,7 @@ export interface OrganizationNodeData {
   actors: number;
   runs_active: number;
   spend_cents: number;
-  kill_switches: Array<{
-    scope_type: string;
-    scope_id: string | null;
-    mode: string;
-    reason: string | null;
-    engaged_by: string | null;
-    engaged_at: string | null;
-  }>;
+  kill_switches: KillSwitchView[];
 }
 
 export interface GoalNodeData {
@@ -228,4 +249,183 @@ export interface RunDetail extends RunSummary {
   children: RunSummary[];
   effects: EffectView[];
   artifacts: ArtifactView[];
+}
+
+/* --------------------------------------------------------------------------
+ * `/v1/control`. Everything below changes something, which is the difference
+ * between these types and the ones above.
+ * ------------------------------------------------------------------------ */
+
+export interface SpecFileEntry {
+  path: string;
+  name: string;
+  size: number;
+}
+
+export interface SpecFolder {
+  path: string;
+  name: string;
+  files: SpecFileEntry[];
+  /** Files the loader ignores — a README beside the documents. Listed so nobody
+   * spends an afternoon wondering why editing one changed nothing. */
+  other: string[];
+  kinds: Record<string, number>;
+  organization: string | null;
+  /** Set when this folder's organization already exists in the database, so the
+   * editor can tell "this creates a company" from "this changes one". */
+  organization_id: string | null;
+  /** A parse failure. The folder still lists — that is exactly when somebody
+   * needs to open it. */
+  error: string | null;
+}
+
+export interface SpecRoot {
+  path: string;
+  exists: boolean;
+  folders: SpecFolder[];
+  /** YAML sitting loose at the root of a spec root, like `config/agents.example.yaml`.
+   * Not a company; not compiled. */
+  loose: string[];
+}
+
+export interface SpecListing {
+  roots: SpecRoot[];
+  /** `RUNTIME_SPEC_EDITABLE`. False means every write verb answers 403. */
+  editable: boolean;
+}
+
+export interface SpecFile {
+  path: string;
+  content: string;
+  /** Send this back as `base_sha256` to save. It is what makes a concurrent
+   * edit a 409 rather than a silent overwrite. */
+  sha256: string;
+  size: number;
+  modified_at: string;
+}
+
+export interface SpecValidation {
+  ok: boolean;
+  organization: string;
+  fingerprint: string;
+  documents: number;
+  actors: Array<{ name: string; kind: string; spec_hash: string }>;
+  counts: { roles: number; grants: number; policies: number; triggers: number };
+}
+
+export interface PlanChange {
+  kind: string;
+  name: string;
+  action: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface PlanResult {
+  plan_id: string | null;
+  plan_hash: string;
+  empty: boolean;
+  /** The CLI's own rendering. Shown verbatim: two renderings of one diff is two
+   * things that can disagree about what an apply will do. */
+  render: string;
+  changes: PlanChange[];
+  renames: string[][];
+  warnings: string[];
+  created_at: string | null;
+  expires_in_seconds: number;
+  expires_at: string | null;
+}
+
+export interface ApplyResult {
+  applied: boolean;
+  detail?: string;
+  changed?: number;
+  created?: number;
+  updated?: number;
+  deactivated?: number;
+  renamed?: number;
+  plan_hash: string;
+  versions_published?: Record<string, number>;
+  budget_changes?: Array<{ scope: string; before: number; after: number }>;
+}
+
+export interface DriftReport {
+  clean: boolean;
+  render: string;
+  findings: Array<{ source: string; subject: string; detail: string }>;
+}
+
+export interface ApplyHistory {
+  events: Array<{
+    kind: string;
+    name: string;
+    action: string;
+    detail: Record<string, unknown> | null;
+    applied_by: string;
+    created_at: string | null;
+  }>;
+}
+
+export interface DepartmentTrigger {
+  key: string;
+  actor: string;
+  cron: string;
+  timezone: string;
+  active: boolean;
+  last_evaluated_at: string | null;
+}
+
+export interface DepartmentDetail {
+  name: string;
+  description: string;
+  head: string | null;
+  parent: string | null;
+  active: boolean;
+  state: DepartmentState;
+  members: string[];
+  live_runs: number;
+  triggers: DepartmentTrigger[];
+  kill_switch: KillSwitchView | null;
+}
+
+export interface DepartmentList {
+  departments: DepartmentDetail[];
+  /** How long a worker may keep running on a stale kill-switch cache. The UI says
+   * this out loud rather than letting a stop look like it did not take. */
+  propagation_seconds: number;
+}
+
+export interface StopResult {
+  department: string;
+  stopped: boolean;
+  mode: string;
+  triggers_paused: number;
+  propagation_seconds: number;
+  detail: string;
+}
+
+export interface StartResult {
+  department: string;
+  kill_switch_disengaged: boolean;
+  triggers_resumed: number;
+  propagation_seconds: number;
+}
+
+export interface TickResult {
+  fired: Array<{
+    trigger: string;
+    scheduled_for: string;
+    run_id: string | null;
+    skipped: boolean;
+  }>;
+  dispatched: number;
+  detail: string;
+}
+
+export interface RunStarted {
+  run_id: string;
+  status: string;
+  spec_hash: string;
+  /** False means an existing run was returned: the idempotency key had been used.
+   * Worth showing — "nothing happened" and "it worked" look identical otherwise. */
+  created: boolean;
 }

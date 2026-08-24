@@ -1,0 +1,277 @@
+/**
+ * The specs screen: a tree, an editor, and the plan pane.
+ *
+ * CodeMirror ships its own `oneDark` palette, and the point of this file is to
+ * stop it: the editor sits inside the app, so its surfaces, lines and text come
+ * from `tokens.css` like everything else. Only the *syntax* colours are left to
+ * the theme — there are no tokens for those, and inventing a monochrome
+ * highlighting scheme would make YAML harder to read to no end.
+ *
+ * There is one theme, dark. `tokens.css` has a single `:root` block and ends
+ * `color-scheme: dark`; a light theme would add a `[data-theme="light"]` block
+ * there, and this file would follow it for free because it names no colours of
+ * its own.
+ */
+
+/* --- layout ------------------------------------------------------------- */
+
+.spec-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* Tree, editor, plan. The editor takes the slack: it is the thing being read. */
+  grid-template-columns: 260px minmax(0, 1fr) 340px;
+}
+
+@media (max-width: 1200px) {
+  .spec-layout {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .spec-side {
+    display: none;
+  }
+}
+
+/* --- the tree ----------------------------------------------------------- */
+
+.spec-tree {
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  padding: 10px 0;
+  background: var(--bg-panel);
+}
+
+.spec-root-head {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+
+.spec-folder-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  padding: 6px 12px;
+  color: var(--text-dim);
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.spec-folder-head:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.spec-folder-head.on {
+  background: var(--bg-raised);
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+
+.spec-folder-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.spec-folder-meta {
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.spec-files {
+  list-style: none;
+  margin: 2px 0 6px;
+  padding: 0;
+}
+
+.spec-file {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 3px 12px 3px 26px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.spec-file:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.spec-file.on {
+  color: var(--text);
+  background: var(--bg-active);
+}
+
+/* A README beside the documents. Visible, and visibly not editable. */
+.spec-file.muted {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.spec-kinds,
+.spec-loose,
+.spec-error,
+.spec-note {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  padding: 0 12px 6px 26px;
+  margin: 0;
+}
+
+.spec-error {
+  color: var(--failed);
+}
+
+.spec-loose {
+  padding-left: 12px;
+  font-style: italic;
+}
+
+/* --- the editor --------------------------------------------------------- */
+
+.spec-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.spec-editor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.spec-editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cm-host,
+.cm-host .cm-editor {
+  height: 100%;
+}
+
+.cm-host .cm-editor {
+  background: var(--bg);
+  font-size: 12.5px;
+}
+
+.cm-host .cm-scroller {
+  font-family: var(--mono);
+  line-height: 1.6;
+}
+
+.cm-host .cm-gutters {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line-soft);
+  color: var(--text-faint);
+}
+
+.cm-host .cm-activeLine,
+.cm-host .cm-activeLineGutter {
+  background: var(--bg-hover);
+}
+
+.cm-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-host .cm-selectionBackground,
+.cm-host .cm-editor .cm-selectionBackground {
+  background: var(--bg-active) !important;
+}
+
+/* The lint underline and its gutter mark. One hue in the app, and a syntax
+   error is exactly the kind of thing it is for. */
+.cm-host .cm-lintRange-error {
+  text-decoration-color: var(--failed);
+}
+
+.cm-host .cm-lint-marker-error {
+  color: var(--failed);
+}
+
+/* The unified diff: what a save would change. Deletions get the one hue;
+   insertions get a surface, because two hues would make the editor a different
+   piece of software from the rest of the app. */
+.cm-host .cm-deletedChunk {
+  background: rgba(194, 104, 95, 0.12);
+}
+
+.cm-host .cm-changedLine {
+  background: var(--accent-wash);
+}
+
+/* --- the plan pane ------------------------------------------------------ */
+
+.spec-side {
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+  background: var(--bg-panel);
+}
+
+.plan-pane {
+  padding: 4px 14px 24px;
+}
+
+.plan-render {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  padding: 10px;
+  margin: 0;
+  max-height: 45vh;
+  overflow: auto;
+}
+
+.plan-warnings {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* The staleness countdown. It goes from a note to the one hue at zero, because
+   at zero the button above it will 409. */
+.expiry {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.expiry.gone {
+  color: var(--halted);
+}
+
+.dim {
+  color: var(--text-faint);
+}
