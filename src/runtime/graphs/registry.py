@@ -28,12 +28,26 @@ class GraphBuilder(Protocol):
 
 
 _GRAPHS: dict[str, Callable[[], Any]] = {}
+_MODES: dict[str, tuple[str, ...]] = {}
 
 
-def register_graph(ref: str, builder: Callable[[], Any]) -> None:
+def register_graph(ref: str, builder: Callable[[], Any], *, modes: tuple[str, ...] = ()) -> None:
+    """Register a graph, and optionally say which entry points it dispatches on.
+
+    `modes` is the list a caller may put in `input["mode"]` and expect the graph to
+    route on — **read off the graph's own branch function, never off a schedule**. The
+    two disagree: `runtime.org.department.MODES` is derived from `TRIGGERS`, so it
+    contains `weekly_metrics` (which `marketing_head@1` does not dispatch on) and omits
+    `task.submitted` (which it does). Seeding from it would offer an operator a dead
+    option and hide a live one.
+
+    Empty means *unknown*, not *none*. A caller that needs to show the choices falls
+    back to free text rather than pretending a graph has no entry points.
+    """
     if ref in _GRAPHS:
         raise SpecError(f"graph {ref!r} is already registered")
     _GRAPHS[ref] = builder
+    _MODES[ref] = tuple(modes)
 
 
 def get_graph(ref: str) -> Callable[[], Any]:
@@ -45,3 +59,8 @@ def get_graph(ref: str) -> Callable[[], Any]:
 
 def known_graphs() -> frozenset[str]:
     return frozenset(_GRAPHS)
+
+
+def modes_for(ref: str) -> tuple[str, ...]:
+    """The entry points this graph routes on, or `()` if it did not declare any."""
+    return _MODES.get(ref, ())

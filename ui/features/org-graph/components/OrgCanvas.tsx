@@ -27,6 +27,13 @@ import { CanvasLegend } from "./CanvasLegend";
  * layout, and fly to a node — are exposed on a handle.
  */
 
+/**
+ * One number for the dot grid and for snapping, so the dots a viewer can see
+ * *are* the grid a dragged node lands on — a snap that answers to an invisible
+ * grid just reads as the drag being laggy.
+ */
+const GRID = 22;
+
 export interface OrgCanvasHandle {
   /** Throw away dragged positions and re-run the layout. */
   relayout: () => void;
@@ -39,6 +46,8 @@ export interface OrgCanvasProps {
   filters: GraphFilters;
   selectedId: string | null;
   onSelect: (nodeId: string | null) => void;
+  /** Snap a dragged node to the dot grid. Off is free placement. */
+  snapToGrid?: boolean;
   ref?: Ref<OrgCanvasHandle>;
 }
 
@@ -52,7 +61,7 @@ export function OrgCanvas(props: OrgCanvasProps) {
   );
 }
 
-function Canvas({ graph, filters, selectedId, onSelect, ref }: OrgCanvasProps) {
+function Canvas({ graph, filters, selectedId, onSelect, snapToGrid, ref }: OrgCanvasProps) {
   const view = useGraphView(graph, filters, selectedId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>([]);
@@ -126,6 +135,8 @@ function Canvas({ graph, filters, selectedId, onSelect, ref }: OrgCanvasProps) {
         onPaneClick={() => onSelect(null)}
         nodesConnectable={false}
         edgesFocusable={false}
+        snapToGrid={snapToGrid}
+        snapGrid={[GRID, GRID]}
         proOptions={{ hideAttribution: true }}
         minZoom={0.15}
         maxZoom={2}
@@ -134,7 +145,7 @@ function Canvas({ graph, filters, selectedId, onSelect, ref }: OrgCanvasProps) {
             come from the `--xy-*` theme block in canvas.css, which resolves to
             the same tokens as everything else. The per-node minimap dot is the
             exception — it is a callback, not a stylesheet property. */}
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
+        <Background variant={BackgroundVariant.Dots} gap={GRID} size={1} />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable nodeColor={(node) => minimapColor(node.type)} />
       </ReactFlow>

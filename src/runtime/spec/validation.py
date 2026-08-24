@@ -79,8 +79,19 @@ def default_registries(settings: object = None) -> Registries:
     here rather than at module import: `runtime.spec` is imported by the CLI for
     commands that never need a registry, and importing every graph to run `spec show`
     would be a slow no-op.
+
+    **It must import everything the worker imports, or validate is stricter than the
+    runtime.** `runtime.graphs.department` registers three of the five graphs;
+    `echo_agent@1` and `delegator@1` are registered by their own modules, which only
+    `runtime.worker.main` was importing. The result was a `spec validate` that refused
+    a document naming an entrypoint the worker can execute perfectly well — CI red for
+    a spec that would have applied and run. The two imports below are the fix, and the
+    rule they encode is that this function's import list and the worker's are the same
+    list.
     """
+    import runtime.graphs.delegator
     import runtime.graphs.department
+    import runtime.graphs.echo_agent
     import runtime.handlers  # noqa: F401  registers analytics@1, hasher@1
     from runtime.gateway.builtin import build_registry
     from runtime.graphs.registry import known_graphs

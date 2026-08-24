@@ -121,6 +121,21 @@ class Settings(BaseSettings):
     approval_sweep_interval_seconds: float = Field(default=60.0, gt=0)
     eval_deadline_sweep_interval_seconds: float = Field(default=60.0, gt=0)
 
+    conductor_enabled: bool = True
+    """Whether `runtime.worker.main` runs the scheduler and the dispatcher.
+
+    **On by default, and that is the point.** Without it there is no long-lived
+    process that turns a cron into a run or an inbox message into a run — only
+    `runtime.cli tick`, typed by a human. `docs/MEASUREMENT_PROTOCOL.md` §4 requires
+    two consecutive weeks with the long-lived processes left alone and counts any
+    intervention as a reset, so a runtime with no conductor cannot *have* a clean run:
+    somebody has to type `tick`, and typing it is the intervention.
+
+    Turn it off (`RUNTIME_CONDUCTOR_ENABLED=false`) when something else is driving the
+    loop — a test that ticks deliberately, a second deployment that owns scheduling,
+    or a worker pool scaled out behind one conductor. Two conductors are safe (the
+    `trigger_fires` primary key and `uq_run_idem` make them idempotent); zero is not."""
+
     # --- M3: memory ------------------------------------------------------------------
     # Everything here is off or shadowed by default. M3 §9: PR-27 through PR-34 are safe
     # to build at any time because none of them touches a prompt, and **PR-35 is the only

@@ -89,4 +89,7 @@ def build() -> StateGraph[EchoState, Any, Any, Any]:
     return graph
 
 
+# No `modes`, deliberately: this graph has no branch and echoes whatever it is
+# given, so any list would be an invention. A caller that wants to offer choices
+# gets `()` and falls back to free-form input, which is the truth here.
 register_graph("echo_agent@1", build)

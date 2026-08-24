@@ -37,12 +37,24 @@ class HandlerContext(Protocol):
 HandlerFn = Callable[[HandlerContext, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 _HANDLERS: dict[str, HandlerFn] = {}
+_MODES: dict[str, tuple[str, ...]] = {}
 
 
-def register_handler(ref: str, fn: HandlerFn) -> None:
+def register_handler(ref: str, fn: HandlerFn, *, modes: tuple[str, ...] = ()) -> None:
+    """Register a handler, and optionally the entry points it branches on.
+
+    Same contract as `register_graph`'s `modes`, and the same warning: read them off
+    the handler, not off the schedule that happens to call it.
+
+    Note the asymmetry with the graph registry, which is deliberate and older than
+    this parameter: re-registering the *same* function is fine here, and any
+    re-registration is an error there. A handler module is imported from several
+    entry points and a graph builder is not.
+    """
     if ref in _HANDLERS and _HANDLERS[ref] is not fn:
         raise SpecError(f"handler {ref!r} is already registered")
     _HANDLERS[ref] = fn
+    _MODES[ref] = tuple(modes)
 
 
 def get_handler(ref: str) -> HandlerFn:
@@ -54,3 +66,8 @@ def get_handler(ref: str) -> HandlerFn:
 
 def known_handlers() -> frozenset[str]:
     return frozenset(_HANDLERS)
+
+
+def modes_for(ref: str) -> tuple[str, ...]:
+    """The entry points this handler branches on, or `()` if it did not declare any."""
+    return _MODES.get(ref, ())

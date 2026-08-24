@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,6 +52,10 @@ class TriggerRow:
     input: dict[str, Any]
     catchup_policy: CatchupPolicy
     last_evaluated_at: dt.datetime | None
+    active: bool = True
+    """Always true for a row from `active()`, which filters on it. `for_org()` is the
+    read that returns paused triggers too, and it is the only caller for which this
+    field carries information."""
 
 
 class TriggerRepository:
@@ -125,9 +130,81 @@ class TriggerRepository:
                 input=dict(r.input or {}),
                 catchup_policy=CatchupPolicy(r.catchup_policy),
                 last_evaluated_at=r.last_evaluated_at,
+                active=True,
             )
             for r in rows
         ]
+
+    async def for_org(self, organization_id: uuid.UUID) -> list[TriggerRow]:
+        """Every trigger, paused ones included.
+
+        `active()` is the scheduler's read and filters inactive rows out, which is
+        correct for firing and useless for showing an operator what exists. A paused
+        trigger that is invisible reads as a deleted one, and the next question is why
+        `apply` brought it back.
+        """
+        rows = (
+            await self._s.execute(
+                text(
+                    """
+                    SELECT id, organization_id, key, actor_name, cron, timezone, input,
+                           catchup_policy, last_evaluated_at, active
+                      FROM triggers WHERE organization_id = :org ORDER BY key
+                    """
+                ),
+                {"org": organization_id},
+            )
+        ).all()
+        return [
+            TriggerRow(
+                id=TriggerId(r.id),
+                organization_id=r.organization_id,
+                key=r.key,
+                actor_name=r.actor_name,
+                cron=r.cron,
+                timezone=r.timezone,
+                input=dict(r.input or {}),
+                catchup_policy=CatchupPolicy(r.catchup_policy),
+                last_evaluated_at=r.last_evaluated_at,
+                active=bool(r.active),
+            )
+            for r in rows
+        ]
+
+    async def set_active(
+        self, organization_id: uuid.UUID, keys: Sequence[str], active: bool
+    ) -> int:
+        """Pause or resume triggers by key. Returns how many rows moved.
+
+        **Pausing a trigger is not a stop, and must not be sold as one.** `upsert()`
+        forces `active = true` in its conflict branch, so the next `spec apply` resumes
+        anything paused here. That is the right behaviour for the config plane — the
+        files are the intent, and a paused trigger the files still declare is drift —
+        but it means an operator who wants a department to *stay* stopped wants the
+        kill switch, which no apply touches. The control surface engages both, in that
+        order, for exactly this reason.
+
+        An empty `keys` is a no-op rather than "all of them": the plural form of a
+        destructive verb should never widen when its argument goes missing.
+        """
+        if not keys:
+            return 0
+        # RETURNING rather than `rowcount`: the async result object does not expose a
+        # row count, and counting what came back is the same number without depending
+        # on the driver to report one.
+        moved = (
+            await self._s.execute(
+                text(
+                    """
+                    UPDATE triggers SET active = :active
+                     WHERE organization_id = :org AND key = ANY(:keys) AND active <> :active
+                    RETURNING key
+                    """
+                ),
+                {"org": organization_id, "keys": list(keys), "active": active},
+            )
+        ).all()
+        return len(moved)
 
     async def claim_fire(
         self,

@@ -150,4 +150,7 @@ def _requested_week(payload: dict[str, Any]) -> dt.date:
     return week_of(dt.datetime.now(dt.UTC))
 
 
-register_handler("analytics@1", analytics)
+# The two the module docstring names. Neither is read out of `mode` — the handler
+# branches on whether a task is attached — but they are the two entry points a caller
+# can name, and `weekly_metrics` with no task is a real thing to ask for by hand.
+register_handler("analytics@1", analytics, modes=("weekly_metrics", "work"))

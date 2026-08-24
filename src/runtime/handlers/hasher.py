@@ -26,4 +26,5 @@ async def hasher(handler_ctx: HandlerContext, payload: dict[str, Any]) -> dict[s
     }
 
 
+# No `modes`: it hashes its payload and has no entry points to choose between.
 register_handler("hasher@1", hasher)

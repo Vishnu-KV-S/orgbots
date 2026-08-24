@@ -1,4 +1,4 @@
-import { MarkerType, type Edge } from "@xyflow/react";
+import { MarkerType, type BuiltInEdge } from "@xyflow/react";
 import { plural } from "@/lib/format";
 import type { EdgeKind, GraphEdge } from "@/lib/types";
 
@@ -46,13 +46,20 @@ export const EDGE_STYLES: Record<EdgeKind, EdgeStyle> = {
 
 const FALLBACK: EdgeStyle = EDGE_STYLES.contains;
 
-export function toFlowEdge(edge: GraphEdge): Edge {
+// `BuiltInEdge` rather than `Edge`: `pathOptions` only exists on the union
+// member for the edge type that reads it, and bezier is the one we ask for.
+export function toFlowEdge(edge: GraphEdge): BuiltInEdge {
   const style = EDGE_STYLES[edge.kind] ?? FALLBACK;
   return {
     id: edge.id,
     source: edge.source,
     target: edge.target,
-    type: "smoothstep",
+    // Bezier rather than stepped elbows: the org chart reads as a flow instead
+    // of a circuit diagram. The curvature is pushed above the 0.25 default so
+    // the fan-out from a head to its reports is unmistakably a curve, and so
+    // that two edges leaving the same handle separate early enough to follow.
+    type: "default",
+    pathOptions: { curvature: 0.4 },
     animated: style.animated ?? false,
     // Only delegation carries a count, and only because it is traffic that ran
     // rather than structure that was configured.

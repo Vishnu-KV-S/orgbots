@@ -21,6 +21,7 @@ const TOGGLES = [
   { key: "plan", label: "goals & projects", title: "show goals and projects" },
   { key: "delegation", label: "delegation", title: "show observed delegation traffic" },
   { key: "feed", label: "events", title: "show the event tail" },
+  { key: "snap", label: "snap", title: "snap dragged nodes to the grid" },
 ] as const;
 
 export function OrgGraphScreen({ orgId }: { orgId: string }) {
@@ -28,6 +29,7 @@ export function OrgGraphScreen({ orgId }: { orgId: string }) {
     plan: true,
     delegation: true,
     feed: true,
+    snap: true,
     live: true,
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -96,6 +98,7 @@ export function OrgGraphScreen({ orgId }: { orgId: string }) {
           filters={filters}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          snapToGrid={flags.snap}
         />
         <Inspector
           node={selected}

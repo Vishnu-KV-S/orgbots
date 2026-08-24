@@ -347,10 +347,25 @@ class KillMode(StrEnum):
 
 
 class KillScope(StrEnum):
+    """What a switch covers. `scope_id` names the subject, except for `org`.
+
+    `department` is the operator-shaped one. The other four are the subjects a
+    *gateway call* already knows about — this tool, this actor, this connection —
+    and they are what an incident is usually about. A department is what a person
+    points at: "stop growth" is a sentence somebody says, and expressing it as four
+    actor switches engaged one at a time is how one gets missed.
+
+    It resolves through the actor: a department switch covers a call if the actor
+    making it belongs to that department. A check with no actor — a tool- or
+    connection-only check — therefore cannot be covered by one. See
+    `KillSwitchService.check`.
+    """
+
     ORG = "org"
     TOOL = "tool"
     ACTOR = "actor"
     CONNECTION = "connection"
+    DEPARTMENT = "department"
 
 
 class GatewayDecision(StrEnum):

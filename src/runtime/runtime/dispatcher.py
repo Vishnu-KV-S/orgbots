@@ -22,12 +22,22 @@ closures are notifications; they have no run to start. Marking them DELIVERED wi
 null `delivered_run_id` keeps them out of the poll and keeps them in the record. A
 message that stayed PENDING forever would be re-examined on every tick for the life
 of the system.
+
+**Who counts as an actor is a question for the database.** M1 answered it with
+`ALL_ACTORS`, four names in Python, which was correct while the department was
+Python. It is not correct for a company defined in YAML: a recipient outside that
+frozenset is settled as `not-an-actor` and its wake-up is *silently discarded*, so an
+organization whose head is called anything but `marketing-head` never runs at all.
+`actors=None` — the default now — resolves the organization's active actor names per
+drain, cached for the same ten seconds the kill switch uses. Passing an explicit tuple
+still works and still means exactly what it did.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -62,6 +72,11 @@ notifications, and a notification that started a run would double the loop."""
 
 TERMINAL_KINDS = frozenset({KIND_TASK_CLOSED, "note"})
 
+ACTOR_CACHE_TTL_SECONDS = 10.0
+"""How long a resolved actor list is trusted. Same number as the kill switch's cache
+and for the same reason: an actor published a moment ago starts receiving work while
+somebody is still watching, and the poll does not put a query on every message."""
+
 
 @dataclass
 class DispatchStats:
@@ -82,14 +97,35 @@ class Dispatcher:
         service: RunService,
         *,
         settings: Settings | None = None,
-        actors: tuple[str, ...] = ALL_ACTORS,
+        actors: tuple[str, ...] | None = ALL_ACTORS,
     ) -> None:
+        """`actors=None` resolves the recipient set from the database, per organization.
+
+        The default is still M1's four names so that every existing caller and every
+        existing test behaves exactly as before. `runtime.worker.main` passes `None`,
+        which is what a company whose actors are named in YAML needs.
+        """
         self._uow = uow_factory
         self._service = service
         self._settings = settings or get_settings()
-        self._actors = frozenset(actors)
+        self._actors = frozenset(actors) if actors is not None else None
+        self._resolved: dict[str, tuple[frozenset[str], float]] = {}
         self._stopping = asyncio.Event()
         self.stats = DispatchStats()
+
+    async def _recipients(self, organization_id: uuid.UUID) -> frozenset[str]:
+        """Who may receive a wake-up in this organization."""
+        if self._actors is not None:
+            return self._actors
+        key = str(organization_id)
+        now = time.monotonic()
+        hit = self._resolved.get(key)
+        if hit is not None and hit[1] > now:
+            return hit[0]
+        async with self._uow() as uow:
+            names = frozenset(await uow.actors.active_names(organization_id))
+        self._resolved[key] = (names, now + ACTOR_CACHE_TTL_SECONDS)
+        return names
 
     async def drain(self, limit: int | None = None) -> int:
         """One pass. Returns how many runs were started."""
@@ -105,7 +141,8 @@ class Dispatcher:
         return started
 
     async def _handle(self, message: InboxRow) -> bool:
-        if message.kind in TERMINAL_KINDS or message.recipient_name not in self._actors:
+        recipients = await self._recipients(message.organization_id)
+        if message.kind in TERMINAL_KINDS or message.recipient_name not in recipients:
             # A notification, or addressed to a human. Settle it so the poll does
             # not re-examine it forever, and keep the row.
             await self._settle(message, run_id=None)

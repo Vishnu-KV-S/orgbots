@@ -29,6 +29,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from runtime.persistence.json import to_jsonb
+from runtime.persistence.repositories.triggers import TriggerRepository
 
 APPLY_LOCK_NAMESPACE = 0x4D34
 """M4's advisory-lock namespace. Distinct from the test suite's session lock so that a
@@ -447,10 +448,13 @@ class SpecRepository:
         )
 
     async def deactivate_trigger(self, organization_id: uuid.UUID, key: str) -> None:
-        await self._s.execute(
-            text("UPDATE triggers SET active = false WHERE organization_id = :org AND key = :key"),
-            {"org": organization_id, "key": key},
-        )
+        """The apply path's single-key pause, delegated so there is one statement.
+
+        `TriggerRepository.set_active` is the operator's plural version. Two hand-
+        written UPDATEs would be two places to remember when `triggers` grows a column
+        that a pause has to touch, and the first one anybody would forget is this one.
+        """
+        await TriggerRepository(self._s).set_active(organization_id, [key], False)
 
     # --- the live-state read -----------------------------------------------------------
 

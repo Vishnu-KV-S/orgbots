@@ -310,4 +310,5 @@ def build() -> StateGraph[ContentState, Any, Any, Any]:
     return graph
 
 
-register_graph("content@1", build)
+# Linear, and driven by the assigned task rather than by `mode`. See `research@1`.
+register_graph("content@1", build, modes=("work",))

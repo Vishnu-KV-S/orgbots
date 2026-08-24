@@ -39,6 +39,43 @@ class ActorRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
+    async def active_names(self, organization_id: uuid.UUID) -> list[str]:
+        """Who this organization's actors currently are.
+
+        The dispatcher's answer to "is this recipient an actor". M1 answered it from a
+        frozenset in Python, which stopped being true the moment an organization could
+        be defined in a file.
+        """
+        rows = (
+            await self._s.execute(
+                text(
+                    "SELECT name FROM actors WHERE organization_id = :org AND active ORDER BY name"
+                ),
+                {"org": organization_id},
+            )
+        ).all()
+        return [r.name for r in rows]
+
+    async def departments_by_name(self, organization_id: uuid.UUID) -> dict[str, str]:
+        """actor name → department name, for the actors that have one.
+
+        One query rather than a join onto every kill-switch read: the caller wants this
+        only while a department-scoped switch is engaged. See
+        `runtime.org.killswitch.KillSwitchService.departments_by_actor`.
+        """
+        rows = (
+            await self._s.execute(
+                text(
+                    """
+                    SELECT name, department FROM actors
+                     WHERE organization_id = :org AND active AND department IS NOT NULL
+                    """
+                ),
+                {"org": organization_id},
+            )
+        ).all()
+        return {r.name: r.department for r in rows}
+
     async def create_actor(
         self, actor_id: ActorId, organization_id: uuid.UUID, name: str, kind: str
     ) -> None:

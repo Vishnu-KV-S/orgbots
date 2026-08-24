@@ -1,10 +1,24 @@
 """Worker process entrypoint.
 
-Runs five loops side by side: the outbox relay, the reaper, the governance sweeper,
-the memory worker, and the worker itself. In production these would usually be separate
-deployments — the relay, reaper and sweeper are singletons-ish, the workers scale out —
-but there is one process type and splitting it would be scaffolding for a shape nobody
-has needed yet.
+Runs up to seven loops side by side: the outbox relay, the reaper, the governance
+sweeper, the scheduler, the dispatcher, the memory worker, and the worker itself. In
+production these would usually be separate deployments — the relay, reaper and sweeper
+are singletons-ish, the workers scale out — but there is one process type and splitting
+it would be scaffolding for a shape nobody has needed yet.
+
+**The conductor — the scheduler and the dispatcher — is what makes the loop turn by
+itself.** Until it was started here, nothing in a long-lived process turned a cron into
+a run or an inbox message into a run: `runtime.cli tick` did, once, when a human typed
+it. `docs/MEASUREMENT_PROTOCOL.md` §4 asks for two consecutive weeks with the
+long-lived processes running and left alone, and counts any intervention as a reset —
+so a runtime whose only crank is a person typing `tick` cannot have a clean run at all.
+It is on by default for that reason. `RUNTIME_CONDUCTOR_ENABLED=false` is for the case
+where something *else* is driving the loop, not for turning the loop off.
+
+Neither half executes a run. Both only call `RunService.start_run`, which writes and
+returns; the run is picked up from the stream by the worker loop below, exactly as it
+is when the API starts one. So this does not change what a worker process *is* — it
+changes whether anything is asking it to work.
 
 The sweeper is M2's addition and it is not optional. Approval escalation is
 time-driven: a chain that is never walked is a list, and `on_expiry` would never
@@ -53,6 +67,9 @@ from runtime.observability.logging import configure_logging, get_logger
 from runtime.observability.tracing import configure_tracing
 from runtime.persistence.engine import dispose_engines
 from runtime.persistence.uow import UnitOfWorkFactory
+from runtime.runtime.dispatcher import Dispatcher
+from runtime.runtime.run_service import RunService
+from runtime.runtime.scheduler import Scheduler
 from runtime.runtime.sweeper import GovernanceSweeper
 from runtime.settings import get_settings
 from runtime.worker.lease import Reaper
@@ -78,6 +95,17 @@ async def run() -> None:
     reaper = Reaper(uow, settings)
     sweeper = GovernanceSweeper(uow, settings=settings)
 
+    # The conductor. Constructed only when enabled, and `actors=None` so the
+    # dispatcher resolves who the organization's actors are from the database rather
+    # than from M1's four hardcoded names — a YAML company with different names would
+    # otherwise have every inbox message settled as "not-an-actor".
+    scheduler: Scheduler | None = None
+    dispatcher: Dispatcher | None = None
+    if settings.conductor_enabled:
+        service = RunService(uow, settings=settings)
+        scheduler = Scheduler(uow, service, settings=settings)
+        dispatcher = Dispatcher(uow, service, settings=settings, actors=None)
+
     async with checkpointer(settings) as saver:
         worker = Worker(uow, streams, settings=settings, checkpointer=saver)
         memory_worker: MemoryWorker | None = None
@@ -100,6 +128,10 @@ async def run() -> None:
             relay.stop()
             reaper.stop()
             sweeper.stop()
+            if scheduler is not None:
+                scheduler.stop()
+            if dispatcher is not None:
+                dispatcher.stop()
             if memory_worker is not None:
                 memory_worker.stop()
 
@@ -107,13 +139,20 @@ async def run() -> None:
             with contextlib.suppress(NotImplementedError):
                 loop.add_signal_handler(sig, _stop)
 
-        log.info("worker.started", worker_id=str(worker.worker_id))
+        log.info(
+            "worker.started",
+            worker_id=str(worker.worker_id),
+            conductor=settings.conductor_enabled,
+        )
         tasks = [
             asyncio.create_task(worker.run_forever(), name="worker"),
             asyncio.create_task(relay.run_forever(), name="relay"),
             asyncio.create_task(reaper.run_forever(), name="reaper"),
             asyncio.create_task(sweeper.run_forever(), name="sweeper"),
         ]
+        if scheduler is not None and dispatcher is not None:
+            tasks.append(asyncio.create_task(scheduler.run_forever(), name="scheduler"))
+            tasks.append(asyncio.create_task(dispatcher.run_forever(), name="dispatcher"))
         if memory_worker is not None:
             tasks.append(asyncio.create_task(memory_worker.run_forever(), name="memory"))
         await stopping.wait()

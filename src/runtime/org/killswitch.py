@@ -23,6 +23,13 @@ make the kill switch a thing you engage and then wonder about.
 
 The cache is *negative-cached too* — "no switches" is a result worth remembering, and
 it is the answer 99.99% of the time.
+
+**Five scopes, and `department` is the only one that needs a second lookup.** A
+gateway call knows its tool, its actor and its connection; it does not know an org
+chart. So a department switch is resolved through the actor, against a second cache of
+the same shape and TTL, filled only while such a switch is engaged. With none engaged
+— the normal state — that query is never issued and `check()` costs what it always
+did.
 """
 
 from __future__ import annotations
@@ -71,6 +78,19 @@ class _CacheEntry:
     expires_at: float
 
 
+@dataclass(frozen=True, slots=True)
+class _DepartmentEntry:
+    """actor name → department name. The same shape and the same TTL as `_CacheEntry`.
+
+    A second cache rather than a second column on the first, because it is filled on a
+    different schedule: the switch list is read constantly and this one is read only
+    while a department switch is engaged, which is almost never.
+    """
+
+    by_actor: dict[str, str]
+    expires_at: float
+
+
 class KillSwitchService:
     def __init__(
         self,
@@ -83,6 +103,7 @@ class KillSwitchService:
         self._ttl = ttl_seconds
         self._clock = clock
         self._cache: dict[str, _CacheEntry] = {}
+        self._departments: dict[str, _DepartmentEntry] = {}
 
     async def switches(self, organization_id: OrganizationId) -> tuple[KillSwitchRow, ...]:
         key = str(organization_id)
@@ -94,6 +115,24 @@ class KillSwitchService:
             rows = tuple(await uow.killswitch.active(organization_id))
         self._cache[key] = _CacheEntry(rows, now + self._ttl)
         return rows
+
+    async def departments_by_actor(self, organization_id: OrganizationId) -> dict[str, str]:
+        """The org chart's one column this module needs, cached like the switches.
+
+        Read **only** when a department-scoped switch is actually engaged — see
+        `check`. With none engaged this query is never issued and the hot path costs
+        exactly what it cost before `KillScope.DEPARTMENT` existed, which is the whole
+        reason this is a separate lookup rather than a join onto `active()`.
+        """
+        key = str(organization_id)
+        now = self._clock()
+        hit = self._departments.get(key)
+        if hit is not None and hit.expires_at > now:
+            return hit.by_actor
+        async with self._uow() as uow:
+            by_actor = await uow.actors.departments_by_name(organization_id)
+        self._departments[key] = _DepartmentEntry(by_actor, now + self._ttl)
+        return by_actor
 
     async def check(
         self,
@@ -114,11 +153,27 @@ class KillSwitchService:
         Ordering matters when several switches match: `halt` wins over `drain`, so an
         operator escalating from drain to halt does not have to disengage the first
         one under pressure.
+
+        **A `department` switch needs an actor to resolve.** A department is not
+        something a gateway call carries; it is something the calling actor belongs
+        to. So the org chart is consulted — once per ten seconds, and only while a
+        department switch is live — and a check with `actor=None` (a tool- or
+        connection-only check) is *not* covered by one. That is a real gap and it is
+        stated rather than papered over: stopping a department stops its members'
+        runs, model calls and tool calls, and does not stop a call nobody is making.
         """
+        live = await self.switches(organization_id)
+        if not live:
+            return ALLOWED
+
+        department: str | None = None
+        if actor is not None and any(s.scope_type is KillScope.DEPARTMENT for s in live):
+            department = (await self.departments_by_actor(organization_id)).get(actor)
+
         matches = [
             s
-            for s in await self.switches(organization_id)
-            if s.covers(tool=tool, actor=actor, connection=connection)
+            for s in live
+            if s.covers(tool=tool, actor=actor, connection=connection, department=department)
         ]
         if not matches:
             return ALLOWED
@@ -205,9 +260,17 @@ class KillSwitchService:
         return ok
 
     def invalidate(self, organization_id: OrganizationId | None = None) -> None:
-        """Drop the cache. Called after every engage/disengage so the operator who
-        just pulled the switch does not spend ten seconds wondering whether it took."""
+        """Drop both caches. Called after every engage/disengage so the operator who
+        just pulled the switch does not spend ten seconds wondering whether it took.
+
+        **Per-process.** This clears the caller's caches and nobody else's: a switch
+        engaged through the API is seen by the API immediately and by a worker within
+        `KILL_CACHE_TTL_SECONDS`. That is the M2 §7 trade as designed, and it is worth
+        saying out loud now that an operator can pull the switch from a UI and watch
+        for the effect."""
         if organization_id is None:
             self._cache.clear()
+            self._departments.clear()
         else:
             self._cache.pop(str(organization_id), None)
+            self._departments.pop(str(organization_id), None)

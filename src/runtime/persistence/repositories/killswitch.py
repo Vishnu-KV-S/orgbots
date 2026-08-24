@@ -30,12 +30,24 @@ class KillSwitchRow:
     engaged_by: str
     engaged_at: dt.datetime
 
-    def covers(self, *, tool: str | None, actor: str | None, connection: str | None) -> bool:
+    def covers(
+        self,
+        *,
+        tool: str | None,
+        actor: str | None,
+        connection: str | None,
+        department: str | None = None,
+    ) -> bool:
         """Does this switch apply to the thing being attempted?
 
         An `org` switch covers everything, which is the only scope where a NULL
         `scope_id` is legal — the check constraint in 019 says so, and this method
         relies on it rather than re-deriving it.
+
+        `department` is the calling actor's department, resolved by the caller — this
+        row knows a name, not an org chart. It is `None` when there is no actor to
+        resolve one from, and a department switch then covers nothing, which is the
+        honest answer rather than a guess.
         """
         if self.scope_type is KillScope.ORG:
             return True
@@ -43,6 +55,8 @@ class KillSwitchRow:
             return tool is not None and self.scope_id == tool
         if self.scope_type is KillScope.ACTOR:
             return actor is not None and self.scope_id == actor
+        if self.scope_type is KillScope.DEPARTMENT:
+            return department is not None and self.scope_id == department
         return connection is not None and self.scope_id == connection
 
 

@@ -522,4 +522,8 @@ def build() -> StateGraph[ResearchState, Any, Any, Any]:
     return graph
 
 
-register_graph("research@1", build)
+# One entry point. The graph is linear — load, search, fetch, synthesize, submit —
+# and does an assigned task; it never reads `mode`. `work` is named anyway because it
+# is the mode the dispatcher stamps on a `task.assigned` message, so it is the answer
+# to "what do I put in `input.mode` to make this actor run".
+register_graph("research@1", build, modes=("work",))

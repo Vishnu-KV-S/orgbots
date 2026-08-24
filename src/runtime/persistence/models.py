@@ -1038,8 +1038,12 @@ class KillSwitchRecord(Base):
     disengaged_by: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
+        # Mirrors 036. `target_metadata = Base.metadata` (migrations/env.py), so a
+        # model left at 019's four values would make the next `--autogenerate`
+        # propose reverting the constraint.
         CheckConstraint(
-            "scope_type IN ('org','tool','actor','connection')", name="ck_kill_scope_type"
+            "scope_type IN ('org','tool','actor','connection','department')",
+            name="ck_kill_scope_type",
         ),
         CheckConstraint("mode IN ('halt','drain')", name="ck_kill_mode"),
         CheckConstraint(

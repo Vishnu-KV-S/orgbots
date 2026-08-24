@@ -249,4 +249,5 @@ def build() -> StateGraph[DelegatorState, Any, Any, Any]:
     return graph
 
 
+# No `modes`: the fan-out is driven by `input.children`, not by an entry point.
 register_graph("delegator@1", build)

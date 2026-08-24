@@ -659,4 +659,12 @@ def build() -> StateGraph[HeadState, Any, Any, Any]:
     return graph
 
 
-register_graph("marketing_head@1", build)
+# Exactly what `_branch` above routes on, in the order it tests them. Not
+# `department.MODES`: that set is derived from `TRIGGERS`, so it carries
+# `weekly_metrics` (analytics', not this graph's) and omits `task.submitted` (which
+# `_branch` treats as `evaluate`). `weekly_plan` is last because it is the fallthrough.
+register_graph(
+    "marketing_head@1",
+    build,
+    modes=("weekly_plan", "evaluate", "task.submitted", "publish_gate", "weekly_summary"),
+)
