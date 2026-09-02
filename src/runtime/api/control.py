@@ -87,6 +87,20 @@ def _service(request: Request) -> RunService:
     return service
 
 
+def _kill_switches(request: Request) -> KillSwitchService:
+    """**The same instance `RunService` admits runs against**, never a fresh one.
+
+    The kill-switch cache is per instance. A second `KillSwitchService` built here
+    would have its own copy of the switch list, so `start`'s `invalidate()` would clear
+    a cache that nothing consults — and the operator who pressed *start* and then *run*
+    would be refused by their own process for ten seconds, with the switch already
+    disengaged in the database. Ten seconds is the cross-process propagation this
+    surface documents; it is not a delay the process that pulled the switch should
+    impose on itself.
+    """
+    return _service(request).kill_switches
+
+
 # --- path confinement ----------------------------------------------------------------
 
 
@@ -918,7 +932,7 @@ async def stop_department(
     organization_id = OrganizationId(org_id)
     await _department_or_404(request, organization_id, name)
 
-    switches = KillSwitchService(_uow(request))
+    switches = _kill_switches(request)
     engaged = await switches.engage(
         organization_id,
         scope_type=KillScope.DEPARTMENT,
@@ -975,7 +989,7 @@ async def start_department(
     organization_id = OrganizationId(org_id)
     await _department_or_404(request, organization_id, name)
 
-    switches = KillSwitchService(_uow(request))
+    switches = _kill_switches(request)
     disengaged = await switches.disengage(
         organization_id,
         scope_type=KillScope.DEPARTMENT,
@@ -1056,6 +1070,13 @@ async def start_actor_run(
     authority, same budget, same kill switch. That is the whole reason this endpoint
     exists here rather than as a second door: a control surface that could create a run
     around those checks would be the one hole in them.
+
+    **A refused run is still a 202, and `admitted` is how the caller finds out.** A
+    kill switch or an exhausted budget does not raise here: `RunService` writes a
+    `LIMIT_REACHED` row with a reason, because a refusal that left no trace is a
+    refusal nobody can review afterwards (edge case 21). The run id in the response is
+    the evidence, so it would be wrong to answer 403 and throw it away — and wrong to
+    answer a bare 202 that reads like success. Both fields are on the wire instead.
     """
     service = _service(request)
     payload = dict(body.input)
@@ -1076,4 +1097,6 @@ async def start_actor_run(
         "status": result.status.value,
         "spec_hash": result.spec_hash,
         "created": result.created,
+        "admitted": result.admitted,
+        "refusal_reason": result.refusal_reason,
     }

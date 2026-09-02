@@ -428,4 +428,12 @@ export interface RunStarted {
   /** False means an existing run was returned: the idempotency key had been used.
    * Worth showing — "nothing happened" and "it worked" look identical otherwise. */
   created: boolean;
+  /** False when the run was *refused* — a kill switch, an exhausted budget, a shed
+   * priority. The request still succeeded and the run id is still real: a refusal is
+   * a `LIMIT_REACHED` row, not an exception, so that it can be reviewed later. Show
+   * it as a refusal, not as a start. */
+  admitted: boolean;
+  /** `KILL_SWITCH`, `POOL_EXHAUSTED`, `PRIORITY_SHED`, `ALLOCATION_CEILING`. "No"
+   * without a reason sends an operator to the wrong dashboard. */
+  refusal_reason: string | null;
 }

@@ -138,6 +138,19 @@ class RunService:
         )
         self._max_depth = self._settings.delegation_max_depth
 
+    @property
+    def kill_switches(self) -> KillSwitchService:
+        """The switch service this instance actually admits runs against.
+
+        Exposed so a caller that *engages* a switch can invalidate the same cache the
+        admission check reads. The cache is per **instance**, not per process, so a
+        control surface that built its own `KillSwitchService` would clear a cache
+        nobody consults: an operator who pressed *start* and then *run* would be
+        refused, by their own process, for the full ten seconds — with the switch
+        already disengaged in the database. Found exactly that way.
+        """
+        return self._kill_switches
+
     async def start_run(self, req: StartRunRequest) -> StartRunResult:
         """Resolve spec, admit, write runs + run_specs + budget + outbox in ONE
         transaction, return.

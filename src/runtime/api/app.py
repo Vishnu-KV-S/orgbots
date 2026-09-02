@@ -45,6 +45,7 @@ from runtime.domain.specs import StartRunRequest
 from runtime.events.stream import RedisStreams
 from runtime.observability.logging import configure_logging, get_logger
 from runtime.observability.tracing import configure_tracing
+from runtime.org.killswitch import KillSwitchService
 from runtime.persistence.engine import dispose_engines
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.runtime.run_service import RunService
@@ -66,7 +67,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.uow = UnitOfWorkFactory(settings)
     app.state.streams = RedisStreams(settings)
-    app.state.service = RunService(app.state.uow, settings=settings)
+    # One `KillSwitchService` for the process, handed to `RunService` and reached by
+    # `/v1/control` through `RunService.kill_switches`. Two instances would each cache
+    # their own copy of the switch list, and the endpoint that engages a switch would
+    # invalidate a cache the endpoint that admits runs never reads.
+    app.state.kill_switches = KillSwitchService(app.state.uow)
+    app.state.service = RunService(
+        app.state.uow, settings=settings, kill_switches=app.state.kill_switches
+    )
     try:
         yield
     finally:

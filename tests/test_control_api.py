@@ -317,6 +317,36 @@ async def test_start_recovers_both_halves(client: httpx.AsyncClient, org: Organi
     assert department["kill_switch"] is None
 
 
+async def test_start_then_run_is_admitted_immediately_in_the_same_process(
+    client: httpx.AsyncClient, org: OrganizationId
+) -> None:
+    """Pressing *start* and then *run* must work, with no ten-second wait.
+
+    The kill-switch cache is per **instance**. When the control surface built its own
+    `KillSwitchService`, `start`'s `invalidate()` cleared a cache that nothing read, and
+    admission kept refusing from a stale copy for the full TTL — with the switch already
+    disengaged in the database. Ten seconds is the *cross-process* propagation this
+    surface documents; the process that pulled the switch must not impose it on itself.
+    """
+    await _apply(client, org)
+    await client.post(f"/v1/control/organizations/{org}/departments/{DEPARTMENT}/stop", json={})
+
+    refused = await client.post(
+        f"/v1/control/organizations/{org}/actors/{HEAD}/run", json={"mode": "weekly_plan"}
+    )
+    assert refused.json()["admitted"] is False
+
+    await client.post(f"/v1/control/organizations/{org}/departments/{DEPARTMENT}/start", json={})
+
+    admitted = await client.post(
+        f"/v1/control/organizations/{org}/actors/{HEAD}/run",
+        json={"mode": "weekly_plan", "idempotency_key": f"after-start:{uuid.uuid4()}"},
+    )
+    body = admitted.json()
+    assert body["admitted"] is True, body.get("refusal_reason")
+    assert body["status"] == "QUEUED"
+
+
 async def test_starting_an_already_running_department_is_not_an_error(
     client: httpx.AsyncClient, org: OrganizationId
 ) -> None:
@@ -391,6 +421,31 @@ async def test_the_same_idempotency_key_twice_starts_one_run(
     assert first.json()["run_id"] == second.json()["run_id"]
     assert first.json()["created"] is True
     assert second.json()["created"] is False
+
+
+async def test_a_refused_run_is_a_row_not_an_error(
+    client: httpx.AsyncClient, org: OrganizationId
+) -> None:
+    """A kill switch does not raise here, and the response must not pretend it did.
+
+    `RunService` records a refusal as a `LIMIT_REACHED` run with a reason, because a
+    refusal that left no trace is one nobody can review afterwards (edge case 21). So
+    the status is 202 and the run id is real — and `admitted` is how the caller learns
+    that nothing is going to happen. A bare 202 would read as success; a 403 would
+    throw away the evidence.
+    """
+    await _apply(client, org)
+    await client.post(f"/v1/control/organizations/{org}/departments/{DEPARTMENT}/stop", json={})
+
+    response = await client.post(
+        f"/v1/control/organizations/{org}/actors/{HEAD}/run", json={"mode": "weekly_plan"}
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["admitted"] is False
+    assert body["refusal_reason"] == "KILL_SWITCH"
+    assert body["status"] == "LIMIT_REACHED"
+    assert body["run_id"], "the refusal is reviewable because the row exists"
 
 
 async def test_an_unknown_actor_is_404(client: httpx.AsyncClient, org: OrganizationId) -> None:

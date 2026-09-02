@@ -52,6 +52,8 @@ export function RunControl({ orgId, actor, modes, onOpenRun, onStarted }: RunCon
       const started = await startActorRun(orgId, actor, { mode, input });
       onStarted();
       // The run view wants the full detail, and the start response is a receipt.
+      // Opened even when the run was refused: a `LIMIT_REACHED` run is a row with a
+      // reason on it, and the reason is the thing somebody came here to find.
       onOpenRun(await fetchRun(started.run_id));
       return started;
     }, [actor, inputText, mode, onOpenRun, onStarted, orgId, showInput]),
@@ -123,7 +125,14 @@ export function RunControl({ orgId, actor, modes, onOpenRun, onStarted }: RunCon
       </div>
 
       {start.error && <ErrorNotice>{start.error}</ErrorNotice>}
-      {start.result && !start.result.created && (
+      {start.result && !start.result.admitted && (
+        <ErrorNotice>
+          Refused: <strong>{start.result.refusal_reason ?? "not admitted"}</strong>. The
+          run exists as a <code>LIMIT_REACHED</code> row so the refusal can be reviewed
+          — it did not execute.
+        </ErrorNotice>
+      )}
+      {start.result?.admitted && !start.result.created && (
         <p className="ok-note">
           That idempotency key already had a run — this is the existing one, not a
           second.
