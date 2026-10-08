@@ -170,3 +170,51 @@ forbidden_modules =
     runtime.org
     runtime.graphs
     runtime.handlers
+
+# The computer (`runtime.computer`) is an external system that happens to live in this
+# repository: a separate process the gateway reaches over HTTP, the way it reaches a
+# search API. Both directions are held. It imports nothing from the runtime — no
+# database, no fence, nothing a bot's action could use to step around the gateway — and
+# nothing in the runtime imports it or Playwright, so the only path from a graph to the
+# browser is `browser.observe@1` / `browser.act@1` through `ToolGateway`.
+[importlinter:contract:computer-is-external]
+name = The computer imports nothing from the runtime
+type = forbidden
+source_modules =
+    runtime.computer
+forbidden_modules =
+    runtime.api
+    runtime.worker
+    runtime.spec
+    runtime.runtime
+    runtime.graphs
+    runtime.handlers
+    runtime.memory
+    runtime.gateway
+    runtime.org
+    runtime.effects
+    runtime.budget
+    runtime.artifacts
+    runtime.events
+    runtime.persistence
+    runtime.domain
+    runtime.settings
+
+[importlinter:contract:browser-only-through-the-gateway]
+name = Nothing reaches the browser except over HTTP
+type = forbidden
+source_modules =
+    runtime.api
+    runtime.cli
+    runtime.worker
+    runtime.spec
+    runtime.runtime
+    runtime.graphs
+    runtime.handlers
+    runtime.memory
+    runtime.gateway
+    runtime.org
+    runtime.domain
+forbidden_modules =
+    runtime.computer
+    playwright

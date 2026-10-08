@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from runtime.domain.enums import BlastRadius
 from runtime.gateway.builtin import (
+    browser,
     fixture_sideeffect,
     publish_external,
     web_fetch,
@@ -38,6 +39,7 @@ def build_registry(
     fixture_sideeffect.register(registry, uow_factory)
     web_search.register(registry, resolved)
     publish_external.register(registry, resolved)
+    browser.register(registry, resolved)
     return registry
 
 
@@ -77,6 +79,7 @@ def default_action_floors(settings: Settings | None = None) -> dict[str, BlastRa
 
 __all__ = [
     "action_floors",
+    "browser",
     "build_registry",
     "default_action_floors",
     "fixture_sideeffect",

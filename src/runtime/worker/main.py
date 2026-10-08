@@ -50,6 +50,7 @@ import asyncio
 import contextlib
 import signal
 
+import runtime.graphs.bot_agent
 import runtime.graphs.delegator
 import runtime.graphs.echo_agent
 import runtime.handlers  # noqa: F401  registers hasher@1 and analytics@1

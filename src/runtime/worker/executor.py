@@ -271,6 +271,10 @@ class RunExecutor:
         result = await graph.ainvoke(
             {"input": ctx.spec.input},
             config={
+                # LangGraph's default of 25 supersteps is below what `bot_agent@1`'s
+                # step cycle needs (one superstep per browser action). The run's own
+                # ceilings — tool calls, model calls, wall clock — are the real bound.
+                "recursion_limit": 120,
                 "configurable": {
                     "thread_id": ctx.spec.thread_id,
                     GRAPH_KEY: node_ctx,

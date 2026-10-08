@@ -89,6 +89,7 @@ def default_registries(settings: object = None) -> Registries:
     rule they encode is that this function's import list and the worker's are the same
     list.
     """
+    import runtime.graphs.bot_agent
     import runtime.graphs.delegator
     import runtime.graphs.department
     import runtime.graphs.echo_agent
