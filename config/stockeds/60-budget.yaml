@@ -1,0 +1,24 @@
+# $30 a month, $25 of it inside the desk.
+#
+# The arithmetic this is sized against: one briefed research run is ~45k input tokens
+# and up to 16k out on `ds-pro-search`, which at 66/198 cents per Mtok is roughly 5-8
+# cents. Five a day for thirty days is $7.50-$12. $30 is between two and four times
+# the expected spend, which is headroom for a bad month rather than permission for one
+# — `maxCostCents: 40` on the actor is the per-run guard, and this is the guard on
+# every run together.
+#
+# `oversubscription: 0.3` lets the allocations sum to 1.3x the pool while actual spend
+# stays bounded by 1x: five triggers reserving against one department pool would
+# otherwise refuse the fifth on a day when the first four each reserved their ceiling
+# and spent a fifth of it.
+apiVersion: agent-platform/v1
+kind: BudgetPolicy
+metadata:
+  name: default
+spec:
+  actors: {}
+  departments:
+    edtech-research: 2500
+  organization: 3000
+  oversubscription: 0.3
+  period: month

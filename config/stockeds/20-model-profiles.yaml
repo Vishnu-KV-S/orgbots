@@ -1,0 +1,69 @@
+# Two profiles. Stockeds runs on DeepSeek because it is the only provider
+# `build_providers` registers with a key in `.env`; prices are DeepSeek's cents/Mtok
+# and the usage ledger bills against these numbers, so they have to match the vendor's
+# rate or every cost figure downstream is fiction.
+
+# The searching profile, and the only one that produces a report. Pro rather than
+# flash for the reason `config/testco` documents at length: flash drives the
+# server-side search loop badly — it narrates between rounds and can spend the whole
+# search budget without writing the answer, which reaches `call_structured` as
+# `not_json` and fails the run on a schema error that has nothing to do with the
+# schema.
+#
+# 16000 output tokens because an ed-tech brief written against ~45k tokens of search
+# results ran past 8000 on testco and truncated mid-string. Above 8000 the request
+# also streams, which is what keeps a reply this long inside its timeout.
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: ds-pro-search
+spec:
+  effort: high
+  inputCentsPerMtok: 66
+  maxOutputTokens: 16000
+  model: deepseek-v4-pro
+  outputCentsPerMtok: 198
+  provider: deepseek
+  temperature: 0.0
+  # Off, and the continuation loop is why. Resuming a paused server-tool turn means
+  # handing the assistant blocks back, and a thinking block the endpoint wants signed
+  # is refused on the way in — the continuation falls back to the partial answer and
+  # the search was paid for and thrown away. `web_search` and `thinking` are not
+  # independent dials on this provider.
+  thinking: false
+  webSearch: true
+---
+# History compression only. The cheapest call in the company and the highest-volume
+# one; it never touches a deliverable.
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: ds-flash
+spec:
+  effort: low
+  inputCentsPerMtok: 22
+  maxOutputTokens: 4000
+  model: deepseek-v4-flash
+  outputCentsPerMtok: 66
+  provider: deepseek
+  temperature: 0.0
+  thinking: false
+  webSearch: false
+---
+# The head's profile. Unused on the scheduled path — no trigger names this actor —
+# but an `llm_agent` with no profiles cannot make a call at all, and a head that
+# cannot answer an escalation is a seat that only looks filled.
+apiVersion: agent-platform/v1
+kind: ModelProfile
+metadata:
+  name: ds-flash-work
+spec:
+  effort: medium
+  inputCentsPerMtok: 22
+  maxOutputTokens: 8000
+  model: deepseek-v4-flash
+  outputCentsPerMtok: 66
+  provider: deepseek
+  temperature: 0.0
+  thinking: false
+  webSearch: false

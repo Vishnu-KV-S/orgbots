@@ -1,0 +1,42 @@
+# The search connection. `secretRef` points at the encrypted credentials table, never
+# at a literal — an inline secret is a validation error in this format, not a warning.
+#
+# Until `search_api_key` is actually stored and `RUNTIME_SEARCH_ENDPOINT_URL` is set,
+# `web.search@1` raises `SpecError` at call time and `research@1` handles it: it stops
+# searching, records a gap saying the tool was unconfigured and that what the report
+# cites came from the provider's own search, and carries on to `synthesize`. So the
+# reports are grounded either way — with the key they additionally carry the fetched
+# pages as an evidence artifact.
+apiVersion: agent-platform/v1
+kind: Connection
+metadata:
+  name: search-primary
+spec:
+  credentials:
+    secretRef: search_api_key
+  provider: serper
+  scopes:
+  - search:read
+  status: ACTIVE
+---
+apiVersion: agent-platform/v1
+kind: ToolGrant
+metadata:
+  name: actor-research-web-search-1
+spec:
+  connection: search-primary
+  subject:
+    actor: research
+    role: null
+  tool: web.search@1
+---
+apiVersion: agent-platform/v1
+kind: ToolGrant
+metadata:
+  name: actor-research-web-fetch-1
+spec:
+  connection: null
+  subject:
+    actor: research
+    role: null
+  tool: web.fetch@1

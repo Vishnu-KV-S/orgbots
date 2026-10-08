@@ -1,0 +1,22 @@
+apiVersion: agent-platform/v1
+kind: Organization
+metadata:
+  name: stockeds
+spec:
+  description: >-
+    An ed-tech trend desk. One department, one standing job: watch what is changing
+    in education technology and file a report five times a day.
+  displayName: Stockeds
+---
+# One department, and it is a research desk rather than a marketing one — there is
+# nothing here to draft, gate or publish. The head seat exists because `research@1`
+# names a manager (`runtime.org.department.HEAD`) as the escalation target for a
+# schema failure on an assigned task; on the scheduled path it is never called.
+apiVersion: agent-platform/v1
+kind: Department
+metadata:
+  name: edtech-research
+spec:
+  description: 'Five briefs a day on what changed in education technology.'
+  head: marketing-head
+  parent: null
