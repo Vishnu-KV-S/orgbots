@@ -167,7 +167,8 @@ class BotManager:
                     uuid.uuid4(),
                     bot_id,
                     role="system",
-                    content=f"You updated {bot.name}'s brief ({', '.join(changed)}).",
+                    content=f"You updated {bot.name}'s brief ({', '.join(changed)})"
+                    + (f": {reason}" if reason else "."),
                     payload={"brief_changed": changed},
                 )
             if locked is not None:

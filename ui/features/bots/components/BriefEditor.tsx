@@ -170,7 +170,10 @@ export function BriefSection({
   const latest = revisions.data?.revisions[0];
 
   const save = useAction(() => updateBot(bot.id, { brief: clean(form) }), { onDone: onChanged });
-  const lock = useAction((locked: boolean) => updateBot(bot.id, { brief_locked: locked }), {
+  // Shown at once on click; the server's value takes over again when it arrives.
+  const [locked, setLocked] = useState(bot.brief_locked);
+  useEffect(() => setLocked(bot.brief_locked), [bot.id, bot.brief_locked]);
+  const lock = useAction((value: boolean) => updateBot(bot.id, { brief_locked: value }), {
     onDone: onChanged,
   });
   const restore = useAction((rev: number) => restoreRevision(bot.id, rev), {
@@ -194,9 +197,13 @@ export function BriefSection({
         <label className="checkline">
           <input
             type="checkbox"
-            checked={bot.brief_locked}
+            checked={locked}
             disabled={lock.pending}
-            onChange={(e) => void lock.run(e.target.checked)}
+            onChange={(e) => {
+              const value = e.target.checked;
+              setLocked(value);
+              void lock.run(value).then((r) => r === null && setLocked(!value));
+            }}
           />
           Only I can change this brief
         </label>
