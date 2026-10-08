@@ -24,7 +24,7 @@ export const MOODS: { id: Mood; label: string; hint: string }[] = [
   {
     id: "thinking",
     label: "Thinking",
-    hint: "Tilts its head, eyes drift up",
+    hint: "Eyes melt into four rippling dots",
   },
   {
     id: "browsing",

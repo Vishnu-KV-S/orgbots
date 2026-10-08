@@ -53,6 +53,7 @@ export const FINISHES: { id: Finish; label: string }[] = [
 ];
 
 export const BODY_COLORS = [
+  "#ecebe7", // warm off-white
   "#eceaf3", // pearl white
   "#c9b8f0", // lilac
   "#9aa3b5", // brushed steel
@@ -66,6 +67,7 @@ export const BODY_COLORS = [
 ];
 
 export const GLOW_COLORS = [
+  "#f5a623", // anodised orange
   "#e040fb", // magenta
   "#ff4fa3", // hot pink
   "#7c4dff", // ultraviolet
@@ -78,59 +80,60 @@ export const GLOW_COLORS = [
 ];
 
 /** The two looks from the reference images, and a few more. */
+/** Starting points. Every bot shares the finish and the eyes; these vary the rest. */
 export const PRESETS: { name: string; appearance: Appearance }[] = [
   {
     name: "Orbit",
     appearance: {
       shape: "orb",
-      body: "#eceaf3",
-      glow: "#e040fb",
+      body: "#ecebe7",
+      glow: "#f5a623",
       eyes: "pill",
       top: "ring",
-      finish: "pearl",
+      finish: "matte",
     },
   },
   {
     name: "Cubey",
     appearance: {
       shape: "cube",
-      body: "#b7aee0",
+      body: "#d8d4cc",
       glow: "#ff4fa3",
-      eyes: "round",
+      eyes: "pill",
       top: "knobs",
-      finish: "metal",
+      finish: "matte",
     },
   },
   {
     name: "Sprout",
     appearance: {
       shape: "capsule",
-      body: "#cfe8c4",
+      body: "#cfe0c8",
       glow: "#3dffb0",
-      eyes: "dot",
+      eyes: "pill",
       top: "antenna",
-      finish: "gloss",
+      finish: "matte",
     },
   },
   {
     name: "Beacon",
     appearance: {
       shape: "pod",
-      body: "#2c2f3a",
+      body: "#3a3b3f",
       glow: "#18c8ff",
-      eyes: "visor",
+      eyes: "pill",
       top: "halo",
-      finish: "metal",
+      finish: "matte",
     },
   },
   {
     name: "Telly",
     appearance: {
       shape: "tv",
-      body: "#f5d9a8",
-      glow: "#ffb02e",
-      eyes: "square",
-      top: "antenna",
+      body: "#e9dfcf",
+      glow: "#f5a623",
+      eyes: "pill",
+      top: "ears",
       finish: "matte",
     },
   },

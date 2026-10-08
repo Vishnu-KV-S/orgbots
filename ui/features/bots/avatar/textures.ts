@@ -114,6 +114,8 @@ export function textures() {
   cache = {
     /** Lacquer: a gentle roughness variation, so a reflection is not machine-perfect. */
     plasticRough: dataTexture(noise(256, 24, 200, 255, 10), 3),
+    /** Soft-touch plastic and rubber: a fine, even grain you can see in the light. */
+    softGrain: dataTexture(noise(256, 128, 105, 150, 34), 7),
     /** Brushed aluminium, along one axis. */
     brushedRough: dataTexture(brushed(512), 2),
     led: dataTexture(ledFalloff(64), 1),

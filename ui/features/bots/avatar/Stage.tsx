@@ -96,7 +96,7 @@ function Studio() {
   const scene = useThree((s) => s.scene);
   useEffect(() => {
     scene.environment = studioEnvironment(gl);
-    scene.environmentIntensity = 1.0;
+    scene.environmentIntensity = 0.8;
   }, [gl, scene]);
   return null;
 }
@@ -223,9 +223,9 @@ export function BotFace({
       <Studio />
       {/* A neutral three-point studio rig: warm key, cool fill, white rim. */}
       <ambientLight intensity={0.15} />
-      <directionalLight position={[2.2, 3.2, 2.8]} intensity={2.2} color="#fff6ec" />
+      <directionalLight position={[2.2, 3.2, 2.8]} intensity={1.5} color="#fff6ec" />
       <directionalLight position={[-2.8, 0.8, 1.5]} intensity={0.6} color="#e8f0ff" />
-      <directionalLight position={[0, 2, -3]} intensity={1.1} color="#ffffff" />
+      <directionalLight position={[0, 2, -3]} intensity={0.8} color="#ffffff" />
       <BotModel appearance={appearance} mood={mood} detail={level} phase={phase} />
     </>
   );

@@ -5,8 +5,6 @@ import { cx } from "@/lib/cx";
 import {
   type Appearance,
   BODY_COLORS,
-  EYES,
-  FINISHES,
   GLOW_COLORS,
   PRESETS,
   SHAPES,
@@ -104,22 +102,15 @@ export function Designer({
           </div>
         </div>
         <Choice label="Body" options={SHAPES} value={value.shape} onPick={(v) => set("shape", v)} />
-        <Choice label="Eyes" options={EYES} value={value.eyes} onPick={(v) => set("eyes", v)} />
         <Choice label="Top" options={TOPS} value={value.top} onPick={(v) => set("top", v)} />
-        <Choice
-          label="Finish"
-          options={FINISHES}
-          value={value.finish}
-          onPick={(v) => set("finish", v)}
-        />
         <Swatches
-          label="Colour"
+          label="Shell"
           colors={BODY_COLORS}
           value={value.body}
           onPick={(v) => set("body", v)}
         />
         <Swatches
-          label="Glow"
+          label="Accent"
           colors={GLOW_COLORS}
           value={value.glow}
           onPick={(v) => set("glow", v)}
