@@ -20,6 +20,7 @@ import { ComputerPane } from "./components/ComputerPane";
 import { Conversation, type Pane } from "./components/Conversation";
 import { DetailsPane } from "./components/DetailsPane";
 import { FilesPane } from "./components/FilesPane";
+import { SkillsPane } from "./components/SkillsPane";
 import {
   CommandPalette,
   DeleteBotDialog,
@@ -286,7 +287,13 @@ export function BotsScreen() {
           <aside
             className="bpane"
             aria-label={
-              pane === "computer" ? "Computer" : pane === "files" ? "Team files" : "Details"
+              pane === "computer"
+                ? "Computer"
+                : pane === "files"
+                  ? "Team files"
+                  : pane === "skills"
+                    ? "Skills"
+                    : "Details"
             }
           >
             <div className="bpane-tabs">
@@ -303,6 +310,13 @@ export function BotsScreen() {
                 onClick={() => setPane("files")}
               >
                 Files
+              </button>
+              <button
+                type="button"
+                className={cx("tab", pane === "skills" && "on")}
+                onClick={() => setPane("skills")}
+              >
+                Skills
               </button>
               <button
                 type="button"
@@ -324,6 +338,8 @@ export function BotsScreen() {
             <div className="bpane-body">
               {pane === "computer" ? (
                 <ComputerPane key={selected.id} bot={selected} />
+              ) : pane === "skills" ? (
+                <SkillsPane />
               ) : pane === "files" ? (
                 <FilesPane
                   key={selected.team_id}

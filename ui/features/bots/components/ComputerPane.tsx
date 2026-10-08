@@ -5,11 +5,15 @@ import { ErrorNotice } from "@/components/ui";
 import {
   type Bot,
   type HumanInput,
+  type Teaching,
   computerStatus,
   resetComputer,
   screenshotUrl,
   sendInput,
   setController,
+  startTeaching,
+  stopTeaching,
+  teachingStatus,
 } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
 
@@ -30,6 +34,10 @@ const SPECIAL_KEYS = new Set([
  * then do clicks and keys on the image go through. That makes a login, a 2FA code
  * or a CAPTCHA something the person does themselves, in the bot's own browser,
  * with the bot's session.
+ *
+ * "Teach a task" is the same takeover, recorded: the person does the task while the
+ * computer writes down each click, field and page (never a typed password), and Stop
+ * hands the recording to the bot, which writes it up as a draft skill.
  */
 export function ComputerPane({ bot }: { bot: Bot }) {
   const [frame, setFrame] = useState(0);
@@ -44,6 +52,55 @@ export function ComputerPane({ bot }: { bot: Bot }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screen = useRef<HTMLDivElement>(null);
   const human = controller === "human";
+  const [teaching, setTeaching] = useState<Teaching | null>(null);
+  const [goal, setGoal] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const recording = teaching?.recording ?? null;
+
+  const refreshTeaching = useCallback(async () => {
+    try {
+      setTeaching(await teachingStatus(bot.id));
+    } catch {
+      /* the status line just stays as it was */
+    }
+  }, [bot.id]);
+
+  useEffect(() => {
+    void refreshTeaching();
+    const t = setInterval(() => void refreshTeaching(), 2000);
+    return () => clearInterval(t);
+  }, [refreshTeaching]);
+
+  const teach = async () => {
+    if (!goal?.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await startTeaching(bot.id, goal.trim());
+      setGoal(null);
+      setCtl("human");
+      screen.current?.focus();
+      await refreshTeaching();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const finish = async (cancel: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await stopTeaching(bot.id, cancel);
+      setCtl("bot");
+      await refreshTeaching();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Status: who holds the screen, where it is.
   const refreshStatus = useCallback(async () => {
@@ -247,12 +304,79 @@ export function ComputerPane({ bot }: { bot: Bot }) {
         </p>
       )}
 
+      {recording ? (
+        <div className="teach-bar" role="status">
+          <span className="rec-dot" />
+          <div className="grow">
+            <strong>Recording:</strong> {recording.goal}
+            <div className="muted">
+              {Math.max(0, (teaching?.computer?.steps ?? 1) - 1)} steps ·{" "}
+              {elapsed(teaching?.computer?.elapsed ?? 0)}
+              {teaching?.computer?.full ? " · limit reached, press Stop" : ""}
+            </div>
+          </div>
+          <button type="button" className="pbtn" disabled={busy} onClick={() => void finish(true)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="pbtn primary"
+            disabled={busy}
+            onClick={() => void finish(false)}
+          >
+            Stop &amp; write skill
+          </button>
+        </div>
+      ) : goal !== null ? (
+        <div className="teach-bar">
+          <input
+            className="urlbox grow"
+            style={{ fontFamily: "var(--sans)" }}
+            value={goal}
+            autoFocus
+            placeholder="What will you show? e.g. Download last month's invoice"
+            onChange={(e) => setGoal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void teach();
+              if (e.key === "Escape") setGoal(null);
+            }}
+          />
+          <button type="button" className="pbtn" onClick={() => setGoal(null)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="pbtn primary"
+            disabled={busy || !goal.trim()}
+            onClick={() => void teach()}
+          >
+            Start recording
+          </button>
+        </div>
+      ) : null}
+
       {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="control-row">
-        <button type="button" className={cx("pbtn", !human && "primary")} onClick={() => void toggleControl()}>
-          {human ? "Return control to bot" : "Take control"}
-        </button>
+        {!recording && (
+          <button
+            type="button"
+            className={cx("pbtn", !human && "primary")}
+            onClick={() => void toggleControl()}
+          >
+            {human ? "Return control to bot" : "Take control"}
+          </button>
+        )}
+        {!recording && goal === null && (
+          <button
+            type="button"
+            className="pbtn"
+            title="Do a task yourself on this screen; the bot learns it as a skill"
+            onClick={() => setGoal("")}
+          >
+            🎓 Teach a task
+          </button>
+        )}
         <button
           type="button"
           className="pbtn"
@@ -271,3 +395,9 @@ export function ComputerPane({ bot }: { bot: Bot }) {
     </div>
   );
 }
+
+function elapsed(seconds: number): string {
+  const s = Math.floor(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+

@@ -12,8 +12,9 @@ import { type NextRequest } from "next/server";
  * purpose:**
  *
  *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*,
- *                                /v1/vault*, /healthz
- *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer*, /v1/vault* only
+ *                                /v1/vault*, /v1/skills*, /v1/marketplace*, /healthz
+ *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer*, /v1/vault*,
+ *                                /v1/skills*, /v1/marketplace* only
  *
  * `/v1/observe` stays GET-only because it is read-only *by construction* — every
  * statement in `runtime/api/observe.py` is a SELECT — and a proxy that forwarded a
@@ -32,6 +33,9 @@ import { type NextRequest } from "next/server";
  * computer unless that person has taken control of it. The screenshot is the one
  * non-JSON response that passes through here; the body is forwarded untouched.
  *
+ * `/v1/skills` and `/v1/marketplace` are the organization's library of how-tos that
+ * every bot reads; writing one changes what bots are told, never what they may do.
+ *
  * `/v1/vault` lists saved logins by site and hint and can delete one; no response
  * from it carries a value. A credential card's answer is a POST under `/v1/bots`,
  * and like every body it passes through here as text, unparsed and unlogged.
@@ -42,7 +46,7 @@ import { type NextRequest } from "next/server";
 
 const UPSTREAM = process.env.RUNTIME_API_URL ?? "http://127.0.0.1:8000";
 
-const BOTS = ["v1/bots", "v1/computer", "v1/vault"];
+const BOTS = ["v1/bots", "v1/computer", "v1/vault", "v1/skills", "v1/marketplace"];
 const READABLE = ["v1/observe/", "v1/control/", "healthz", ...BOTS];
 const WRITABLE = ["v1/control/", ...BOTS];
 

@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from runtime.domain.bot_memory import BriefPatch, MemoryKind
 from runtime.domain.routines import RoutineDraft
 from runtime.domain.schemas import SCHEMAS
+from runtime.domain.skills import SkillDraft
 
 MAX_STEPS = 24
 """Steps per run — one chunk of a turn. A task that needs more carries on in a new run
@@ -104,6 +105,9 @@ TURN_ENDING = frozenset({"reply", "ask_user"})
 ROUTINE_ACTIONS = frozenset({"save_routine", "delete_routine"})
 """Steps on the bot's own routines (`domain.routines`) — runtime state, like memory."""
 
+SKILL_ACTIONS = frozenset({"save_skill", "use_skill"})
+"""Steps on the organization's skills library (`domain.skills`)."""
+
 FILE_ACTIONS = frozenset(
     {
         "list_files",
@@ -156,6 +160,8 @@ StepAction = Literal[
     "look",
     "save_routine",
     "delete_routine",
+    "save_skill",
+    "use_skill",
 ]
 
 
@@ -215,7 +221,11 @@ class BotStep(BaseModel):
         "to you. ROUTINES (recurring work, only when your person asks for it): "
         "save_routine creates or changes one of your routines by name (routine = name, "
         "instruction, cron, timezone, output; active=false pauses it). delete_routine "
-        "removes one (routine = its name)."
+        "removes one (routine = its name). SKILLS (your organization's shared how-tos): "
+        "use_skill loads a skill so you can follow it (skill = its name). save_skill "
+        "saves a procedure to the library when your person asks you to keep one, or "
+        "after they show you a task (skill = name, title, when, inputs, steps, checks, "
+        "output, approvals); an existing name changes that skill."
     )
     element: int | None = Field(
         default=None,
@@ -289,6 +299,11 @@ class BotStep(BaseModel):
         description="For save_routine: the routine (name, and for a new one instruction "
         "and cron). For delete_routine: its name.",
     )
+    skill: SkillDraft | None = Field(
+        default=None,
+        description="For use_skill: the skill's name. For save_skill: the skill — name, "
+        "and for a new one its steps and the rest.",
+    )
     diary: str | None = Field(
         default=None,
         max_length=600,
@@ -345,6 +360,8 @@ class BotStep(BaseModel):
             raise ValueError("move_file needs `to` — the new path, or a folder ending in /")
         if self.action in ROUTINE_ACTIONS and self.routine is None:
             raise ValueError(f"{self.action} needs `routine` — at least its name")
+        if self.action in SKILL_ACTIONS and self.skill is None:
+            raise ValueError(f"{self.action} needs `skill` — at least its name")
         if self.action in ("create_bot", "ask_bot"):
             if not (self.bot or "").strip():
                 raise ValueError(f"{self.action} needs `bot` — the helper's name")
@@ -378,14 +395,15 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=5)
-"""Version 5 added routines (`save_routine`, `delete_routine`, with `routine`). Version 4
-added the team drive (`list_files` … `delete_file`, with `path`, `to`,
-`find` and `from_line`) and `look` (vision: a question about the screen). Version 3
-added working memory (`plan` and `notes`, carried from step to step within a turn)
-and `sign_in` (the login vault). Version 2 added memory (remember kinds, forget,
-recall, diary) and the brief (update_brief, create_bot's brief and seed memories).
-Version 1 was never run against stored data, so it is not kept."""
+BOT_STEP = SCHEMAS.register(BotStep, version=6)
+"""Version 6 added skills (`save_skill`, `use_skill`, with `skill`). Version 5 added
+routines (`save_routine`, `delete_routine`, with `routine`). Version 4 added the team
+drive (`list_files` … `delete_file`, with `path`, `to`, `find` and `from_line`) and
+`look` (vision: a question about the screen). Version 3 added working memory (`plan` and
+`notes`, carried from step to step within a turn) and `sign_in` (the login vault).
+Version 2 added memory (remember kinds, forget, recall, diary) and the brief
+(update_brief, create_bot's brief and seed memories). Version 1 was never run against
+stored data, so it is not kept."""
 
 
 # --- appearance -------------------------------------------------------------------------

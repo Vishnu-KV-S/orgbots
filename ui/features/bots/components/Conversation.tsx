@@ -16,7 +16,7 @@ const STARTERS = [
   "Look up the opening hours of the nearest public library.",
 ];
 
-export type Pane = "computer" | "files" | "details" | null;
+export type Pane = "computer" | "files" | "skills" | "details" | null;
 
 export function Conversation({
   bot,
@@ -122,7 +122,7 @@ export function Conversation({
           onClick={() => onPane(pane === "computer" ? null : "computer")}
           title="Watch or take control of this bot's screen"
         >
-          🖥 Computer
+          🖥 <span className="tab-label">Computer</span>
         </button>
         <button
           type="button"
@@ -130,14 +130,23 @@ export function Conversation({
           onClick={() => onPane(pane === "files" ? null : "files")}
           title="The files this bot's team shares"
         >
-          📁 Files
+          📁 <span className="tab-label">Files</span>
+        </button>
+        <button
+          type="button"
+          className={cx("tab", pane === "skills" && "on")}
+          onClick={() => onPane(pane === "skills" ? null : "skills")}
+          title="How-tos every bot can follow"
+        >
+          ✦ <span className="tab-label">Skills</span>
         </button>
         <button
           type="button"
           className={cx("tab", pane === "details" && "on")}
           onClick={() => onPane(pane === "details" ? null : "details")}
+          title="Who this bot is, its routines, memory and rules"
         >
-          ⓘ Details
+          ⓘ <span className="tab-label">Details</span>
         </button>
       </header>
 

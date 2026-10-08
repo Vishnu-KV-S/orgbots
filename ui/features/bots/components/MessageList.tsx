@@ -124,6 +124,23 @@ function WorkBlock({
   );
 }
 
+/** A demonstration's message: the goal, with the recorded steps folded away — they
+ * are for the bot to write up, and a long recording would bury the conversation. */
+function Demonstration({ message }: { message: BotMessage }) {
+  const [open, setOpen] = useState(false);
+  const recorded =
+    message.content.split("<<<RECORDING")[1]?.split("RECORDING>>>")[0]?.trim() ?? "";
+  return (
+    <>
+      <div>Showed how to: {message.payload.demonstration}</div>
+      <button type="button" className="linklike demo-toggle" onClick={() => setOpen((o) => !o)}>
+        {open ? "Hide" : "Show"} {message.payload.steps ?? 0} recorded steps
+      </button>
+      {open && <pre className="demo-steps">{recorded}</pre>}
+    </>
+  );
+}
+
 export function MessageList({
   bot,
   messages,
@@ -232,6 +249,7 @@ export function MessageList({
               {m.payload.from_bot_name && (
                 <div className="from-bot">From {m.payload.from_bot_name} (bot)</div>
               )}
+              {m.payload.demonstration && <div className="from-bot">🎓 Demonstration</div>}
               {m.payload.routine && (
                 <div className="from-bot">
                   {m.payload.trigger === "test"
@@ -244,7 +262,15 @@ export function MessageList({
               )}
               <div className="bubble" style={{ maxWidth: "100%" }}>
                 {quoted && <div className="quote">↪ {quoted.content}</div>}
-                {isUser ? m.content : <RichText text={m.content} />}
+                {isUser ? (
+                  m.payload.demonstration ? (
+                    <Demonstration message={m} />
+                  ) : (
+                    m.content
+                  )
+                ) : (
+                  <RichText text={m.content} />
+                )}
               </div>
               {reactions[m.id] && (
                 <div

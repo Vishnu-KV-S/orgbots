@@ -13,6 +13,13 @@ clicks, keys are typed one at a time, and there is a short settle after each act
 Partly so sites that watch for robotic input behave normally, and partly so that a
 person watching the screen can follow what is happening.
 
+**A person can teach by doing** (`start_recording`). While a screen is recorded, every
+input the person makes through `human_input` is written down as a step — what was
+clicked (its role and label, read off the page), what was typed and into what, keys,
+scrolls and pages — for a bot to turn into a skill. Typing into a password, code or
+card box is recorded as `•••`: the value is never kept, here or anywhere after.
+Recording stops at `RECORDING_STEPS` steps or `RECORDING_SECONDS`.
+
 **`fill` is how a login gets typed, and it is the last line of the vault's checks.**
 It types values the gateway opened from the vault — values no bot has seen — and it
 refuses unless the page is on the site the values belong to, checked immediately
@@ -27,6 +34,7 @@ import asyncio
 import contextlib
 import os
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +62,46 @@ SEALED_SELECTOR = (
     "input[autocomplete^=cc-]"
 )
 """Fields whose contents a bot never reads — the same set `snapshot.SNAPSHOT_JS` seals."""
+RECORDING_STEPS = 200
+RECORDING_SECONDS = 600
+"""A demonstration's limits — the same as `domain.skills`, which this process may not
+import (`runtime.computer` imports nothing from the runtime)."""
+
+_SECRET_LABEL = re.compile(
+    r"pass(word)?|secret|token|otp|2fa|cvv|cvc|card.?number|security code|\bpin\b", re.I
+)
+
+DESCRIBE_JS = """
+([x, y, focused]) => {
+  let el = focused ? document.activeElement : document.elementFromPoint(x, y);
+  if (!el || el === document.body || el === document.documentElement) return null;
+  const target = el.closest(
+    'a,button,input,select,textarea,summary,label,[role=button],[role=link],[role=tab],' +
+    '[role=menuitem],[role=checkbox],[role=option],[role=switch],[contenteditable=true]'
+  ) || el;
+  const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+  const labelled = target.labels && target.labels.length ? target.labels[0].innerText : '';
+  const label = clean(target.getAttribute('aria-label')) || clean(labelled) ||
+    clean(target.getAttribute('placeholder')) || clean(target.innerText) ||
+    clean(target.getAttribute('title')) || clean(target.getAttribute('alt')) ||
+    clean(target.getAttribute('name')) || clean(target.value && target.type === 'submit'
+      ? target.value : '');
+  const type = (target.getAttribute('type') || '').toLowerCase();
+  const auto = (target.getAttribute('autocomplete') || '').toLowerCase();
+  const sealed = type === 'password' || target.hasAttribute('data-vault-filled') ||
+    auto.includes('one-time-code') || auto.startsWith('cc-');
+  return {
+    tag: target.tagName.toLowerCase(),
+    role: target.getAttribute('role') || '',
+    label, type,
+    href: target.tagName === 'A' ? (target.href || '').slice(0, 300) : '',
+    sealed,
+  };
+}
+"""
+"""What a person's click or typing landed on, for a recording: role and label, never a
+field's value. `sealed` is the same set the snapshot seals."""
+
 ACTION_TIMEOUT_MS = 15_000
 NAV_TIMEOUT_MS = 30_000
 HOME_URL = "about:blank"
@@ -82,6 +130,43 @@ class Screen:
     last_action: str = ""
     last_active: float = field(default_factory=time.time)
     label: str = ""
+    recording: Recording | None = None
+
+
+@dataclass
+class Recording:
+    """A demonstration in progress: the steps so far, and when it began."""
+
+    started_at: float = field(default_factory=time.time)
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    full: bool = False
+
+    def expired(self) -> bool:
+        return self.full or time.time() - self.started_at > RECORDING_SECONDS
+
+    def add(self, step: dict[str, Any]) -> None:
+        if self.expired():
+            return
+        step["at"] = round(time.time() - self.started_at, 1)
+        last = self.steps[-1] if self.steps else None
+        # Typing arrives a few characters at a time and scrolling a notch at a time; one
+        # field's typing and one run of scrolling are one step each.
+        same_page = last is not None and last.get("url") == step.get("url")
+        if (
+            same_page
+            and last is not None
+            and last["kind"] == step["kind"] == "type"
+            and last.get("target") == step.get("target")
+        ):
+            if not (step.get("target") or {}).get("secret"):
+                last["text"] = (str(last.get("text", "")) + str(step.get("text", "")))[:400]
+            return
+        if same_page and last is not None and last["kind"] == step["kind"] == "scroll":
+            last["dy"] = float(last.get("dy", 0)) + float(step.get("dy", 0))
+            return
+        self.steps.append(step)
+        if len(self.steps) >= RECORDING_STEPS:
+            self.full = True
 
 
 class Computer:
@@ -166,6 +251,35 @@ class Computer:
         if controller not in ("bot", "human"):
             raise ComputerError(f"unknown controller {controller!r}")
         screen.controller = controller
+
+    # --- demonstrations --------------------------------------------------------------
+
+    async def start_recording(self, screen: Screen) -> Recording:
+        """Begin recording a person's inputs on this screen. They hold it for the length
+        of the recording: a bot acting on it would be recorded as the person."""
+        screen.controller = "human"
+        screen.recording = Recording()
+        screen.recording.add(
+            {"kind": "start", "url": _shown_url(screen.page.url), "title": await _title(screen)}
+        )
+        return screen.recording
+
+    def stop_recording(self, screen: Screen) -> list[dict[str, Any]]:
+        """End the recording and return its steps. The screen stays with the person
+        until they, or the API on their behalf, hand it back."""
+        recording, screen.recording = screen.recording, None
+        return list(recording.steps) if recording is not None else []
+
+    async def _describe(self, screen: Screen, x: float, y: float, *, focused: bool) -> Any:
+        try:
+            target = await screen.page.evaluate(DESCRIBE_JS, [x, y, focused])
+        except PlaywrightError:
+            return None
+        if target:
+            target["secret"] = bool(target.pop("sealed", False)) or bool(
+                _SECRET_LABEL.search(f"{target.get('label', '')} {target.get('type', '')}")
+            )
+        return target
 
     # --- reading ---------------------------------------------------------------------
 
@@ -321,28 +435,54 @@ class Computer:
             raise ComputerError("take control of the screen first")
         page = screen.page
         kind = event.get("kind")
+        recording = screen.recording
+        step: dict[str, Any] | None = None
         async with screen.lock:
             if kind == "click":
                 x, y = float(event["x"]), float(event["y"])
+                if recording is not None:
+                    step = {
+                        "kind": "click",
+                        "target": await self._describe(screen, x, y, focused=False),
+                    }
                 await page.mouse.click(x, y)
                 screen.mouse = (x, y)
             elif kind == "type":
-                await page.keyboard.type(str(event.get("text", "")), delay=20)
+                typed = str(event.get("text", ""))
+                if recording is not None:
+                    target = await self._describe(screen, 0, 0, focused=True) or {}
+                    step = {
+                        "kind": "type",
+                        "target": target,
+                        "text": "•••" if target.get("secret") else typed[:400],
+                    }
+                await page.keyboard.type(typed, delay=20)
             elif kind == "key":
                 await page.keyboard.press(str(event["key"]))
+                step = {"kind": "key", "key": str(event["key"])[:40]}
             elif kind == "scroll":
                 await page.mouse.wheel(0, float(event.get("dy", 400)))
+                step = {"kind": "scroll", "dy": float(event.get("dy", 400))}
             elif kind == "navigate":
                 await page.goto(_normalise_url(str(event["url"])))
+                step = {"kind": "navigate"}
             elif kind == "back":
                 await page.go_back()
+                step = {"kind": "back"}
             elif kind == "forward":
                 await page.go_forward()
+                step = {"kind": "forward"}
             elif kind == "reload":
                 await page.reload()
+                step = {"kind": "reload"}
             else:
                 raise ComputerError(f"unknown input {kind!r}")
             screen.last_active = time.time()
+            if recording is not None and step is not None:
+                # The page the step was made on — for a click that navigated, the click's
+                # own page is the one before, which the previous step already says.
+                step["url"] = _shown_url(page.url)
+                recording.add(step)
 
 
 # --- action implementations -----------------------------------------------------------
@@ -491,6 +631,19 @@ async def _check_fillable(handle: Any, number: int, *, password: bool) -> None:
         raise ComputerError(
             f"element [{number}] is not a password box; a password only goes into one"
         )
+
+
+def _shown_url(url: str) -> str:
+    """A URL as a recording keeps it: no query string or fragment, which is where
+    tokens, session ids and search terms live."""
+    return url.split("#", 1)[0].split("?", 1)[0][:300]
+
+
+async def _title(screen: Screen) -> str:
+    try:
+        return (await screen.page.title())[:120]
+    except PlaywrightError:
+        return ""
 
 
 def _normalise_url(url: str) -> str:

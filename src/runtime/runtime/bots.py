@@ -312,14 +312,24 @@ class BotManager:
     # --- conversation ----------------------------------------------------------------
 
     async def send(
-        self, bot_id: uuid.UUID, text: str, *, reply_to: uuid.UUID | None = None
+        self,
+        bot_id: uuid.UUID,
+        text: str,
+        *,
+        reply_to: uuid.UUID | None = None,
+        payload: dict[str, Any] | None = None,
+        run_input: dict[str, Any] | None = None,
     ) -> Sent:
-        """A person's message: record it, supersede whatever was running, start a run."""
+        """A person's message: record it, supersede whatever was running, start a run.
+
+        `payload` rides on the message (what the conversation shows about it) and
+        `run_input` on the run — a demonstration's message carries its recording in both,
+        so the chat can label it and the turn can tie the skill it writes to it."""
         bot = await self.get(bot_id)
         message_id = uuid.uuid4()
         async with self._uow.transaction() as uow:
             await uow.bots.add_message(
-                message_id, bot_id, role="user", content=text, reply_to=reply_to
+                message_id, bot_id, role="user", content=text, reply_to=reply_to, payload=payload
             )
             # A new instruction makes anything still waiting for approval moot; the
             # bot will re-propose it if it still applies.
@@ -327,7 +337,11 @@ class BotManager:
             await uow.vault.expire_requests(bot_id)
             turn = await uow.bots.bump_turn(bot_id)
         return await self._start(
-            bot, turn, key=f"bot:{bot_id}:msg:{message_id}", extra={}, anchor=message_id
+            bot,
+            turn,
+            key=f"bot:{bot_id}:msg:{message_id}",
+            extra=dict(run_input or {}),
+            anchor=message_id,
         )
 
     async def decide(self, bot_id: uuid.UUID, pending_id: uuid.UUID, decision: str) -> Sent:
@@ -588,6 +602,7 @@ class BotManager:
             key=f"bot:{bot.id}:routine:{fire.id}",
             extra={
                 "routine_id": str(routine.id),
+                "routine": routine.name,
                 "fire_id": str(fire.id),
                 "trigger": fire.trigger,
                 "drafts_only": routine.approval == "drafts" or fire.trigger == "test",
