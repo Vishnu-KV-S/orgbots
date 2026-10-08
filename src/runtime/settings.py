@@ -384,6 +384,14 @@ class Settings(BaseSettings):
     here (`{ui_url}/rt/v1/auth/sso/callback` is what to register with the identity
     provider). An https address also makes the session cookie `Secure`."""
 
+    x_api_url: str = "https://api.x.com/2"
+    """X's API, for Tag @bot on X (`runtime.runtime.x_tags`). Changed only to go through
+    a proxy, or to a stand-in in a test."""
+
+    x_poll_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
+    """How often each connected X account's mentions are read. X allows about 450 reads
+    per 15 minutes per app; a minute is far inside that, and a tag waits at most this."""
+
     push_contact: str = "mailto:bots@localhost"
     """Who runs this runtime, for the push services (Web Push's VAPID `sub` claim). Some
     services reject a push without one; set a real `mailto:` or `https:` address."""

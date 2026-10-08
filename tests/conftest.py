@@ -69,6 +69,11 @@ _TRUNCATE_ORDER = [
     "bot_rules",
     "bot_messages",
     "bots",
+    # Tag on X (054): the account, people's links, codes and mentions seen.
+    "x_mentions",
+    "x_link_codes",
+    "x_links",
+    "x_accounts",
     # Enterprise (053): policies, secrets, the control-plane trail, SCIM, telemetry.
     "org_policies",
     "team_secrets",

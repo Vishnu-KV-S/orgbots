@@ -381,6 +381,27 @@ members, the one person manages them.
   files are never sent. Emails are only sent if you opt in. Headers such as an API key
   are sealed. A batch the collector refuses is retried, and the reason is shown.
 
+**Tag @bot on X.** Tag your organization's X account in a post, and your bot gets the
+task (`runtime/domain/x.py`, migration 054).
+
+- **Setup.** An admin connects the account under **Settings → Tag on X**. It needs an
+  app bearer token to read mentions, and optionally a user token so it can reply.
+- **Linking.** Each person links their own X account with **Link my X account**, which
+  gives a one-time code to post from it (`@AcmeBots link 7KQ2MX`). Only that account's
+  owner can post it, so a handle can't be claimed falsely.
+- **Tagging.** A worker loop (`runtime/runtime/x_tags.py`) reads the mentions timeline
+  every `RUNTIME_X_POLL_SECONDS` (60 by default). A post from a linked account becomes
+  a message to the bot the person chose, which must be their own bot, not one shared
+  with them. The message includes the post they replied to and any post either quotes.
+  The person's words are the instruction; other people's posts are fenced as untrusted
+  data.
+- **What X sees.** At most @AcmeBots replies that the bot has it; the work and results
+  stay in the app.
+- **Ignored.** Mentions from accounts nobody linked, posts with video or a GIF, and
+  anything from before the account was connected are ignored. Each post is acted on
+  once.
+- **Proxies.** `RUNTIME_X_API_URL` points at X's API, or at a proxy.
+
 Not yet built: per-member private chats with a team bot (a team bot's conversation is
 shared), and OAuth sign-in for connectors.
 
