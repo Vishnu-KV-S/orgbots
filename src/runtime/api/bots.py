@@ -196,6 +196,7 @@ def _bot_view(
         "team_id": str(bot.team_id),
         "created_by": bot.created_by,
         "appearance": bot.appearance,
+        "auto_review": bot.auto_review,
         "created_at": bot.created_at.isoformat(),
         "updated_at": bot.updated_at.isoformat(),
         "last_message": _message_view(last) if last else None,
@@ -326,6 +327,7 @@ class UpdateBody(BaseModel):
     pinned: bool | None = None
     hidden: bool | None = None
     appearance: BotAppearance | None = None
+    auto_review: bool | None = None
 
 
 class MemoryBody(BaseModel):

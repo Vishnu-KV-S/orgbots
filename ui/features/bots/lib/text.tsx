@@ -146,6 +146,10 @@ export function describeAction(action: BotAction | undefined): string {
       return `Move ${action.path ?? "a file"} to ${action.to ?? ""}`;
     case "delete_file":
       return `Delete ${action.path ?? "a file"}`;
+    case "review":
+      return `Auto Review: ${
+        action.verdict === "allow" ? "allowed" : action.verdict === "deny" ? "refused" : "asked you"
+      } — ${action.text ?? ""}`;
     case "run_command":
       return `Run a command ${action.local ? "on your computer" : "in the sandbox"}: ${
         action.text ?? ""
@@ -195,6 +199,7 @@ export const ACTION_ICON: Record<string, string> = {
   edit_file: "✐",
   move_file: "⇢",
   delete_file: "✕",
+  review: "⛨",
   run_command: "❯",
   copy_file: "⧉",
   save_skill: "✦",

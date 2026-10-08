@@ -18,7 +18,8 @@ from runtime.domain.ids import OrganizationId
 _BOT_COLUMNS = """
     id, organization_id, actor_name, name, label, description, avatar, brief, brief_locked,
     brief_rev, pinned, hidden, unread, needs_attention, stop_requested, turn, last_run_id,
-    duplicated_from, parent_bot_id, team_id, created_by, appearance, created_at, updated_at
+    duplicated_from, parent_bot_id, team_id, created_by, appearance, created_at, updated_at,
+    auto_review
 """
 
 EDITABLE = frozenset(
@@ -31,6 +32,7 @@ EDITABLE = frozenset(
         "pinned",
         "hidden",
         "appearance",
+        "auto_review",
     }
 )
 _JSON_FIELDS = frozenset({"appearance"})
@@ -66,6 +68,8 @@ class BotRow:
     appearance: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    auto_review: bool = False
+    """A second model checks this bot's risky steps (migration 048, `domain.review`)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +202,7 @@ def _bot(row: Any) -> BotRow:
         appearance=dict(row.appearance or {}),
         created_at=row.created_at,
         updated_at=row.updated_at,
+        auto_review=bool(row.auto_review),
     )
 
 

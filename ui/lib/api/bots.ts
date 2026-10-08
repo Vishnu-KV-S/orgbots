@@ -36,6 +36,8 @@ export interface Bot {
   created_by: "person" | "bot";
   /** The 3D body; `{}` means "derive one from the id". See `features/bots/avatar`. */
   appearance: Partial<import("@/features/bots/avatar/appearance").Appearance>;
+  /** A second model checks this bot's risky steps against what was asked. */
+  auto_review: boolean;
   created_at: string;
   updated_at: string;
   last_message: BotMessage | null;
@@ -158,6 +160,8 @@ export interface BotAction {
   name?: string;
   /** run_command: on the person's own computer rather than the sandbox. */
   local?: boolean;
+  /** An Auto Review line: what the reviewer decided. */
+  verdict?: "allow" | "ask" | "deny";
 }
 
 export interface BotMessage {
@@ -278,7 +282,10 @@ export type BotDraft = Pick<Bot, "name" | "label" | "description" | "avatar"> & 
 };
 
 export type BotPatch = Partial<
-  Pick<Bot, "name" | "label" | "description" | "avatar" | "pinned" | "hidden" | "brief_locked">
+  Pick<
+    Bot,
+    "name" | "label" | "description" | "avatar" | "pinned" | "hidden" | "brief_locked" | "auto_review"
+  >
 > & {
   brief?: BotBrief;
   brief_reason?: string;

@@ -138,7 +138,9 @@ def bot_actor_spec(actor_name: str) -> ActorSpec:
             # may need one corrective retry; the slack covers a resumed turn's parked
             # action and a fill. (It was 40 tool calls, which a busy turn hit at about
             # step 20.)
-            max_llm_calls=2 * MAX_STEPS + 12,
+            # Three a step at most: the decision, a corrective retry, and Auto Review's
+            # check of a risky step (`domain.review`) when the person has it on.
+            max_llm_calls=3 * MAX_STEPS + 12,
             max_tool_calls=2 * MAX_STEPS + 12,
             max_wall_clock_s=1_800.0,
             max_cost_cents=300,
