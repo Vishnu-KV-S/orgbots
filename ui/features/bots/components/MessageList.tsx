@@ -8,6 +8,7 @@ import {
   rawFileUrl,
   reactToBotMessage,
 } from "@/lib/api/bots";
+import { useMe } from "../lib/me";
 import { canSpeak, speak, stopSpeaking } from "../lib/speech";
 import { ACTION_ICON, OPENS_FILE, RichText, describeAction } from "../lib/text";
 import { ApprovalCard } from "./ApprovalCard";
@@ -229,6 +230,7 @@ export function MessageList({
   onDecided: () => void;
   onOpenFile: (path: string) => void;
 }) {
+  const me = useMe();
   const items = useMemo(() => group(messages), [messages]);
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   const decisions = useMemo(() => {
@@ -290,6 +292,7 @@ export function MessageList({
               live={asking.has(rid)}
               decision={answered.get(rid) ?? null}
               onDone={onDecided}
+              shared={bot.visibility === "team" && bot.owner_member_id !== null}
             />
           );
         }
@@ -318,6 +321,9 @@ export function MessageList({
             <div style={{ minWidth: 0, maxWidth: isUser ? "82%" : "100%" }}>
               {m.payload.from_bot_name && (
                 <div className="from-bot">From {m.payload.from_bot_name} (bot)</div>
+              )}
+              {isUser && m.payload.from && m.payload.from.member_id !== me?.id && (
+                <div className="msg-from">{m.payload.from.name}</div>
               )}
               {m.payload.demonstration && <div className="from-bot">🎓 Demonstration</div>}
               {isUser && m.payload.voice && <div className="from-bot">🎙 Said in a voice chat</div>}

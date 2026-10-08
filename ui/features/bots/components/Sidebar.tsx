@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import type { Bot, ComputerStatus, Group } from "@/lib/api/bots";
+import type { Bot, ComputerStatus, Group, Me } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
 import { timeAgo } from "../lib/text";
 import { moodOfBot } from "../avatar";
@@ -110,6 +110,11 @@ function BotRow({
                 ●
               </span>
             )}
+            {bot.visibility === "team" && bot.owner_member_id && depth === 0 && (
+              <span className="team-chip" title="Shared with your team">
+                team
+              </span>
+            )}
           </div>
           <div className="brow-sub">
             {helperCount > 0 && collapsed
@@ -197,6 +202,9 @@ export function Sidebar({
   selectedGroupId,
   onSelectGroup,
   onNewGroup,
+  me = null,
+  onTeam,
+  onSignOut,
 }: {
   bots: Bot[] | null;
   selectedId: string | null;
@@ -211,6 +219,10 @@ export function Sidebar({
   selectedGroupId: string | null;
   onSelectGroup: (id: string) => void;
   onNewGroup: () => void;
+  /** Signed in, with members; null without them. */
+  me?: Me | null;
+  onTeam?: () => void;
+  onSignOut?: () => void;
 }) {
   const [showHidden, setShowHidden] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -340,9 +352,27 @@ export function Sidebar({
             }
           />
         </button>
-        <Link href="/companies" className="bside-link">
-          ▦ Companies console
-        </Link>
+        {me && (
+          <button type="button" className="bside-link" onClick={onTeam}>
+            👥 Team
+          </button>
+        )}
+        {(!me || me.role !== "member") && (
+          <Link href="/companies" className="bside-link">
+            ▦ Companies console
+          </Link>
+        )}
+        {me && (
+          <div className="bside-me">
+            <span className="grow" title={me.email}>
+              {me.name || me.email}
+              <span className="muted"> · {me.role}</span>
+            </span>
+            <button type="button" className="linklike" onClick={onSignOut}>
+              Sign out
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -132,6 +132,7 @@ class Vault:
         fields: list[CredentialField],
         submitted: Mapping[str, str],
         save: bool,
+        profile: str = "",
     ) -> Submitted:
         """Seal what a person typed into the card, in the caller's transaction.
 
@@ -159,11 +160,14 @@ class Vault:
             nonce=nonce,
             ciphertext=ct,
             expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(seconds=ONCE_TTL_S),
+            profile=profile,
         )
 
         saved_id: uuid.UUID | None = None
         if save and saved:
-            saved_id = await self._keep(uow, organization_id, site, saved, bot_id=bot_id)
+            saved_id = await self._keep(
+                uow, organization_id, site, saved, bot_id=bot_id, profile=profile
+            )
         log.info(
             "vault.submitted",
             host=site,
@@ -181,9 +185,10 @@ class Vault:
         values: dict[str, str],
         *,
         bot_id: uuid.UUID,
+        profile: str = "",
     ) -> uuid.UUID:
         identity = _identity(values)
-        for row in await uow.vault.options(organization_id, site, bot_id):
+        for row in await uow.vault.options(organization_id, site, bot_id, profile):
             if row.kind != "saved":
                 continue
             if identity and _identity(self._unseal(row)) == identity:
@@ -211,6 +216,7 @@ class Vault:
             nonce=nonce,
             ciphertext=ct,
             expires_at=None,
+            profile=profile,
         )
         return entry_id
 
@@ -222,6 +228,7 @@ class Vault:
         entry_ids: list[uuid.UUID],
         *,
         bot_id: uuid.UUID,
+        profile: str = "",
     ) -> tuple[str, dict[str, str]]:
         """`(site, values)` for a fill. Earlier entries win where two answer one kind.
 
@@ -238,6 +245,10 @@ class Vault:
             rows = [await uow.vault.get_entry(entry_id) for entry_id in entry_ids]
         for entry_id, row in zip(entry_ids, rows, strict=True):
             if row is None or row.organization_id != organization_id:
+                raise VaultRefusedError(f"vault entry {entry_id} does not exist (deleted?)")
+            if row.kind == "saved" and row.profile != profile:
+                # Someone else's login (another member's, or a team bot's): this bot's
+                # browser profile is not theirs, so neither are their passwords.
                 raise VaultRefusedError(f"vault entry {entry_id} does not exist (deleted?)")
             if row.kind == "once":
                 if row.bot_id != bot_id:
@@ -260,9 +271,9 @@ class Vault:
 
     # --- managing ------------------------------------------------------------------
 
-    async def saved(self, organization_id: uuid.UUID) -> list[VaultEntryRow]:
+    async def saved(self, organization_id: uuid.UUID, profile: str = "") -> list[VaultEntryRow]:
         async with self._uow() as uow:
-            return await uow.vault.saved(organization_id)
+            return await uow.vault.saved(organization_id, profile)
 
 
 def _identity(values: Mapping[str, str]) -> str:

@@ -7,6 +7,7 @@ import {
   type BotRule,
   deleteRule,
   deleteVaultEntry,
+  listMembers,
   listRules,
   listVault,
   putRule,
@@ -16,6 +17,7 @@ import {
 import { useAction } from "@/lib/hooks/useAction";
 import { useResource } from "@/lib/hooks/useResource";
 import { type Appearance, Designer, appearanceFor } from "../avatar";
+import { canEdit, useMe } from "../lib/me";
 import { DECISION_LABEL, RULE_ACTIONS, ruleAction } from "../lib/rules";
 import { BriefSection } from "./BriefEditor";
 import { MemorySection } from "./MemoryPane";
@@ -48,6 +50,7 @@ export function DetailsPane({
 }) {
   return (
     <div>
+      <Access bot={bot} onChanged={onChanged} />
       <Team bot={bot} bots={bots} onSelect={onSelect} />
       <BriefSection bot={bot} bots={bots} onChanged={onChanged} />
       <RoutinesSection bot={bot} />
@@ -79,6 +82,65 @@ export function DetailsPane({
         </div>
       </section>
     </div>
+  );
+}
+
+/**
+ * With members: whose bot this is, and whether the team may use it. Its owner (or an
+ * admin) shares it; a teammate it is shared with is told what is theirs to change and
+ * what is not. Nothing here without members.
+ */
+function Access({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
+  const me = useMe();
+  const members = useResource(
+    useCallback((signal: AbortSignal) => (me ? listMembers(signal) : Promise.resolve(null)), [me]),
+  );
+  // Flips at once, like the brief's lock; the server's answer confirms or puts it back.
+  const [shared, setShared] = useState(bot.visibility === "team");
+  useEffect(() => setShared(bot.visibility === "team"), [bot.id, bot.visibility]);
+  const share = useAction(
+    (team: boolean) => updateBot(bot.id, { visibility: team ? "team" : "private" }),
+    { onDone: onChanged },
+  );
+  if (!me || !bot.owner_member_id) return null;
+  const owner = members.data?.members.find((m) => m.id === bot.owner_member_id);
+  const ownerName =
+    bot.owner_member_id === me.id ? "you" : owner?.name || owner?.email || "a teammate";
+  const editable = canEdit(me, bot);
+  return (
+    <section className="dsec">
+      <h3>Who can use it</h3>
+      {bot.parent_bot_id ? (
+        <p className="screen-help" style={{ margin: 0 }}>
+          A helper: it is shared, or private, along with the bot that leads its team.
+        </p>
+      ) : editable ? (
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={shared}
+            disabled={share.pending}
+            onChange={(e) => {
+              const value = e.target.checked;
+              setShared(value);
+              void share.run(value).then((r) => r === null && setShared(!value));
+            }}
+          />
+          <span>
+            <strong>Share with the team</strong> — every member can talk to {bot.name}, approve its
+            steps once and watch its screen. Only {ownerName === "you" ? "you" : ownerName} and
+            admins change its setup. It signs in to sites with its own browser profile, not yours.
+          </span>
+        </label>
+      ) : (
+        <p className="screen-help" style={{ margin: 0 }}>
+          Shared with you by <strong>{ownerName}</strong>. You can talk to it, approve a step once
+          and watch its screen; its brief, rules, routines and memory are {ownerName}&apos;s to
+          change. What you say here, the whole team sees.
+        </p>
+      )}
+      {share.error && <ErrorNotice>{share.error}</ErrorNotice>}
+    </section>
   );
 }
 
@@ -357,12 +419,15 @@ function Rules({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
  * sent to this page; a login is changed by entering it again on a sign-in card.
  */
 function SavedLogins({ bot }: { bot: Bot }) {
-  const vault = useResource(listVault, { intervalMs: 15000 });
+  const fetcher = useCallback((signal: AbortSignal) => listVault(signal, bot.id), [bot.id]);
+  const vault = useResource(fetcher, { intervalMs: 15000 });
   const toggle = useAction(
-    (id: string, autoUse: boolean) => setVaultAutoUse(id, autoUse),
+    (id: string, autoUse: boolean) => setVaultAutoUse(id, autoUse, bot.id),
     { onDone: vault.refresh },
   );
-  const remove = useAction((id: string) => deleteVaultEntry(id), { onDone: vault.refresh });
+  const remove = useAction((id: string) => deleteVaultEntry(id, bot.id), {
+    onDone: vault.refresh,
+  });
   const entries = vault.data?.entries ?? [];
 
   return (

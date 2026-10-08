@@ -42,6 +42,7 @@ import sys
 import uuid
 from typing import Any
 
+from runtime.cli.members import add_members_parser
 from runtime.cli.memory import add_memory_parser
 from runtime.cli.spec import add_spec_parser
 from runtime.domain.enums import KillMode, KillScope, TaskOutcome
@@ -628,6 +629,7 @@ def build_parser() -> argparse.ArgumentParser:
     cred.set_defaults(fn=cmd_credentials)
 
     add_memory_parser(sub)
+    add_members_parser(sub)
     add_spec_parser(sub)
 
     tick = sub.add_parser("tick", help="drive one turn of the loop by hand")

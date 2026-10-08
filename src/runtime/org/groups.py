@@ -65,13 +65,20 @@ class GroupService:
         name: str,
         members: list[uuid.UUID],
         lead: uuid.UUID | None = None,
+        *,
+        owner_member_id: uuid.UUID | None = None,
     ) -> GroupRow:
         members = list(dict.fromkeys(members))
         async with self._uow.transaction() as uow:
             await self._check_members(uow, organization_id, members)
             gid = uuid.uuid4()
             await uow.groups.create(
-                gid, organization_id, name.strip(), members, lead if lead in members else members[0]
+                gid,
+                organization_id,
+                name.strip(),
+                members,
+                lead if lead in members else members[0],
+                owner_member_id=owner_member_id,
             )
             row = await uow.groups.get(gid)
         assert row is not None

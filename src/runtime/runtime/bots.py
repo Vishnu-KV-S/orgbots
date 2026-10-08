@@ -40,6 +40,7 @@ from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
 from runtime.domain.errors import UnknownActorError
 from runtime.domain.groups import Member, recipients
 from runtime.domain.ids import OrganizationId, RunId
+from runtime.domain.members import computer_profile
 from runtime.domain.routines import ROUTINE_PRIORITY, RoutineError, routine_message
 from runtime.domain.specs import StartRunRequest
 from runtime.domain.templates import BotTemplate, TemplateError
@@ -133,6 +134,7 @@ class BotManager:
         brief: BotBrief | None = None,
         duplicated_from: uuid.UUID | None = None,
         appearance: dict[str, Any] | None = None,
+        owner_member_id: uuid.UUID | None = None,
     ) -> BotRow:
         async with self._uow.transaction() as uow:
             row = await self._insert(
@@ -146,6 +148,7 @@ class BotManager:
                 duplicated_from=duplicated_from,
                 appearance=appearance,
                 brief_reason="Copied with the bot" if duplicated_from else "Written at creation",
+                owner_member_id=owner_member_id,
             )
         log.info("bot.created", bot_id=str(row.id), actor=row.actor_name)
         return row
@@ -163,6 +166,7 @@ class BotManager:
         duplicated_from: uuid.UUID | None,
         appearance: dict[str, Any] | None,
         brief_reason: str,
+        owner_member_id: uuid.UUID | None = None,
     ) -> BotRow:
         bot_id = uuid.uuid4()
         actor_name = actor_name_for(name, secrets.token_hex(3))
@@ -181,6 +185,7 @@ class BotManager:
             avatar=avatar,
             duplicated_from=duplicated_from,
             appearance=appearance,
+            owner_member_id=owner_member_id,
         )
         if brief is not None and not brief.is_empty():
             await write_brief(
@@ -202,6 +207,7 @@ class BotManager:
         *,
         name: str | None = None,
         keep_allows: bool = False,
+        owner_member_id: uuid.UUID | None = None,
     ) -> BotRow:
         """A new bot set up as a template says, after the checks a preview shows
         (`org.templates.preview`): allow rules only when `keep_allows`, every routine
@@ -223,6 +229,7 @@ class BotManager:
                     duplicated_from=None,
                     appearance=made.appearance.model_dump() if made.appearance else None,
                     brief_reason="From a template",
+                    owner_member_id=owner_member_id,
                 )
                 if made.auto_review:
                     await uow.bots.update(row.id, {"auto_review": True})
@@ -249,7 +256,10 @@ class BotManager:
             raise BotNotFoundError(str(bot_id))
         return row
 
-    async def duplicate(self, bot_id: uuid.UUID) -> BotRow:
+    async def duplicate(
+        self, bot_id: uuid.UUID, *, owner_member_id: uuid.UUID | None = None
+    ) -> BotRow:
+        """A copy for whoever asked — their own private bot, even of a team bot."""
         source = await self.get(bot_id)
         copy = await self.create(
             source.organization_id,
@@ -260,12 +270,25 @@ class BotManager:
             brief=brief_of(source),
             duplicated_from=source.id,
             appearance=source.appearance,
+            owner_member_id=owner_member_id,
         )
         async with self._uow.transaction() as uow:
             await uow.bots.copy_rules(source.id, copy.id)
             if source.auto_review:
                 await uow.bots.update(copy.id, {"auto_review": True})
         return await self.get(copy.id)
+
+    async def share(self, bot_id: uuid.UUID, visibility: str) -> BotRow:
+        """Share a bot (and its helpers) with the team, or make it private again. Only a
+        team's lead is shared — its helpers follow it."""
+        bot = await self.get(bot_id)
+        if bot.parent_bot_id is not None:
+            raise ValueError(f"{bot.name} is a helper; share the bot that leads its team")
+        if visibility not in ("private", "team"):
+            raise ValueError("visibility must be private or team")
+        async with self._uow.transaction() as uow:
+            await uow.bots.set_visibility(bot.team_id, visibility)
+        return await self.get(bot_id)
 
     async def update(self, bot_id: uuid.UUID, fields: dict[str, Any]) -> BotRow:
         await self.get(bot_id)
@@ -516,6 +539,7 @@ class BotManager:
                 fields=fields,
                 submitted=clean,
                 save=save,
+                profile=computer_profile(bot),
             )
             clean.clear()
             if not await uow.vault.decide_request(

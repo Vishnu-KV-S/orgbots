@@ -304,7 +304,43 @@ rings when it asks one, and more — preview each in the designer. All of them a
 drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs one
 context, not one per bot.
 
-Not yet built (the next phases): team bots, OAuth sign-in for connectors.
+**Teams: members, sign-in and team bots.** Out of the box the runtime has one person and
+no sign-in (`RUNTIME_AUTH_MODE=none`), as before. Set `RUNTIME_AUTH_MODE=members` and it
+has people (`runtime/domain/members.py`, migration 052):
+
+- **Getting in.** `python -m runtime.cli members add-owner you@company.com` prints a
+  one-time sign-in link for the first owner. Owners and admins then use **👥 Team** to
+  invite people (a link that works once, for a week) and hand out sign-in links. Single
+  sign-on is OpenID Connect, set up under **Team → Single sign-on**: register
+  `{RUNTIME_UI_URL}/rt/v1/auth/sso/callback` with the identity provider, then enter the
+  issuer, client and the email domains that sign in through it. Sign-in uses the
+  authorization code flow with PKCE. The ID token's signature, issuer, audience, nonce
+  and verified email are all checked. **Auto-join** lets new colleagues in those domains
+  join as members. Sessions are HttpOnly, SameSite=Lax cookies, and only their hashes
+  are stored. There are no passwords.
+- **Roles.** Owners can do everything. Admins manage people, sign-in and the
+  organization's apps, but can't touch an owner. Members have their own bots and the
+  team's. There is always at least one owner. Removing someone signs them out
+  everywhere and keeps their name on what they said.
+- **Whose bots.** Every API call is held to the signed-in member's organization; the
+  browser no longer chooses it. A member's bots are private until they **share** one
+  with the team in its Details. Then every member can talk to it, approve a step once
+  and watch its screen. Only its owner or an admin can change its setup: profile,
+  brief, rules, routines, memory and sharing. One table in `runtime/api/access.py`
+  enforces this before any handler runs. A team bot has one shared conversation, and
+  each message shows who sent it. A bot's push notifications go to whoever last wrote
+  to it.
+- **Isolation.** Each member's bots sign in to sites in that member's own browser
+  profile, and each team bot has its own. Saved logins and the `/workspace` belong to
+  a profile, and the computer keeps each profile in a separate directory. A teammate's
+  bot is never signed in as you, and can't fill in your passwords. A member's bot runs
+  commands only in the sandbox, never on the server. Recovering the computer restarts
+  everyone's browser, so it needs an admin. The operator console (`/v1/control`,
+  `/v1/observe`) needs an owner or admin. It shows the whole runtime, so give each
+  organization its own runtime if they must not see each other.
+
+Not yet built: per-member private chats with a team bot (a team bot's conversation is
+shared), and OAuth sign-in for connectors.
 
 ---
 

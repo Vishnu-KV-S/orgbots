@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from runtime.api.bots import _bot_or_404, _computer_call, _manager, _organization, _relay, _uow
+from runtime.domain.members import computer_profile
 from runtime.domain.skills import SkillBody, SkillError, render_recording, slug
 from runtime.org.marketplace import SKILLS, catalog_skill
 from runtime.org.skills import SkillService
@@ -198,13 +199,18 @@ class StopBody(BaseModel):
 
 @teach_router.get("/{bot_id}/teach")
 async def teaching(bot_id: UUID, request: Request) -> dict[str, Any]:
-    await _bot_or_404(request, bot_id)
+    bot = await _bot_or_404(request, bot_id)
     async with _uow(request)() as uow:
         live = await uow.skills.live_recording(bot_id)
     if live is None:
         return {"recording": None}
     progress = await _computer_call(
-        request, "GET", f"/screens/{bot_id}/recording", quiet=True, timeout_s=5.0
+        request,
+        "GET",
+        f"/screens/{bot_id}/recording",
+        quiet=True,
+        timeout_s=5.0,
+        profile=computer_profile(bot),
     )
     status_ = progress.json() if progress is not None and progress.status_code < 400 else {}
     return {"recording": _recording_view(live), "computer": status_}
@@ -218,7 +224,11 @@ async def start_teaching(bot_id: UUID, body: TeachBody, request: Request) -> dic
             raise HTTPException(status_code=409, detail="a demonstration is already recording")
     _relay(
         await _computer_call(
-            request, "POST", f"/screens/{bot_id}/recording", json={"action": "start"}
+            request,
+            "POST",
+            f"/screens/{bot_id}/recording",
+            json={"action": "start"},
+            profile=computer_profile(bot),
         )
     )
     recording_id = uuid.uuid4()
@@ -252,6 +262,7 @@ async def stop_teaching(bot_id: UUID, body: StopBody, request: Request) -> dict[
         f"/screens/{bot_id}/recording",
         json={"action": "stop", "hand_back": True},
         quiet=True,
+        profile=computer_profile(bot),
     )
     steps: list[dict[str, Any]] = []
     if stopped is not None and stopped.status_code < 400:

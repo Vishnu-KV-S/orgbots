@@ -69,6 +69,12 @@ _TRUNCATE_ORDER = [
     "bot_rules",
     "bot_messages",
     "bots",
+    # Members (052): referenced by bots, groups and devices, so after them.
+    "oidc_states",
+    "sso_configs",
+    "member_links",
+    "member_sessions",
+    "members",
     # M4: `apply_events` references `apply_plans`, and both reference
     # organizations. Listed explicitly even though the `organizations CASCADE` below
     # would reach them, because that is the point of this list — adding a table forces

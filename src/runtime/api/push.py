@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from runtime.api.bots import _organization, _settings, _uow
+from runtime.api.identity import current_member
 from runtime.gateway.push import PushSender
 from runtime.gateway.vault import VaultUnavailableError
 
@@ -59,6 +60,7 @@ async def push_key(request: Request) -> dict[str, Any]:
 @router.post("/subscribe", status_code=status.HTTP_201_CREATED)
 async def subscribe(body: Subscription, request: Request) -> dict[str, Any]:
     org = await _organization(request)
+    member = await current_member(request)
     async with _uow(request).transaction() as uow:
         await uow.push.subscribe(
             org,
@@ -66,6 +68,7 @@ async def subscribe(body: Subscription, request: Request) -> dict[str, Any]:
             body.keys.p256dh,
             body.keys.auth,
             body.device or request.headers.get("user-agent", ""),
+            member_id=member.id if member else None,
         )
     return {"subscribed": True}
 
@@ -81,6 +84,7 @@ async def unsubscribe(body: Unsubscribe, request: Request) -> dict[str, Any]:
 @router.post("/test", status_code=status.HTTP_202_ACCEPTED)
 async def test_push(request: Request) -> dict[str, Any]:
     org = await _organization(request)
+    member = await current_member(request)
     async with _uow(request).transaction() as uow:
         await uow.push.notify(
             uuid.uuid4(),
@@ -90,5 +94,6 @@ async def test_push(request: Request) -> dict[str, Any]:
             title="Notifications are on",
             body="Your bots will tell you here when they reply or need you.",
             url="/",
+            member_id=member.id if member else None,
         )
     return {"queued": True}

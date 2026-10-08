@@ -57,6 +57,7 @@ from runtime.domain.bots import (
 from runtime.domain.enums import ActorKind, WorkClass
 from runtime.domain.hashing import canonical_hash
 from runtime.domain.ids import ActorId, CorrelationId, OrganizationId
+from runtime.domain.members import computer_profile
 from runtime.domain.specs import ActorSpec, Ceilings, ModelProfile, ModelProfiles
 from runtime.domain.vault import CredentialField, VaultOption, site_of
 from runtime.domain.vault import request_id as credential_request_id
@@ -315,6 +316,13 @@ async def refresh_bot_actor(
     )
     await uow.actors.set_active_version(current.actor_id, version_id)
     return version
+
+
+async def _audience(uow: UnitOfWork, bot: Any) -> uuid.UUID | None:
+    """Whose devices hear about a bot: whoever last wrote to it (a team bot's
+    conversation is shared), else its owner; None — every device — without members."""
+    speaker = await uow.bots.last_speaker(bot.id)
+    return speaker or getattr(bot, "owner_member_id", None)
 
 
 class BotService:
@@ -608,6 +616,7 @@ class BotService:
                     title=f"{bot.name} needs your approval",
                     body=" ".join(thought.split())[:240],
                     url=f"/?bot={bot_id}",
+                    member_id=await _audience(uow, bot),
                 )
         return pid
 
@@ -725,6 +734,7 @@ class BotService:
                 title=title,
                 body=" ".join(body.split())[:240],
                 url=url or f"/?bot={bot.id}",
+                member_id=await _audience(uow, bot),
             )
 
     async def end_turn(self, bot_id: uuid.UUID, *, needs_attention: bool = False) -> None:
@@ -742,7 +752,9 @@ class BotService:
 
     async def vault_options(self, bot: BotRow, host: str) -> list[VaultOption]:
         async with self._uow() as uow:
-            rows = await uow.vault.options(bot.organization_id, site_of(host), bot.id)
+            rows = await uow.vault.options(
+                bot.organization_id, site_of(host), bot.id, computer_profile(bot)
+            )
         return [vault_option(r) for r in rows]
 
     async def request_credentials(
@@ -811,6 +823,7 @@ class BotService:
                 title=f"{bot.name} needs you to sign in",
                 body=f"{site_of(host)} — {purpose.replace('_', ' ')}",
                 url=f"/?bot={bot.id}",
+                member_id=await _audience(uow, bot),
             )
         return rid
 

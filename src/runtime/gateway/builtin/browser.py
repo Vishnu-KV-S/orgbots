@@ -47,6 +47,7 @@ from pydantic import BaseModel, Field
 from runtime.domain.enums import BlastRadius, RecoveryPolicy
 from runtime.domain.errors import TransientFault
 from runtime.domain.vault import PASSWORD_KINDS, lookup
+from runtime.gateway.builtin.profiles import profile_of, run_bot
 from runtime.gateway.tools import EffectCapabilities, ToolContext, ToolDef, ToolRegistry
 from runtime.gateway.vault import Vault, VaultRefusedError, VaultUnavailableError
 from runtime.persistence.uow import UnitOfWorkFactory
@@ -84,6 +85,10 @@ class BrowserResult(BaseModel):
     """Base64 JPEG of the viewport, masked, when one was asked for."""
 
 
+class ScreenRefusedError(Exception):
+    """A run asked for a screen that is not its own bot's."""
+
+
 def _result(body: dict[str, Any], *, ok: bool = True, error: str | None = None) -> BrowserResult:
     snap = body.get("snapshot") or {}
     return BrowserResult(
@@ -113,12 +118,19 @@ def build(
             vault_holder.append(Vault.from_settings(uow_factory, settings))
         return vault_holder[0]
 
-    fill = _filler(base, vault)
+    async def profile(ctx: ToolContext | None, screen_id: str) -> str:
+        """The run's bot's browser profile — and a bot drives only its own screen."""
+        bot = await run_bot(uow_factory, ctx)
+        if bot is not None and str(bot.id) != screen_id:
+            raise ScreenRefusedError("a bot can only use its own screen")
+        return profile_of(bot)
 
-    async def _post(path: str, payload: dict[str, Any]) -> httpx.Response:
+    fill = _filler(base, vault, profile)
+
+    async def _post(path: str, payload: dict[str, Any], profile: str) -> httpx.Response:
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
-                return await client.post(f"{base}{path}", json=payload)
+                return await client.post(f"{base}{path}", json=payload, params={"profile": profile})
         except httpx.TransportError as exc:
             raise TransientFault(
                 f"the computer at {base} is not reachable ({type(exc).__name__}); "
@@ -126,11 +138,15 @@ def build(
             ) from exc
 
     async def observe(ctx: ToolContext, args: Any) -> BrowserResult:
-        _ = ctx
         typed: ObserveArgs = args
+        try:
+            where = await profile(ctx, typed.screen_id)
+        except ScreenRefusedError as exc:
+            return BrowserResult(ok=False, error=str(exc))
         response = await _post(
             f"/screens/{typed.screen_id}/observe",
             {"label": typed.label, "screenshot": typed.screenshot},
+            where,
         )
         if response.status_code >= 400:
             return BrowserResult(ok=False, error=_detail(response))
@@ -140,8 +156,14 @@ def build(
         typed: ActArgs = args
         if typed.action.get("type") == "fill_credentials":
             return await fill(ctx, typed)
+        try:
+            where = await profile(ctx, typed.screen_id)
+        except ScreenRefusedError as exc:
+            return BrowserResult(ok=False, error=str(exc))
         response = await _post(
-            f"/screens/{typed.screen_id}/act", {"action": typed.action, "label": typed.label}
+            f"/screens/{typed.screen_id}/act",
+            {"action": typed.action, "label": typed.label},
+            where,
         )
         if response.status_code == 409:
             return BrowserResult(ok=False, error=_detail(response), controller="human")
@@ -177,19 +199,29 @@ def build(
     return (observe_def, observe), (act_def, act)
 
 
+async def _default_profile(ctx: ToolContext | None, screen_id: str) -> str:
+    return ""
+
+
 def _filler(
-    base: str, vault: Callable[[], Vault]
+    base: str,
+    vault: Callable[[], Vault],
+    profile: Callable[[ToolContext | None, str], Awaitable[str]] = _default_profile,
 ) -> Callable[[ToolContext | None, ActArgs], Awaitable[BrowserResult]]:
     async def fill(ctx: ToolContext | None, typed: ActArgs) -> BrowserResult:
         action = typed.action
         if ctx is None:
             return BrowserResult(ok=False, error="a fill needs a run context")
         try:
+            where = await profile(ctx, typed.screen_id)
             entries = [uuid.UUID(str(e)) for e in action.get("entries", [])]
             site, values = await vault().open(
-                uuid.UUID(ctx.organization_id), entries, bot_id=uuid.UUID(typed.screen_id)
+                uuid.UUID(ctx.organization_id),
+                entries,
+                bot_id=uuid.UUID(typed.screen_id),
+                profile=where,
             )
-        except (VaultUnavailableError, VaultRefusedError, ValueError) as exc:
+        except (VaultUnavailableError, VaultRefusedError, ScreenRefusedError, ValueError) as exc:
             return BrowserResult(ok=False, error=str(exc).splitlines()[0])
         fields: list[dict[str, Any]] = []
         missing: list[str] = []
@@ -214,6 +246,7 @@ def _filler(
             async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
                 response = await client.post(
                     f"{base}/screens/{typed.screen_id}/fill",
+                    params={"profile": where},
                     json={
                         "expect_host": site,
                         "fields": fields,

@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from runtime.api.bots import _bot_or_404, _manager, _organization, _run_status, _uow, _working
+from runtime.api.identity import current_member
 from runtime.domain.groups import MAX_MEMBERS, MIN_MEMBERS
 from runtime.org.groups import GroupError, GroupService
 from runtime.persistence.repositories.groups import GroupMessageRow, GroupRow
@@ -89,9 +90,23 @@ async def _view(
 async def _group_or_404(request: Request, group_id: UUID) -> GroupRow:
     org = await _organization(request)
     group = await _service(request).get(group_id)
-    if group is None or group.organization_id != org:
+    member = await current_member(request)
+    if (
+        group is None
+        or group.organization_id != org
+        or (member is not None and group.owner_member_id not in (None, member.id))
+    ):
         raise HTTPException(status_code=404, detail=f"no group {group_id}")
     return group
+
+
+async def _check_bots(request: Request, bots: list[UUID]) -> None:
+    """A group is its creator's, so only bots they can see may be in it."""
+    for bot_id in bots:
+        try:
+            await _bot_or_404(request, bot_id)
+        except HTTPException as exc:
+            raise HTTPException(status_code=422, detail=f"no bot {bot_id} to add") from exc
 
 
 class GroupBody(BaseModel):
@@ -119,8 +134,13 @@ class ReactBody(BaseModel):
 @router.get("")
 async def list_groups(request: Request) -> dict[str, Any]:
     org = await _organization(request)
+    member = await current_member(request)
     async with _uow(request)() as uow:
-        groups = await uow.groups.list_for(org)
+        groups = [
+            g
+            for g in await uow.groups.list_for(org)
+            if member is None or g.owner_member_id in (None, member.id)
+        ]
         last = await uow.groups.last_message_per_group(org)
     return {"groups": [await _view(request, g, last.get(g.id)) for g in groups]}
 
@@ -128,8 +148,16 @@ async def list_groups(request: Request) -> dict[str, Any]:
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_group(body: GroupBody, request: Request) -> dict[str, Any]:
     org = await _organization(request)
+    member = await current_member(request)
+    await _check_bots(request, list(body.members))
     try:
-        group = await _service(request).create(org, body.name, list(body.members), body.lead)
+        group = await _service(request).create(
+            org,
+            body.name,
+            list(body.members),
+            body.lead,
+            owner_member_id=member.id if member else None,
+        )
     except GroupError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return await _view(request, group)
@@ -143,6 +171,8 @@ async def get_group(group_id: UUID, request: Request) -> dict[str, Any]:
 @router.patch("/{group_id}")
 async def update_group(group_id: UUID, body: GroupPatch, request: Request) -> dict[str, Any]:
     group = await _group_or_404(request, group_id)
+    if body.members is not None:
+        await _check_bots(request, list(body.members))
     try:
         updated = await _service(request).update(
             group,

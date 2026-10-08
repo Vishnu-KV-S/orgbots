@@ -11,7 +11,9 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-_GROUP = "id, organization_id, name, lead_bot_id, unread, created_at, updated_at"
+_GROUP = (
+    "id, organization_id, name, lead_bot_id, unread, created_at, updated_at, owner_member_id"
+)
 _MESSAGE = """
     id, seq, group_id, author_kind, author_bot_id, author_name, content, payload,
     thread_root, run_id, created_at
@@ -31,6 +33,8 @@ class GroupRow:
     unread: bool
     created_at: dt.datetime
     updated_at: dt.datetime
+    owner_member_id: uuid.UUID | None = None
+    """The member whose group this is (migration 052); None without members."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +81,7 @@ def _group(r: Any) -> GroupRow:
         unread=r.unread,
         created_at=r.created_at,
         updated_at=r.updated_at,
+        owner_member_id=r.owner_member_id,
     )
 
 
@@ -113,13 +118,20 @@ class GroupRepository:
         name: str,
         members: list[uuid.UUID],
         lead: uuid.UUID | None,
+        owner_member_id: uuid.UUID | None = None,
     ) -> None:
         await self._s.execute(
             text(
-                "INSERT INTO bot_groups (id, organization_id, name, lead_bot_id) "
-                "VALUES (:id, :org, :name, :lead)"
+                "INSERT INTO bot_groups (id, organization_id, name, lead_bot_id, owner_member_id) "
+                "VALUES (:id, :org, :name, :lead, :owner)"
             ),
-            {"id": group_id, "org": organization_id, "name": name, "lead": lead},
+            {
+                "id": group_id,
+                "org": organization_id,
+                "name": name,
+                "lead": lead,
+                "owner": owner_member_id,
+            },
         )
         await self.set_members(group_id, members)
 

@@ -29,7 +29,9 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
+from runtime.api.access import bot_access, group_access
 from runtime.api.attachments import router as attachments_router
+from runtime.api.auth import router as auth_router
 from runtime.api.bots import computer_router as bots_computer_router
 from runtime.api.bots import router as bots_router
 from runtime.api.bots import vault_router as bots_vault_router
@@ -39,6 +41,8 @@ from runtime.api.control import router as control_router
 from runtime.api.errors import http_errors
 from runtime.api.groups import reactions_router
 from runtime.api.groups import router as groups_router
+from runtime.api.identity import authenticate, require_admin
+from runtime.api.members import router as members_router
 from runtime.api.observe import router as observe_router
 from runtime.api.push import router as push_router
 from runtime.api.routines import hooks_router
@@ -115,49 +119,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is not None:
         app.state.settings = settings
 
+    # Who may reach what (`api.identity`, `api.access`). Without members the first two
+    # admit everyone and the operator console stays open, as it always was; the bot
+    # guard's organization check applies either way. With members, every router below
+    # but `/v1/auth` and `/v1/hooks` needs a session — mounted here, so a route nobody
+    # remembered to guard is guarded anyway.
+    signed_in = [Depends(authenticate)]
+    bot_routes = [Depends(authenticate), Depends(bot_access)]
+    group_routes = [Depends(authenticate), Depends(group_access)]
+    admins = [Depends(require_admin)]
+    # Signing in and out, and the organization's people.
+    app.include_router(auth_router)
+    app.include_router(members_router, dependencies=signed_in)
+
     # Read-only. Mounted here rather than kept in a second process so that the
     # viewer reads through the same session factory and the same connection pool
     # the control surface does — a second process would be a second answer to
     # "what is the state right now".
-    app.include_router(observe_router)
+    app.include_router(observe_router, dependencies=admins)
 
     # Write. Mounted beside the reader rather than folded into it, because the whole
     # value of `observe.py`'s first rule — *every statement here is a SELECT* — is that
     # it is checkable by opening the file. A control endpoint added to that module
     # would end that, and `test_api_observe.py`'s "the surface is read-only" test would
     # start being about a convention instead of about a fact.
-    app.include_router(control_router)
+    app.include_router(control_router, dependencies=admins)
 
     # Bots: the chat surface and its computer proxy. Writes go through `BotManager`, and
     # every run it creates goes through `RunService.start_run()` like the rest.
-    app.include_router(bots_router)
-    app.include_router(bots_computer_router)
-    app.include_router(bots_vault_router)
+    app.include_router(bots_router, dependencies=bot_routes)
+    app.include_router(bots_computer_router, dependencies=signed_in)
+    app.include_router(bots_vault_router, dependencies=signed_in)
     # Bytes into a team's drive (attachments, uploads) and back out (`/raw`).
-    app.include_router(attachments_router)
+    app.include_router(attachments_router, dependencies=bot_routes)
     # The computer's shared /workspace and the person's sandboxed shell.
-    app.include_router(workspace_router)
+    app.include_router(workspace_router, dependencies=signed_in)
     # Group chats between the person and their bots, and reactions on any message.
-    app.include_router(groups_router)
-    app.include_router(reactions_router)
+    app.include_router(groups_router, dependencies=group_routes)
+    app.include_router(reactions_router, dependencies=bot_routes)
     # Connectors: MCP servers the organization connected, and the marketplace's.
-    app.include_router(connectors_router)
-    app.include_router(connectors_market_router)
+    app.include_router(connectors_router, dependencies=signed_in)
+    app.include_router(connectors_market_router, dependencies=signed_in)
     # Push notifications to the person's devices.
-    app.include_router(push_router)
+    app.include_router(push_router, dependencies=signed_in)
     # Bot templates: export, share links, and making a bot from one.
-    app.include_router(templates_bots_router)
-    app.include_router(templates_router)
+    app.include_router(templates_bots_router, dependencies=bot_routes)
+    app.include_router(templates_router, dependencies=signed_in)
     # Routines: a bot's own (`/v1/bots/{id}/routines`, behind the UI's proxy), and the
     # webhook that starts an event routine (`/v1/hooks`, which is not — it is called
     # from outside, and authenticated by its token and the sender's signature).
-    app.include_router(routines_router)
+    app.include_router(routines_router, dependencies=bot_routes)
     app.include_router(hooks_router)
     # Skills: the organization's library, the packaged ones, and teaching by
     # demonstration (`/v1/bots/{id}/teach`), which drives the computer's recorder.
-    app.include_router(skills_router)
-    app.include_router(marketplace_router)
-    app.include_router(teach_router)
+    app.include_router(skills_router, dependencies=signed_in)
+    app.include_router(marketplace_router, dependencies=signed_in)
+    app.include_router(teach_router, dependencies=bot_routes)
 
     def uow_factory(request: Request) -> UnitOfWorkFactory:
         factory: UnitOfWorkFactory = request.app.state.uow

@@ -38,6 +38,9 @@ export interface Bot {
   appearance: Partial<import("@/features/bots/avatar/appearance").Appearance>;
   /** A second model checks this bot's risky steps against what was asked. */
   auto_review: boolean;
+  /** With members: whose bot this is (null: everyone's), and whether it is shared. */
+  owner_member_id: string | null;
+  visibility: "private" | "team";
   created_at: string;
   updated_at: string;
   last_message: BotMessage | null;
@@ -186,6 +189,8 @@ export interface BotMessage {
     status?: string;
     from_bot_id?: string;
     from_bot_name?: string;
+    /** Which member wrote a user message, when the runtime has members. */
+    from?: { member_id: string; name: string };
     outcome?: string;
     changed?: string[];
     found?: number;
@@ -287,7 +292,15 @@ export type BotDraft = Pick<Bot, "name" | "label" | "description" | "avatar"> & 
 export type BotPatch = Partial<
   Pick<
     Bot,
-    "name" | "label" | "description" | "avatar" | "pinned" | "hidden" | "brief_locked" | "auto_review"
+    | "name"
+    | "label"
+    | "description"
+    | "avatar"
+    | "pinned"
+    | "hidden"
+    | "brief_locked"
+    | "auto_review"
+    | "visibility"
   >
 > & {
   brief?: BotBrief;
@@ -386,14 +399,21 @@ export const cancelCredentials = (id: string, requestId: string) =>
 
 export const VAULT_BASE = "/rt/v1/vault";
 
-export const listVault = (signal?: AbortSignal) =>
-  request<{ entries: VaultEntry[] }>(VAULT_BASE, { signal });
+/** `botId` picks that bot's browser profile — with members, a team bot's logins are its
+ * own; without it, the caller's. */
+const forBot = (botId?: string) => (botId ? `bot_id=${botId}` : "");
 
-export const setVaultAutoUse = (entryId: string, autoUse: boolean) =>
-  request<unknown>(`${VAULT_BASE}/${entryId}`, json("PATCH", { auto_use: autoUse }));
+export const listVault = (signal?: AbortSignal, botId?: string) =>
+  request<{ entries: VaultEntry[] }>(`${VAULT_BASE}?${forBot(botId)}`, { signal });
 
-export const deleteVaultEntry = (entryId: string) =>
-  request<unknown>(`${VAULT_BASE}/${entryId}`, { method: "DELETE" });
+export const setVaultAutoUse = (entryId: string, autoUse: boolean, botId?: string) =>
+  request<unknown>(
+    `${VAULT_BASE}/${entryId}?${forBot(botId)}`,
+    json("PATCH", { auto_use: autoUse }),
+  );
+
+export const deleteVaultEntry = (entryId: string, botId?: string) =>
+  request<unknown>(`${VAULT_BASE}/${entryId}?${forBot(botId)}`, { method: "DELETE" });
 
 export const listRules = (id: string, signal?: AbortSignal) =>
   request<{ rules: BotRule[] }>(`${BOTS_BASE}/${id}/rules`, { signal });
@@ -809,18 +829,18 @@ export interface CommandResult {
 }
 
 /** The bots' shared /workspace on the computer. */
-export const listWorkspace = (path = "/workspace", signal?: AbortSignal) =>
+export const listWorkspace = (path = "/workspace", signal?: AbortSignal, botId?: string) =>
   request<{ path: string; entries: WorkspaceEntry[] }>(
-    `${COMPUTER_BASE}/workspace?path=${encodeURIComponent(path)}`,
+    `${COMPUTER_BASE}/workspace?path=${encodeURIComponent(path)}&${forBot(botId)}`,
     { signal },
   );
 
-export const workspaceFileUrl = (path: string) =>
-  `${COMPUTER_BASE}/workspace/file?path=${encodeURIComponent(path)}`;
+export const workspaceFileUrl = (path: string, botId?: string) =>
+  `${COMPUTER_BASE}/workspace/file?path=${encodeURIComponent(path)}&${forBot(botId)}`;
 
-export const uploadToWorkspace = async (folder: string, file: File) =>
+export const uploadToWorkspace = async (folder: string, file: File, botId?: string) =>
   request<{ path: string; bytes: number }>(
-    `${COMPUTER_BASE}/workspace/file`,
+    `${COMPUTER_BASE}/workspace/file?${forBot(botId)}`,
     json("POST", {
       path: `${folder.replace(/\/+$/, "")}/${file.name}`,
       data: await new Promise<string>((resolve, reject) => {
@@ -833,9 +853,9 @@ export const uploadToWorkspace = async (folder: string, file: File) =>
   );
 
 /** The person's own command — always in the sandbox, never on this machine. */
-export const runSandboxCommand = (command: string, timeoutS = 60) =>
+export const runSandboxCommand = (command: string, timeoutS = 60, botId?: string) =>
   request<CommandResult>(
-    `${COMPUTER_BASE}/terminal`,
+    `${COMPUTER_BASE}/terminal?${forBot(botId)}`,
     json("POST", { command, timeout_s: timeoutS }),
   );
 
@@ -1088,3 +1108,107 @@ export const importTemplate = (
   source: { template: BotTemplate } | { token: string },
   options: { name?: string; keep_allows: boolean },
 ) => request<Bot>(`${TEMPLATES_BASE}/import`, json("POST", { ...source, ...options }));
+
+// --- members and sign-in ----------------------------------------------------------------
+
+export const AUTH_BASE = "/rt/v1/auth";
+export const MEMBERS_BASE = "/rt/v1/members";
+
+export type Role = "owner" | "admin" | "member";
+
+export interface Me {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  organization_id: string;
+}
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  active: boolean;
+  created_at: string;
+  last_seen_at: string | null;
+}
+
+export interface Invite {
+  id: string;
+  email: string;
+  role: Role;
+  created_at: string;
+  expires_at: string;
+  link?: string;
+}
+
+export interface SSOConfig {
+  configured: boolean;
+  callback_url: string;
+  issuer?: string;
+  client_id?: string;
+  has_secret?: boolean;
+  domains?: string[];
+  auto_join?: boolean;
+  enabled?: boolean;
+}
+
+export const authMe = (signal?: AbortSignal) =>
+  request<{ mode: "none" | "members"; member: Me | null }>(`${AUTH_BASE}/me`, { signal });
+
+export const linkInfo = (token: string) =>
+  request<{
+    kind: "invite" | "sign_in";
+    email: string;
+    role: Role;
+    organization: string;
+    joining: boolean;
+  }>(`${AUTH_BASE}/links/${encodeURIComponent(token)}`, {});
+
+export const acceptLink = (token: string, name: string) =>
+  request<{ member: Me }>(
+    `${AUTH_BASE}/links/${encodeURIComponent(token)}`,
+    json("POST", { name }),
+  );
+
+export const startSSO = (email: string, returnTo: string) =>
+  request<{ redirect_url: string }>(
+    `${AUTH_BASE}/sso/start`,
+    json("POST", { email, return_to: returnTo }),
+  );
+
+export const signOut = () =>
+  request<{ signed_out: boolean }>(`${AUTH_BASE}/sign-out`, json("POST", {}));
+
+export const listMembers = (signal?: AbortSignal) =>
+  request<{ members: TeamMember[]; me: string }>(MEMBERS_BASE, { signal });
+
+export const inviteMember = (email: string, role: Role) =>
+  request<Invite>(`${MEMBERS_BASE}/invites`, json("POST", { email, role }));
+
+export const listInvites = (signal?: AbortSignal) =>
+  request<{ invites: Invite[] }>(`${MEMBERS_BASE}/invites`, { signal });
+
+export const revokeInvite = (id: string) =>
+  request<{ revoked: string }>(`${MEMBERS_BASE}/invites/${id}`, { method: "DELETE" });
+
+export const updateMember = (id: string, change: { role?: Role; active?: boolean }) =>
+  request<TeamMember>(`${MEMBERS_BASE}/${id}`, json("PATCH", change));
+
+export const memberSignInLink = (id: string) =>
+  request<{ link: string }>(`${MEMBERS_BASE}/${id}/sign-in-link`, json("POST", {}));
+
+export const getSSO = (signal?: AbortSignal) =>
+  request<SSOConfig>(`${MEMBERS_BASE}/sso`, { signal });
+
+export const saveSSO = (config: {
+  issuer: string;
+  client_id: string;
+  client_secret?: string;
+  domains: string[];
+  auto_join: boolean;
+  enabled: boolean;
+}) => request<SSOConfig>(`${MEMBERS_BASE}/sso`, json("PUT", config));
+
+export const deleteSSO = () => request<SSOConfig>(`${MEMBERS_BASE}/sso`, { method: "DELETE" });

@@ -53,6 +53,13 @@ async function toError(response: Response): Promise<ApiError> {
 
 export async function request<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
+  if (response.status === 401 && typeof window !== "undefined" && !url.includes("/v1/auth/")) {
+    // The runtime has members and this browser's session ended (or never began).
+    if (window.location.pathname !== "/signin") {
+      const back = window.location.pathname + window.location.search;
+      window.location.assign(`/signin?return_to=${encodeURIComponent(back)}`);
+    }
+  }
   if (!response.ok) throw await toError(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;

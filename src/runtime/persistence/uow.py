@@ -34,6 +34,7 @@ from runtime.persistence.repositories.files import TeamFileRepository
 from runtime.persistence.repositories.groups import GroupRepository
 from runtime.persistence.repositories.inbox import InboxRepository
 from runtime.persistence.repositories.killswitch import KillSwitchRepository
+from runtime.persistence.repositories.members import MemberRepository
 from runtime.persistence.repositories.memory import (
     ContextTraceRepository,
     EntityRepository,
@@ -142,6 +143,7 @@ class UnitOfWork:
         # notification that tells the person about it are one transaction.
         self.push = PushRepository(session)
         self.template_shares = TemplateShareRepository(session)
+        self.members = MemberRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

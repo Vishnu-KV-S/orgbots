@@ -28,7 +28,9 @@ from pydantic import BaseModel, Field
 
 from runtime.domain.enums import BlastRadius, RecoveryPolicy
 from runtime.domain.errors import TransientFault
+from runtime.gateway.builtin.profiles import profile_of, run_bot
 from runtime.gateway.tools import EffectCapabilities, ToolContext, ToolDef, ToolRegistry
+from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.settings import Settings
 
 MAX_COMMAND_S = 300
@@ -89,7 +91,9 @@ def _detail(response: httpx.Response) -> str:
     return str(detail or f"computer answered {response.status_code}")
 
 
-def build(settings: Settings) -> list[tuple[ToolDef, Any]]:
+def build(
+    settings: Settings, uow_factory: UnitOfWorkFactory | None = None
+) -> list[tuple[ToolDef, Any]]:
     base = settings.computer_url.rstrip("/")
 
     async def _call(method: str, path: str, *, wait_s: float, **kwargs: Any) -> httpx.Response:
@@ -103,13 +107,25 @@ def build(settings: Settings) -> list[tuple[ToolDef, Any]]:
             ) from exc
 
     async def run(ctx: ToolContext, args: Any) -> RunResult:
-        _ = ctx
         typed: RunArgs = args
+        bot = await run_bot(uow_factory, ctx)
+        mode = "local" if typed.local else "sandbox"
+        if bot is not None and str(bot.id) != typed.screen_id:
+            return RunResult(ok=False, error="a bot can only use its own terminal", mode=mode)
+        if typed.local and bot is not None and bot.owner_member_id is not None:
+            # "This computer" is the machine the runtime runs on — shared by every member.
+            # A member's bot runs commands in its own sandbox and workspace instead.
+            return RunResult(
+                ok=False,
+                error="running commands on the server is off for organizations with members; "
+                "use the sandbox",
+                mode=mode,
+            )
         response = await _call(
             "POST",
             "/terminal/run",
             wait_s=typed.timeout_s + 15,
-            json=typed.model_dump(),
+            json={**typed.model_dump(), "profile": profile_of(bot)},
         )
         if response.status_code >= 400:
             return RunResult(
@@ -118,9 +134,11 @@ def build(settings: Settings) -> list[tuple[ToolDef, Any]]:
         return RunResult.model_validate(response.json())
 
     async def read(ctx: ToolContext, args: Any) -> ReadResult:
-        _ = ctx
         typed: ReadArgs = args
-        response = await _call("GET", "/workspace/file", wait_s=60, params={"path": typed.path})
+        where = profile_of(await run_bot(uow_factory, ctx))
+        response = await _call(
+            "GET", "/workspace/file", wait_s=60, params={"path": typed.path, "profile": where}
+        )
         if response.status_code >= 400:
             return ReadResult(ok=False, error=_detail(response), path=typed.path)
         return ReadResult(
@@ -131,9 +149,15 @@ def build(settings: Settings) -> list[tuple[ToolDef, Any]]:
         )
 
     async def write(ctx: ToolContext, args: Any) -> WriteResult:
-        _ = ctx
         typed: WriteArgs = args
-        response = await _call("POST", "/workspace/file", wait_s=60, json=typed.model_dump())
+        where = profile_of(await run_bot(uow_factory, ctx))
+        response = await _call(
+            "POST",
+            "/workspace/file",
+            wait_s=60,
+            json=typed.model_dump(),
+            params={"profile": where},
+        )
         if response.status_code >= 400:
             return WriteResult(ok=False, error=_detail(response), path=typed.path)
         body = response.json()
@@ -187,6 +211,8 @@ def build(settings: Settings) -> list[tuple[ToolDef, Any]]:
     ]
 
 
-def register(registry: ToolRegistry, settings: Settings) -> None:
-    for definition, fn in build(settings):
+def register(
+    registry: ToolRegistry, settings: Settings, uow_factory: UnitOfWorkFactory | None = None
+) -> None:
+    for definition, fn in build(settings, uow_factory):
         registry.register(definition, fn)

@@ -370,6 +370,20 @@ class Settings(BaseSettings):
     show an event routine's webhook URL; unset, the URL is built from the request, which
     is right for a sender on the same machine and wrong for GitHub or Slack."""
 
+    auth_mode: Literal["none", "members"] = "none"
+    """Who may use the bots. `none` (the default) is one person and no sign-in: whoever
+    reaches the API is them, and the browser names its organization — right for a
+    runtime on your own machine, and how it has always worked. `members` requires every
+    request to the bot surface to come from a signed-in member (`domain.members`), takes
+    the organization from them, and holds each to their role and to whose bots are
+    whose. The operator console (`/v1/control`, `/v1/observe`) then needs an admin.
+    Create the first owner with `python -m runtime.cli members add-owner`."""
+
+    ui_url: str = "http://localhost:3000"
+    """Where people open the UI. Sign-in links and the single sign-on redirect point
+    here (`{ui_url}/rt/v1/auth/sso/callback` is what to register with the identity
+    provider). An https address also makes the session cookie `Secure`."""
+
     push_contact: str = "mailto:bots@localhost"
     """Who runs this runtime, for the push services (Web Push's VAPID `sub` claim). Some
     services reject a push without one; set a real `mailto:` or `https:` address."""
