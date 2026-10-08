@@ -108,6 +108,16 @@ function WorkBlock({
                   )}
                   {s.payload.note && <div className="why">“{s.payload.note}”</div>}
                   {s.payload.url && <div className="where">{s.payload.url}</div>}
+                  {s.payload.output && (
+                    <pre className="cmd-out">
+                      {s.payload.timed_out
+                        ? "(timed out) "
+                        : s.payload.exit_code !== undefined && s.payload.exit_code !== 0
+                          ? `(exit ${s.payload.exit_code}) `
+                          : ""}
+                      {s.payload.output}
+                    </pre>
+                  )}
                   {s.payload.schedule && (
                     <div className="where">
                       {s.payload.schedule}

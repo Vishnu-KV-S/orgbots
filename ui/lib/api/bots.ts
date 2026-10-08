@@ -156,6 +156,8 @@ export interface BotAction {
   to?: string;
   /** save_routine / delete_routine: the routine's name. */
   name?: string;
+  /** run_command: on the person's own computer rather than the sandbox. */
+  local?: boolean;
 }
 
 export interface BotMessage {
@@ -202,6 +204,11 @@ export interface BotMessage {
     recording_id?: string;
     steps?: number;
     teach?: "started" | "cancelled";
+    /** run_command's result: the tail of what it printed. */
+    output?: string;
+    exit_code?: number | null;
+    mode?: "sandbox" | "local";
+    timed_out?: boolean;
     /** A message a routine sent (role "user"), and save_routine's result. */
     routine?: string;
     routine_id?: string;
@@ -228,7 +235,8 @@ export interface BotRule {
   id: string;
   action_type: string;
   host: string;
-  decision: "ask" | "allow";
+  /** "deny" is never allow: the step is refused, not asked about. */
+  decision: "ask" | "allow" | "deny";
   created_at: string;
 }
 
@@ -748,5 +756,59 @@ export const stopTeaching = (botId: string, cancel = false) =>
   request<{ status: "stopped" | "cancelled"; steps: number; run_id?: string | null }>(
     `${BOTS_BASE}/${botId}/teach/stop`,
     json("POST", { cancel }),
+  );
+
+// --- the computer's workspace and terminal ---------------------------------------------
+
+export interface WorkspaceEntry {
+  name: string;
+  /** Always starts with /workspace. */
+  path: string;
+  folder: boolean;
+  link?: boolean;
+  bytes: number;
+  modified: number;
+}
+
+export interface CommandResult {
+  ok: boolean;
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  timed_out: boolean;
+  seconds: number;
+  mode: "sandbox" | "local";
+}
+
+/** The bots' shared /workspace on the computer. */
+export const listWorkspace = (path = "/workspace", signal?: AbortSignal) =>
+  request<{ path: string; entries: WorkspaceEntry[] }>(
+    `${COMPUTER_BASE}/workspace?path=${encodeURIComponent(path)}`,
+    { signal },
+  );
+
+export const workspaceFileUrl = (path: string) =>
+  `${COMPUTER_BASE}/workspace/file?path=${encodeURIComponent(path)}`;
+
+export const uploadToWorkspace = async (folder: string, file: File) =>
+  request<{ path: string; bytes: number }>(
+    `${COMPUTER_BASE}/workspace/file`,
+    json("POST", {
+      path: `${folder.replace(/\/+$/, "")}/${file.name}`,
+      data: await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+        reader.onerror = () => reject(reader.error ?? new Error(`could not read ${file.name}`));
+        reader.readAsDataURL(file);
+      }),
+    }),
+  );
+
+/** The person's own command — always in the sandbox, never on this machine. */
+export const runSandboxCommand = (command: string, timeoutS = 60) =>
+  request<CommandResult>(
+    `${COMPUTER_BASE}/terminal`,
+    json("POST", { command, timeout_s: timeoutS }),
   );
 

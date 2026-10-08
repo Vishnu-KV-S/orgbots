@@ -2423,3 +2423,114 @@ button.frow:hover {
   margin: 8px 0;
 }
 
+/* --- terminal and workspace ------------------------------------------------------------ */
+
+.rule .decision.deny {
+  background: var(--failed);
+  color: var(--bg);
+}
+
+.cmd-out {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+}
+
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg-panel);
+}
+
+.seg-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.seg-btn.on {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.ws-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-family: var(--mono);
+  margin-bottom: 8px;
+}
+
+.ws-list {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  max-height: 260px;
+  overflow: auto;
+}
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ws-row:hover {
+  background: var(--bg-hover);
+}
+
+.ws-row .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-ico {
+  width: 12px;
+  color: var(--text-faint);
+}
+
+.ws-shell {
+  margin-top: 12px;
+}
+
+.ws-cmd {
+  margin-bottom: 8px;
+}
+
+.ws-prompt {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
