@@ -127,7 +127,7 @@ function Looks({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
   return (
     <section className="dsec">
       <h3>Appearance</h3>
-      <Designer value={look} onChange={setLook} previewSize={170} />
+      <Designer value={look} onChange={setLook} previewSize={240} />
       {save.error && <ErrorNotice>{save.error}</ErrorNotice>}
       <div className="form-actions" style={{ marginTop: 10 }}>
         <button type="button" className="pbtn" disabled={!dirty} onClick={() => setLook(saved)}>

@@ -211,7 +211,7 @@ export function BotFace({
     return <FlatFace appearance={appearance} size={size} className={className} />;
   }
   const camera: [number, number, number] =
-    framing === "head" ? [0, 0.1, 2.75] : level === "high" ? [0, 0.3, 4.0] : [0, 0.1, 2.9];
+    framing === "head" ? [0, 0.1, 2.75] : level === "high" ? [0, 0.22, 3.1] : [0, 0.1, 2.9];
   const scene = (
     <>
       <PerspectiveCamera

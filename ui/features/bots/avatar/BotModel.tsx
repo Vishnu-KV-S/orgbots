@@ -7,7 +7,11 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { Appearance, Shape } from "./appearance";
 import type { Mood } from "./mood";
+import { applyFace, cloneFace, easeFace, screenMaterial, targetFace } from "./eyes";
 import { textures } from "./textures";
+
+/** Distance between LEDs on the display, in body units. */
+const LED_PITCH = 0.0135;
 
 /**
  * One bot, built like a product rather than a cartoon.
@@ -30,6 +34,8 @@ import { textures } from "./textures";
 interface Layout {
   /** Where the eyes sit on a flat screen. */
   eyeZ: number;
+  /** The screen mesh's vertical offset in the body; eye coordinates are relative to it. */
+  screenY: number;
   /** A curved screen's radius; `sphere` if it curves vertically too. */
   radius?: number;
   sphere?: boolean;
@@ -45,16 +51,26 @@ const LAYOUT: Record<Shape, Layout> = {
     eyeZ: 0,
     radius: 0.603,
     sphere: true,
+    screenY: 0,
     eyeY: 0.02,
     eyeX: 0.165,
     topY: 0.6,
     halfWidth: 0.6,
     floorY: -0.62,
   },
-  cube: { eyeZ: 0.516, eyeY: -0.02, eyeX: 0.19, topY: 0.475, halfWidth: 0.55, floorY: -0.5 },
+  cube: {
+    screenY: -0.02,
+    eyeZ: 0.516,
+    eyeY: -0.02,
+    eyeX: 0.19,
+    topY: 0.475,
+    halfWidth: 0.55,
+    floorY: -0.5,
+  },
   capsule: {
     eyeZ: 0,
     radius: 0.423,
+    screenY: 0.13,
     eyeY: 0.13,
     eyeX: 0.13,
     topY: 0.67,
@@ -64,13 +80,14 @@ const LAYOUT: Record<Shape, Layout> = {
   pod: {
     eyeZ: 0,
     radius: 0.552,
+    screenY: -0.12,
     eyeY: -0.12,
     eyeX: 0.17,
     topY: 0.6,
     halfWidth: 0.56,
     floorY: -0.46,
   },
-  tv: { eyeZ: 0.416, eyeY: 0.0, eyeX: 0.2, topY: 0.46, halfWidth: 0.6, floorY: -0.64 },
+  tv: { screenY: 0, eyeZ: 0.416, eyeY: 0.0, eyeX: 0.2, topY: 0.46, halfWidth: 0.6, floorY: -0.64 },
 };
 
 const ERROR_LED = new THREE.Color("#ff3b30");
@@ -83,14 +100,8 @@ interface Pose {
   rotZ: number;
   sx: number;
   sy: number;
-  lookX: number;
-  lookY: number;
-  /** 1 open, 0 shut. */
-  open: number;
   /** LED brightness multiplier. */
   glow: number;
-  left: number;
-  right: number;
   spin: boolean;
 }
 
@@ -102,16 +113,9 @@ const BASE: Pose = {
   rotZ: 0,
   sx: 1,
   sy: 1,
-  lookX: 0,
-  lookY: 0,
-  open: 1,
   glow: 1,
-  left: 1,
-  right: 1,
   spin: false,
 };
-
-const blinkAt = (t: number, every: number) => (t % every < 0.12 ? 0.06 : 1);
 
 /** Movements are small and weighted — a heavy object hovering, not a balloon. */
 function pose(mood: Mood, t: number): Pose {
@@ -121,22 +125,15 @@ function pose(mood: Mood, t: number): Pose {
       p.y = 0.025 * Math.sin(t * 1.4);
       p.rotZ = 0.02 * Math.sin(t * 0.8);
       p.rotY = 0.16 * Math.sin(t * 0.3);
-      p.lookX = 0.03 * Math.tanh(4 * Math.sin(t * 0.42));
-      p.open = blinkAt(t, 4.1);
       break;
     case "thinking":
       p.y = 0.02 * Math.sin(t * 1.6);
       p.rotZ = 0.12 * Math.sin(t * 0.7);
-      p.lookX = 0.03 + 0.008 * Math.sin(t * 1.3);
-      p.lookY = 0.03;
       p.glow = 0.85 + 0.2 * Math.sin(t * 2.4);
-      p.open = blinkAt(t, 3.1);
       break;
     case "browsing":
       p.y = 0.015 * Math.sin(t * 2.2);
-      p.lookX = 0.05 * Math.sin(t * 1.9);
       p.rotY = 0.22 * Math.sin(t * 1.9);
-      p.open = blinkAt(t, 2.6);
       break;
     case "clicking": {
       const c = (t % 0.8) / 0.8;
@@ -145,23 +142,16 @@ function pose(mood: Mood, t: number): Pose {
       p.sx = hit ? 1.04 : 1;
       p.y = hit ? -0.03 : 0.015 * Math.sin(c * Math.PI);
       p.rotX = hit ? 0.07 : 0;
-      p.open = hit ? 0.5 : 1;
-      p.lookY = -0.02;
       break;
     }
     case "typing":
       p.x = 0.004 * Math.sin(t * 55);
       p.rotZ = 0.01 * Math.sin(t * 41);
       p.y = 0.008 * Math.sin(t * 8);
-      p.lookY = -0.03;
-      p.open = 0.55;
       break;
     case "waiting":
       p.rotZ = 0.16 + 0.03 * Math.sin(t * 2.2);
       p.y = 0.015 * Math.sin(t * 1.6);
-      p.left = 1.18;
-      p.right = 0.85;
-      p.lookY = 0.02;
       p.glow = 1 + 0.25 * Math.max(0, Math.sin(t * 3));
       break;
     case "error": {
@@ -187,8 +177,6 @@ function pose(mood: Mood, t: number): Pose {
       p.rotX = 0.1 + 0.05 * Math.sin(t * 4.5);
       p.rotY = 0.28;
       p.y = 0.01 * Math.sin(t * 4.5);
-      p.lookX = 0.04;
-      p.open = blinkAt(t, 1.6);
       break;
     case "remembering":
       p.rotX = 0.06 * Math.sin(t * 1.8);
@@ -208,15 +196,6 @@ function pose(mood: Mood, t: number): Pose {
       break;
   }
   return p;
-}
-
-type EyeKind = "pill" | "round" | "square" | "visor" | "dot" | "arc" | "x" | "line";
-
-function eyeKind(base: Appearance["eyes"], mood: Mood): EyeKind {
-  if (mood === "happy") return "arc";
-  if (mood === "error") return "x";
-  if (mood === "sleeping" || mood === "remembering" || mood === "stopped") return "line";
-  return base;
 }
 
 function useMaterials(a: Appearance, mood: Mood) {
@@ -282,11 +261,12 @@ function useMaterials(a: Appearance, mood: Mood) {
       reflectivity: 1,
       envMapIntensity: 1.4,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.4,
       depthWrite: false,
     });
-    // The display behind it: plain black. The eyes are the only light in the visor.
-    const screen = new THREE.MeshStandardMaterial({ color: "#000000", roughness: 1 });
+    // The display behind it: black, with the LED dot-matrix eyes drawn into it by a
+    // shader (`eyes.ts`). The eyes are the only light in the visor.
+    const screen = screenMaterial(a, LED_PITCH);
     // LEDs: emissive with a centre-bright falloff. Drawn after the glass
     // (transparent + renderOrder), so they read through it at full strength — a lit
     // LED dominates the cover in front of it — while the depth test still hides them
@@ -318,7 +298,7 @@ function useMaterials(a: Appearance, mood: Mood) {
       clearcoatRoughness: 0.04,
     });
     return { body, glass, screen, led, steel, seam, rubber };
-  }, [a.body, a.glow, a.finish, tex]);
+  }, [a.body, a.glow, a.finish, a.eyes, tex]);
 
   useEffect(() => () => Object.values(materials).forEach((m) => m.dispose()), [materials]);
 
@@ -327,42 +307,6 @@ function useMaterials(a: Appearance, mood: Mood) {
   }, [materials, mood, a.glow]);
 
   return materials;
-}
-
-const DEPTH = 0.012;
-const EYE_GEOMETRY = {
-  pill: new RoundedBoxGeometry(0.11, 0.19, DEPTH, 4, 0.005),
-  round: new THREE.CylinderGeometry(0.08, 0.08, DEPTH, 40).rotateX(Math.PI / 2),
-  square: new RoundedBoxGeometry(0.16, 0.14, DEPTH, 4, 0.005),
-  visor: new RoundedBoxGeometry(0.48, 0.085, DEPTH, 4, 0.005),
-  dot: new THREE.CylinderGeometry(0.048, 0.048, DEPTH, 32).rotateX(Math.PI / 2),
-  arc: new THREE.TorusGeometry(0.07, 0.018, 10, 36, Math.PI).scale(1, 1, 0.4),
-  bar: new THREE.BoxGeometry(0.15, 0.028, DEPTH),
-  line: new RoundedBoxGeometry(0.14, 0.026, DEPTH, 2, 0.005),
-};
-
-function Eye({ kind, material }: { kind: EyeKind; material: THREE.Material }) {
-  if (kind === "x") {
-    return (
-      <group>
-        <mesh
-          geometry={EYE_GEOMETRY.bar}
-          material={material}
-          rotation={[0, 0, Math.PI / 4]}
-          renderOrder={3}
-        />
-        <mesh
-          geometry={EYE_GEOMETRY.bar}
-          material={material}
-          rotation={[0, 0, -Math.PI / 4]}
-          renderOrder={3}
-        />
-      </group>
-    );
-  }
-  const geometry =
-    kind === "arc" ? EYE_GEOMETRY.arc : kind === "line" ? EYE_GEOMETRY.line : EYE_GEOMETRY[kind];
-  return <mesh geometry={geometry} material={material} renderOrder={3} />;
 }
 
 type Mats = ReturnType<typeof useMaterials>;
@@ -650,14 +594,10 @@ export function BotModel({
   const m = useMaterials(appearance, mood);
   const root = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
-  const eyes = useRef<THREE.Group>(null);
-  const leftEye = useRef<THREE.Group>(null);
-  const rightEye = useRef<THREE.Group>(null);
+  // The face being shown, eased toward the mood's target every frame.
+  const face = useRef(cloneFace(targetFace(mood, appearance.eyes, layout.eyeX, 0, phase)));
   const spin = useRef(0);
   const sway = useRef(0);
-  const kind = eyeKind(appearance.eyes, mood);
-  const single = kind === "visor" || (appearance.eyes === "visor" && kind === "line");
-
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime + phase;
     const p = pose(mood, t);
@@ -684,41 +624,11 @@ export function BotModel({
     b.scale.z = b.scale.x;
     b.scale.y += (p.sy - b.scale.y) * Math.min(1, dt * 16);
 
-    const e = eyes.current;
-    if (e) {
-      e.position.x += (p.lookX - e.position.x) * k;
-      e.position.y += (layout.eyeY + p.lookY - e.position.y) * k;
-    }
-    const blinkable =
-      kind === "pill" ||
-      kind === "round" ||
-      kind === "square" ||
-      kind === "visor" ||
-      kind === "dot";
-    const open = blinkable ? p.open : 1;
-    for (const [eye, s] of [
-      [leftEye.current, p.left],
-      [rightEye.current, p.right],
-    ] as const) {
-      if (!eye) continue;
-      eye.scale.x += (s - eye.scale.x) * k;
-      eye.scale.y += (s * open - eye.scale.y) * Math.min(1, dt * 25);
-    }
+    // The display: ease the eyes toward this moment's expression and draw it.
+    easeFace(face.current, targetFace(mood, appearance.eyes, layout.eyeX, t, phase * 7), dt);
+    applyFace(m.screen, face.current, 0, layout.eyeY - layout.screenY);
     m.led.emissiveIntensity += (2.4 * p.glow - m.led.emissiveIntensity) * k;
   });
-
-  // An eye sits on the screen surface — curved or flat — facing along its normal.
-  const eyeAt = (x: number): { z: number; rotY: number } => {
-    if (!layout.radius) return { z: layout.eyeZ, rotY: 0 };
-    const r2 = layout.radius ** 2 - x * x - (layout.sphere ? layout.eyeY ** 2 : 0);
-    const z = Math.sqrt(Math.max(0.01, r2));
-    // Raised off the screen enough that glancing sideways across a curved face
-    // (the eyes slide in x without following the curve) never sinks them into it.
-    return { z: z + 0.01, rotY: Math.atan2(x, z) };
-  };
-  const leftAt = eyeAt(-layout.eyeX);
-  const rightAt = eyeAt(layout.eyeX);
-  const centerAt = eyeAt(0);
 
   return (
     <group>
@@ -728,30 +638,6 @@ export function BotModel({
               one shape's meshes for another's: a mesh that had its geometry as a prop
               and is reused for one that declares it as a child ends up with none. */}
           <Body key={appearance.shape} shape={appearance.shape} m={m} />
-          <group ref={eyes} position={[0, layout.eyeY, 0]}>
-            {single ? (
-              <group ref={leftEye} position={[0, 0, centerAt.z]}>
-                <Eye key={kind} kind={kind === "line" ? "line" : "visor"} material={m.led} />
-              </group>
-            ) : (
-              <>
-                <group
-                  ref={leftEye}
-                  position={[-layout.eyeX, 0, leftAt.z]}
-                  rotation={[0, leftAt.rotY, 0]}
-                >
-                  <Eye key={kind} kind={kind} material={m.led} />
-                </group>
-                <group
-                  ref={rightEye}
-                  position={[layout.eyeX, 0, rightAt.z]}
-                  rotation={[0, rightAt.rotY, 0]}
-                >
-                  <Eye key={kind} kind={kind} material={m.led} />
-                </group>
-              </>
-            )}
-          </group>
           <TopPiece
             key={`${appearance.top}:${appearance.shape}`}
             a={appearance}
