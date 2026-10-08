@@ -55,6 +55,7 @@ function Studio() {
   const scene = useThree((s) => s.scene);
   useEffect(() => {
     scene.environment = studioEnvironment(gl);
+    scene.environmentIntensity = 0.85;
   }, [gl, scene]);
   return null;
 }
@@ -86,8 +87,10 @@ export function BotStage({ children }: { children: React.ReactNode }) {
             powerPreference: "high-performance",
           }}
           onCreated={({ gl }) => {
-            gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 1.05;
+            // AgX: a filmic curve that rolls bright LEDs off toward white without
+            // shifting their hue, the way a camera sensor does.
+            gl.toneMapping = THREE.AgXToneMapping;
+            gl.toneMappingExposure = 1.1;
           }}
         >
           <View.Port />
@@ -177,9 +180,11 @@ export function BotFace({
         onUpdate={(c) => c.lookAt(0, 0.04, 0)}
       />
       <Studio />
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[2.5, 3, 3]} intensity={1.7} />
-      <directionalLight position={[-3, 1.2, -2]} intensity={0.9} color={appearance.glow} />
+      {/* A neutral three-point studio rig: warm key, cool fill, white rim. */}
+      <ambientLight intensity={0.15} />
+      <directionalLight position={[2.2, 3.2, 2.8]} intensity={2.2} color="#fff6ec" />
+      <directionalLight position={[-2.8, 0.8, 1.5]} intensity={0.6} color="#e8f0ff" />
+      <directionalLight position={[0, 2, -3]} intensity={1.1} color="#ffffff" />
       <BotModel appearance={appearance} mood={mood} detail={level} phase={phase} />
     </>
   );
@@ -190,8 +195,10 @@ export function BotFace({
           dpr={[1, 2]}
           gl={{ antialias: true, alpha: true }}
           onCreated={({ gl }) => {
-            gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 1.05;
+            // AgX: a filmic curve that rolls bright LEDs off toward white without
+            // shifting their hue, the way a camera sensor does.
+            gl.toneMapping = THREE.AgXToneMapping;
+            gl.toneMappingExposure = 1.1;
           }}
         >
           {scene}

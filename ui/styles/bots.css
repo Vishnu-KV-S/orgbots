@@ -1520,9 +1520,8 @@ kbd {
   gap: 8px;
   padding: 10px;
   border-radius: var(--r-lg);
-  background:
-    radial-gradient(ellipse at 50% 70%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
-    var(--bg-raised);
+  /* A plain studio sweep: lighter behind the bot, falling off to the edges. */
+  background: radial-gradient(ellipse at 50% 38%, var(--bg-hover), var(--bg-raised) 70%);
   border: 1px solid var(--line);
 }
 

@@ -24,7 +24,7 @@ export const MOODS: { id: Mood; label: string; hint: string }[] = [
   {
     id: "thinking",
     label: "Thinking",
-    hint: "Tilts its head; thought dots orbit",
+    hint: "Tilts its head, eyes drift up",
   },
   {
     id: "browsing",
@@ -36,25 +36,25 @@ export const MOODS: { id: Mood; label: string; hint: string }[] = [
   {
     id: "waiting",
     label: "Needs you",
-    hint: "Puzzled wiggle with a question mark",
+    hint: "Head cocked, one eye wider",
   },
-  { id: "error", label: "Error", hint: "X eyes, a shake, red glow" },
-  { id: "happy", label: "Done", hint: "Happy eyes, a hop and a spin" },
-  { id: "creating", label: "New helper", hint: "Spins up with sparkles" },
+  { id: "error", label: "Error", hint: "X eyes, a shudder, red LEDs" },
+  { id: "happy", label: "Done", hint: "Happy eyes and a little hop" },
+  { id: "creating", label: "New helper", hint: "Turns slowly, LEDs brighten" },
   {
     id: "delegating",
     label: "Asking helper",
-    hint: "Leans in and sends signals",
+    hint: "Leans in and nods",
   },
   {
     id: "remembering",
     label: "Remembering",
-    hint: "Eyes close, glow brightens, a nod",
+    hint: "Eyes close, LEDs brighten",
   },
   {
     id: "sleeping",
     label: "Sleeping",
-    hint: "Eyes shut, slow breathing, dim glow",
+    hint: "Eyes shut, slow breathing, LEDs dim",
   },
   { id: "stopped", label: "Stopped", hint: "Slumps and powers down" },
 ];
