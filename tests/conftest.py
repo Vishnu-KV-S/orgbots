@@ -52,6 +52,8 @@ _TRUNCATE_ORDER = [
     "bot_notifications",
     "push_subscriptions",
     "push_keys",
+    # Template links (051) reference bots.
+    "bot_template_shares",
     "bot_reactions",
     "bot_wakes",
     "bot_group_messages",

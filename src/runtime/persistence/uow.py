@@ -52,6 +52,7 @@ from runtime.persistence.repositories.sessions import SessionRepository
 from runtime.persistence.repositories.skills import SkillRepository
 from runtime.persistence.repositories.spec import SpecRepository
 from runtime.persistence.repositories.tasks import EvaluationRepository, TaskRepository
+from runtime.persistence.repositories.templates import TemplateShareRepository
 from runtime.persistence.repositories.triggers import TriggerRepository
 from runtime.persistence.repositories.vault import VaultRepository
 from runtime.settings import Settings
@@ -140,6 +141,7 @@ class UnitOfWork:
         # Push notifications (migration 050): a bot's line in its conversation and the
         # notification that tells the person about it are one transaction.
         self.push = PushRepository(session)
+        self.template_shares = TemplateShareRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

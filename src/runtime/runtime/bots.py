@@ -40,8 +40,9 @@ from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
 from runtime.domain.errors import UnknownActorError
 from runtime.domain.groups import Member, recipients
 from runtime.domain.ids import OrganizationId, RunId
-from runtime.domain.routines import ROUTINE_PRIORITY, routine_message
+from runtime.domain.routines import ROUTINE_PRIORITY, RoutineError, routine_message
 from runtime.domain.specs import StartRunRequest
+from runtime.domain.templates import BotTemplate, TemplateError
 from runtime.domain.vault import CredentialField, check_value, same_site
 from runtime.gateway.vault import Vault
 from runtime.observability.logging import get_logger
@@ -52,10 +53,12 @@ from runtime.org.bots import (
     store_memory,
     write_brief,
 )
+from runtime.org.routines import RoutineService
+from runtime.org.templates import preview
 from runtime.persistence.repositories.bots import BotRow
 from runtime.persistence.repositories.groups import GroupRow, WakeRow
 from runtime.persistence.repositories.routines import RoutineRow, RoutineRunRow
-from runtime.persistence.uow import UnitOfWorkFactory
+from runtime.persistence.uow import UnitOfWork, UnitOfWorkFactory
 from runtime.runtime.bootstrap import Registrar
 from runtime.runtime.run_service import RunService
 
@@ -131,38 +134,113 @@ class BotManager:
         duplicated_from: uuid.UUID | None = None,
         appearance: dict[str, Any] | None = None,
     ) -> BotRow:
+        async with self._uow.transaction() as uow:
+            row = await self._insert(
+                uow,
+                organization_id,
+                name=name,
+                label=label,
+                description=description,
+                avatar=avatar,
+                brief=brief,
+                duplicated_from=duplicated_from,
+                appearance=appearance,
+                brief_reason="Copied with the bot" if duplicated_from else "Written at creation",
+            )
+        log.info("bot.created", bot_id=str(row.id), actor=row.actor_name)
+        return row
+
+    async def _insert(
+        self,
+        uow: UnitOfWork,
+        organization_id: OrganizationId,
+        *,
+        name: str,
+        label: str,
+        description: str,
+        avatar: str,
+        brief: BotBrief | None,
+        duplicated_from: uuid.UUID | None,
+        appearance: dict[str, Any] | None,
+        brief_reason: str,
+    ) -> BotRow:
         bot_id = uuid.uuid4()
         actor_name = actor_name_for(name, secrets.token_hex(3))
         # Actor and row in one transaction: a bot row pointing at an actor that failed
         # to publish would be a bot whose every message is refused for a reason nobody
         # can see. `publish_bot_actor` is the same path a helper takes, so a person's bot
         # and a bot's helper are the same kind of actor with the same delegation limits.
-        async with self._uow.transaction() as uow:
-            await publish_bot_actor(uow, organization_id, actor_name)
-            await uow.bots.create(
+        await publish_bot_actor(uow, organization_id, actor_name)
+        await uow.bots.create(
+            bot_id,
+            organization_id,
+            actor_name=actor_name,
+            name=name,
+            label=label,
+            description=description,
+            avatar=avatar,
+            duplicated_from=duplicated_from,
+            appearance=appearance,
+        )
+        if brief is not None and not brief.is_empty():
+            await write_brief(
+                uow,
                 bot_id,
-                organization_id,
-                actor_name=actor_name,
-                name=name,
-                label=label,
-                description=description,
-                avatar=avatar,
-                duplicated_from=duplicated_from,
-                appearance=appearance,
+                brief,
+                revision=uuid.uuid4(),
+                editor_kind="person",
+                reason=brief_reason,
             )
-            if brief is not None and not brief.is_empty():
-                await write_brief(
-                    uow,
-                    bot_id,
-                    brief,
-                    revision=uuid.uuid4(),
-                    editor_kind="person",
-                    reason="Copied with the bot" if duplicated_from else "Written at creation",
-                )
-            row = await uow.bots.get(bot_id)
+        row = await uow.bots.get(bot_id)
         assert row is not None
-        log.info("bot.created", bot_id=str(bot_id), actor=actor_name)
         return row
+
+    async def create_from_template(
+        self,
+        organization_id: OrganizationId,
+        template: BotTemplate,
+        *,
+        name: str | None = None,
+        keep_allows: bool = False,
+    ) -> BotRow:
+        """A new bot set up as a template says, after the checks a preview shows
+        (`org.templates.preview`): allow rules only when `keep_allows`, every routine
+        paused. All of it or none of it — a bot without the routines the person saw
+        would be a different bot from the one they chose."""
+        shown = preview(template, keep_allows=keep_allows)
+        made = shown.template
+        routines = RoutineService(self._uow)
+        try:
+            async with self._uow.transaction() as uow:
+                row = await self._insert(
+                    uow,
+                    organization_id,
+                    name=(name or made.name).strip()[:80] or made.name,
+                    label=made.label,
+                    description=made.description,
+                    avatar=made.avatar,
+                    brief=made.brief,
+                    duplicated_from=None,
+                    appearance=made.appearance.model_dump() if made.appearance else None,
+                    brief_reason="From a template",
+                )
+                if made.auto_review:
+                    await uow.bots.update(row.id, {"auto_review": True})
+                for rule in shown.plan.rules:
+                    await uow.bots.put_rule(row.id, rule.action_type, rule.host, rule.decision)
+                for spec in shown.plan.routines:
+                    await routines.insert(
+                        uow,
+                        row,
+                        spec,
+                        uuid.uuid4(),
+                        created_by_kind="person",
+                        created_by_bot_id=None,
+                    )
+        except RoutineError as exc:
+            raise TemplateError(str(exc)) from exc
+        log.info("bot.created", bot_id=str(row.id), actor=row.actor_name, template=True)
+        return await self.get(row.id)
 
     async def get(self, bot_id: uuid.UUID) -> BotRow:
         async with self._uow() as uow:

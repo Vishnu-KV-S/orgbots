@@ -2775,3 +2775,84 @@ button.frow:hover {
   margin-right: 6px;
 }
 
+
+/* --- templates (sharing a bot's setup) ------------------------------------------------- */
+
+.share-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.share-link .input {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.share-link .routine-meta {
+  flex-basis: 100%;
+}
+
+.template-review {
+  gap: 12px;
+}
+
+.template-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.template-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.template-part {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+  font-size: 13px;
+}
+
+.template-part h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.template-part p {
+  margin: 0 0 6px;
+}
+
+.template-part ul {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.template-notes {
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.template-routine {
+  padding: 4px 0;
+}
+
+.template-allows {
+  margin-top: 8px;
+  align-items: flex-start !important;
+}
+
+.template-allows input {
+  margin-top: 3px;
+}

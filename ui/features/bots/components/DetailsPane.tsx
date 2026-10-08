@@ -16,24 +16,11 @@ import {
 import { useAction } from "@/lib/hooks/useAction";
 import { useResource } from "@/lib/hooks/useResource";
 import { type Appearance, Designer, appearanceFor } from "../avatar";
+import { DECISION_LABEL, RULE_ACTIONS, ruleAction } from "../lib/rules";
 import { BriefSection } from "./BriefEditor";
 import { MemorySection } from "./MemoryPane";
 import { RoutinesSection } from "./RoutinesPane";
-
-const RULE_ACTIONS = [
-  ["*", "any action"],
-  ["navigate", "opening a page"],
-  ["click", "clicking"],
-  ["type", "typing"],
-  ["select", "choosing an option"],
-  ["press", "pressing a key"],
-  ["sign_in", "signing in with a saved login"],
-  ["run_command", "running commands in the sandbox"],
-  ["run_local", "running commands on this computer"],
-  ["use_connector", "using a connected app (name it under On site)"],
-] as const;
-
-const DECISION_LABEL = { ask: "Ask first", allow: "Allow", deny: "Never" } as const;
+import { ShareSection } from "./Sharing";
 
 /**
  * Who this bot is and what it may do without asking.
@@ -69,6 +56,7 @@ export function DetailsPane({
       <Looks bot={bot} onChanged={onChanged} />
       <Rules bot={bot} onChanged={onChanged} />
       <SavedLogins bot={bot} />
+      <ShareSection bot={bot} />
       <section className="dsec">
         <h3>About</h3>
         <dl className="kv">
@@ -284,7 +272,7 @@ function Rules({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
         <div key={r.id} className="rule">
           <span className={`decision ${r.decision}`}>{DECISION_LABEL[r.decision]}</span>
           <span className="grow">
-            {RULE_ACTIONS.find(([k]) => k === r.action_type)?.[1] ?? r.action_type}
+            {ruleAction(r.action_type)}
             {r.host ? (
               <>
                 {" "}

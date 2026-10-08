@@ -281,6 +281,18 @@ never sees what a bot said. A device the push service has forgotten is unsubscri
 and a notification more than 12 hours old is dropped rather than sent late. The layout
 works at phone width: the header shows icons only, and side-by-side form fields stack.
 
+**Sharing bot templates.** *Share as a template* in a bot's Details lets someone start
+their own copy of that bot. It shares the profile, look, brief, approval rules, routines
+and the Auto Review setting (`runtime/domain/templates.py`). Memories, conversations,
+saved sign-ins, files, connected apps and webhook addresses are never shared. You can
+*Save as a file*, a `.bot.json` that **New bot → Import a template file…** reads, or
+*Make a link* (`/?template=…`, migration 051). A link is a snapshot of the bot when it
+was made, counts its uses, and can be turned off. Importing shows everything first,
+then builds the bot, its rules and its routines in one transaction. A stranger's
+template can't give itself permission: its *allow* rules are only kept if the importer
+ticks the box beside them. Every routine arrives paused, and an event routine gets a
+new address. A template from a newer version of the app is refused, and says so.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a

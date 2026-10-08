@@ -53,6 +53,8 @@ from runtime.api.schemas import (
 )
 from runtime.api.skills import marketplace_router, teach_router
 from runtime.api.skills import router as skills_router
+from runtime.api.templates import router as templates_bots_router
+from runtime.api.templates import templates_router
 from runtime.api.workspace import router as workspace_router
 from runtime.domain.ids import OrganizationId, RunId, SessionId
 from runtime.domain.specs import StartRunRequest
@@ -143,6 +145,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(connectors_market_router)
     # Push notifications to the person's devices.
     app.include_router(push_router)
+    # Bot templates: export, share links, and making a bot from one.
+    app.include_router(templates_bots_router)
+    app.include_router(templates_router)
     # Routines: a bot's own (`/v1/bots/{id}/routines`, behind the UI's proxy), and the
     # webhook that starts an event routine (`/v1/hooks`, which is not — it is called
     # from outside, and authenticated by its token and the sender's signature).

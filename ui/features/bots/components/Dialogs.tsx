@@ -1,24 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
   type Bot,
   type BotDraft,
   type ComputerStatus,
   type SearchResult,
+  type TemplatePreview,
   createBot,
   resetComputer,
   searchBots,
   pushTest,
+  sharedTemplate,
 } from "@/lib/api/bots";
 import { useAction } from "@/lib/hooks/useAction";
+import { useResource } from "@/lib/hooks/useResource";
 import { cx } from "@/lib/cx";
 import { Designer, randomAppearance } from "../avatar";
 import { type PushState, disablePush, enablePush, pushState } from "../lib/push";
 import { TEMPLATES } from "../lib/templates";
 import { Avatar } from "./Avatar";
 import { BriefFields } from "./BriefEditor";
+import { TemplateReview, readTemplateFile } from "./Sharing";
 
 export function Modal({
   title,
@@ -59,9 +63,26 @@ export function NewBotDialog({
   onCreated: (bot: Bot) => void;
 }) {
   const [form, setForm] = useState<BotDraft | null>(null);
+  const [imported, setImported] = useState<TemplatePreview | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const create = useAction((draft: BotDraft) => createBot(draft), {
     onDone: (bot) => onCreated(bot),
   });
+  const read = useAction((file: File) => readTemplateFile(file), { onDone: setImported });
+
+  if (imported) {
+    return (
+      <Modal title="Create a bot from a template" onClose={onClose}>
+        <TemplateReview
+          preview={imported}
+          source={{ template: imported.template }}
+          onCreated={onCreated}
+          onCancel={() => setImported(null)}
+          cancelLabel="Back"
+        />
+      </Modal>
+    );
+  }
 
   if (!form) {
     return (
@@ -93,6 +114,28 @@ export function NewBotDialog({
             </button>
           ))}
         </div>
+        <div className="control-row" style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className="pbtn"
+            disabled={read.pending}
+            onClick={() => picker.current?.click()}
+          >
+            {read.pending ? "Reading…" : "Import a template file…"}
+          </button>
+          <input
+            ref={picker}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void read.run(file);
+            }}
+          />
+        </div>
+        {read.error && <ErrorNotice>{read.error}</ErrorNotice>}
       </Modal>
     );
   }
@@ -618,5 +661,39 @@ function PushSetting() {
       )}
       {error && <ErrorNotice>{error}</ErrorNotice>}
     </div>
+  );
+}
+
+/** `/?template=…` — a link someone shared: review it, then make your own bot from it. */
+export function SharedTemplateDialog({
+  token,
+  onClose,
+  onCreated,
+}: {
+  token: string;
+  onClose: () => void;
+  onCreated: (bot: Bot) => void;
+}) {
+  const fetcher = useCallback((signal: AbortSignal) => sharedTemplate(token, signal), [token]);
+  const shared = useResource(fetcher);
+  return (
+    <Modal title="Create a bot from a shared template" onClose={onClose}>
+      {shared.error && <ErrorNotice>{shared.error}</ErrorNotice>}
+      {shared.loading && <p className="screen-help">Loading the template…</p>}
+      {shared.data && (
+        <>
+          <p className="screen-help" style={{ marginTop: 0 }}>
+            Someone shared this bot&apos;s setup. Read what it will do, then create your own.
+            It&apos;s yours to change, and nothing you do with it goes back to them.
+          </p>
+          <TemplateReview
+            preview={shared.data}
+            source={{ token }}
+            onCreated={onCreated}
+            onCancel={onClose}
+          />
+        </>
+      )}
+    </Modal>
   );
 }
