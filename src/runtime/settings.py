@@ -315,6 +315,17 @@ class Settings(BaseSettings):
     be reaped, releasing nothing. On expiry the parent cancels the subtree and reports
     what it got, which is `drain` semantics arrived at by the clock."""
 
+    worker_slots: int = Field(default=1, ge=1, le=64)
+    """How many runs one worker process executes at once — that many independent
+    worker loops, each with its own id, each claiming runs the ordinary way (I5's
+    conditional claim is what makes several in one process as safe as several
+    processes). One is the M0 default and what the chaos tests assume.
+
+    **Bots want at least 2**, and a few more is better: every bot that is working holds
+    a slot, and a bot that asks a helper (`ask_bot`) holds its slot *while the helper
+    works in another one* — with a single slot the two would wait on each other until
+    the delegation timeout."""
+
     # --- bots ------------------------------------------------------------------------
     computer_url: str = "http://127.0.0.1:8020"
     """The shared browser (`python -m runtime.computer.main`). The browser tools and the

@@ -20,6 +20,7 @@ import { Conversation, type Pane } from "./components/Conversation";
 import { DetailsPane } from "./components/DetailsPane";
 import {
   CommandPalette,
+  DeleteBotDialog,
   NewBotDialog,
   SettingsDialog,
   notificationsEnabled,
@@ -46,6 +47,7 @@ export function BotsScreen() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
   const [showList, setShowList] = useState(false);
+  const [deleting, setDeleting] = useState<Bot | null>(null);
 
   const list = bots.data?.bots ?? null;
   const selected = useMemo(
@@ -162,19 +164,7 @@ export function BotsScreen() {
         await markRead(bot.id, !bot.unread);
         refresh();
       },
-      remove: async (bot) => {
-        if (
-          !window.confirm(
-            `Delete ${bot.name}? Its conversation and memory go with it. This cannot be undone.`,
-          )
-        ) {
-          return;
-        }
-        await deleteBot(bot.id);
-        if (bot.id === selectedId) select(null);
-        refresh();
-        setToast({ text: `Deleted ${bot.name}.` });
-      },
+      remove: (bot) => setDeleting(bot),
     }),
     [refresh, select, selectedId],
   );
@@ -275,6 +265,8 @@ export function BotsScreen() {
               <DetailsPane
                 key={selected.id}
                 bot={selected}
+                bots={list ?? []}
+                onSelect={select}
                 onChanged={refresh}
                 onDuplicate={() => void commands.duplicate(selected)}
                 onDelete={() => void commands.remove(selected)}
@@ -284,6 +276,26 @@ export function BotsScreen() {
         </aside>
       )}
 
+      {deleting && (
+        <DeleteBotDialog
+          bot={deleting}
+          bots={list ?? []}
+          onClose={() => setDeleting(null)}
+          onDelete={async (withHelpers) => {
+            const result = await deleteBot(deleting.id, withHelpers);
+            if (selectedId && result.deleted.includes(selectedId)) select(null);
+            setDeleting(null);
+            refresh();
+            const extra = result.deleted.length - 1;
+            setToast({
+              text:
+                extra > 0
+                  ? `Deleted ${deleting.name} and ${extra} helper${extra === 1 ? "" : "s"}.`
+                  : `Deleted ${deleting.name}.`,
+            });
+          }}
+        />
+      )}
       {dialog === "new" && <NewBotDialog onClose={() => setDialog(null)} onCreated={created} />}
       {dialog === "palette" && (
         <CommandPalette

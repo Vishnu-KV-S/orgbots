@@ -122,6 +122,8 @@ def _bot_view(
         "run_status": run_status,
         "last_run_id": str(bot.last_run_id) if bot.last_run_id else None,
         "duplicated_from": str(bot.duplicated_from) if bot.duplicated_from else None,
+        "parent_bot_id": str(bot.parent_bot_id) if bot.parent_bot_id else None,
+        "created_by": bot.created_by,
         "created_at": bot.created_at.isoformat(),
         "updated_at": bot.updated_at.isoformat(),
         "last_message": _message_view(last) if last else None,
@@ -270,11 +272,16 @@ async def duplicate_bot(bot_id: UUID, request: Request) -> dict[str, Any]:
 
 
 @router.delete("/{bot_id}")
-async def delete_bot(bot_id: UUID, request: Request) -> dict[str, Any]:
+async def delete_bot(
+    bot_id: UUID, request: Request, with_helpers: bool = Query(default=False)
+) -> dict[str, Any]:
+    """Delete a bot. `with_helpers=true` deletes every helper under it too; the default
+    keeps them and moves its direct helpers up a level. The UI asks which."""
     await _bot_or_404(request, bot_id)
-    await _manager(request).delete(bot_id)
-    await _computer_call(request, "DELETE", f"/screens/{bot_id}", quiet=True)
-    return {"deleted": str(bot_id)}
+    deleted = await _manager(request).delete(bot_id, with_helpers=with_helpers)
+    for victim in deleted:
+        await _computer_call(request, "DELETE", f"/screens/{victim}", quiet=True)
+    return {"deleted": [str(d) for d in deleted]}
 
 
 @router.post("/{bot_id}/read")

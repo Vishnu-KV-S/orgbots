@@ -32,11 +32,19 @@ function BotRow({
   active,
   onSelect,
   commands,
+  depth = 0,
+  helperCount = 0,
+  collapsed = false,
+  onToggle,
 }: {
   bot: Bot;
   active: boolean;
   onSelect: () => void;
   commands: BotCommands;
+  depth?: number;
+  helperCount?: number;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
   const items: MenuItem[] = [
     { label: "Edit profile", onSelect: () => commands.edit(bot) },
@@ -50,21 +58,54 @@ function BotRow({
     { label: "Delete…", onSelect: () => commands.remove(bot), danger: true },
   ];
   return (
+    // Not `role="button"` on the row: that would make the twisty and the menu inside
+    // it presentational, unreachable by keyboard and by a screen reader. The row is a
+    // plain container; selecting is its own button, and the click anywhere else on the
+    // row is a pointer convenience.
     <div
-      role="button"
-      tabIndex={0}
-      className={cx("brow", active && "active", bot.unread && "unread")}
+      className={cx("brow", active && "active", bot.unread && "unread", depth > 0 && "helper")}
+      style={depth > 0 ? { paddingLeft: 8 + depth * 18 } : undefined}
       onClick={onSelect}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect()}
     >
-      <Avatar name={bot.name} avatar={bot.avatar} working={bot.working} />
+      {helperCount > 0 ? (
+        <button
+          type="button"
+          className="twisty"
+          aria-label={collapsed ? `Show ${bot.name}'s helpers` : `Hide ${bot.name}'s helpers`}
+          aria-expanded={!collapsed}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle?.();
+          }}
+        >
+          {collapsed ? "▸" : "▾"}
+        </button>
+      ) : depth > 0 ? (
+        <span className="twisty-space" aria-hidden>
+          ↳
+        </span>
+      ) : null}
+      <button
+        type="button"
+        className="brow-hit"
+        aria-current={active ? "true" : undefined}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+        }}
+      >
+      <Avatar name={bot.name} avatar={bot.avatar} working={bot.working} size={depth > 0 ? "sm" : undefined} />
       <div className="brow-main">
         <div className="brow-name">
           {bot.name}
           {bot.pinned && <span className="pin" title="Pinned">●</span>}
         </div>
-        <div className="brow-sub">{preview(bot)}</div>
+        <div className="brow-sub">
+          {helperCount > 0 && collapsed ? `${helperCount} helper${helperCount === 1 ? "" : "s"} · ` : ""}
+          {preview(bot)}
+        </div>
       </div>
+      </button>
       <div className="brow-marks">
         {bot.needs_attention ? (
           <span className="mark-attention" title="Needs attention">
@@ -103,20 +144,49 @@ export function Sidebar({
   error: string | null;
 }) {
   const [showHidden, setShowHidden] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const visible = (bots ?? []).filter((b) => showHidden || !b.hidden || b.id === selectedId);
-  const pinned = visible.filter((b) => b.pinned);
-  const rest = visible.filter((b) => !b.pinned);
+  const ids = new Set(visible.map((b) => b.id));
+  // A helper is listed under its parent; one whose parent is not visible (hidden, or
+  // deleted with "keep helpers") is listed at the top level.
+  const childrenOf = new Map<string, Bot[]>();
+  for (const b of visible) {
+    if (b.parent_bot_id && ids.has(b.parent_bot_id)) {
+      childrenOf.set(b.parent_bot_id, [...(childrenOf.get(b.parent_bot_id) ?? []), b]);
+    }
+  }
+  const roots = visible.filter((b) => !b.parent_bot_id || !ids.has(b.parent_bot_id));
+  const pinned = roots.filter((b) => b.pinned);
+  const rest = roots.filter((b) => !b.pinned);
   const hiddenCount = (bots ?? []).filter((b) => b.hidden).length;
 
-  const row = (bot: Bot) => (
-    <BotRow
-      key={bot.id}
-      bot={bot}
-      active={bot.id === selectedId}
-      onSelect={() => onSelect(bot.id)}
-      commands={commands}
-    />
-  );
+  const toggle = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const row = (bot: Bot, depth = 0): React.ReactNode => {
+    const kids = childrenOf.get(bot.id) ?? [];
+    const isCollapsed = collapsed.has(bot.id);
+    return (
+      <div key={bot.id}>
+        <BotRow
+          bot={bot}
+          active={bot.id === selectedId}
+          onSelect={() => onSelect(bot.id)}
+          commands={commands}
+          depth={depth}
+          helperCount={kids.length}
+          collapsed={isCollapsed}
+          onToggle={() => toggle(bot.id)}
+        />
+        {!isCollapsed && kids.map((kid) => row(kid, depth + 1))}
+      </div>
+    );
+  };
 
   return (
     <aside className="bside">
@@ -143,9 +213,9 @@ export function Sidebar({
           </p>
         )}
         {pinned.length > 0 && <div className="bside-group">Pinned</div>}
-        {pinned.map(row)}
+        {pinned.map((b) => row(b))}
         {pinned.length > 0 && rest.length > 0 && <div className="bside-group">Bots</div>}
-        {rest.map(row)}
+        {rest.map((b) => row(b))}
         {hiddenCount > 0 && (
           <button
             type="button"

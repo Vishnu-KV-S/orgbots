@@ -40,6 +40,33 @@ MAX_HISTORY_MESSAGES = 24
 MAX_MEMORY_CHARS = 4_000
 """What a bot may keep in its learned notes. Old notes fall off the front."""
 
+MAX_HELPERS = 5
+"""Live helpers one bot may have created. A bot that wants a sixth reuses one."""
+
+MAX_HELPER_DEPTH = 2
+"""A person's bot is depth 0; its helper 1; the helper's helper 2, and no deeper.
+The same bound as the runtime's delegation depth, which is what `ask_bot` rides on —
+a bot that could create a helper it could never ask anything would be a bot that
+creates litter."""
+
+HELPER_REPLY_CHARS = 2_000
+"""How much of a helper's answer is carried back into the asking bot's next prompt."""
+
+BOT_DELEGATION = {
+    "enabled": True,
+    "max_depth": MAX_HELPER_DEPTH,
+    # One question at a time per bot — a turn is a sequence of steps, so a bot never
+    # has two questions outstanding — and a tree-wide bound on how much can be live.
+    "max_children": 1,
+    "max_live_descendants": MAX_HELPER_DEPTH,
+    "max_subtree_cost_cents": 600,
+    "max_subtree_llm_calls": 150,
+    "exhaustion_policy": "drain",
+}
+"""Every bot actor's delegation limits (`actors.delegation`), written when the bot is
+created. The same for every bot, like its spec: what a bot may delegate is not
+something a bot or its instructions can widen."""
+
 BROWSER_ACTIONS = frozenset(
     {
         "navigate",
@@ -78,6 +105,8 @@ StepAction = Literal[
     "remember",
     "reply",
     "ask_user",
+    "create_bot",
+    "ask_bot",
 ]
 
 
@@ -95,7 +124,10 @@ class BotStep(BaseModel):
         description="navigate/click/type/press/select/scroll/hover/back/forward/reload/"
         "wait drive the browser. observe re-reads the page. remember saves a note to "
         "your long-term memory and continues. reply ends your turn with a message to "
-        "the person. ask_user ends your turn with a question you need answered."
+        "the person. ask_user ends your turn with a question you need answered. "
+        "create_bot creates a helper bot under you (bot = its name, text = its role and "
+        "instructions). ask_bot gives one of your helpers a task and waits for its answer "
+        "(bot = the helper's name, text = the task, with every fact it needs)."
     )
     element: int | None = Field(
         default=None,
@@ -103,6 +135,14 @@ class BotStep(BaseModel):
         "Required for click, type, select and hover.",
     )
     url: str | None = Field(default=None, description="For navigate.")
+    bot: str | None = Field(
+        default=None,
+        max_length=80,
+        description="For create_bot: the new helper's name. For ask_bot: which helper.",
+    )
+    label: str | None = Field(
+        default=None, max_length=80, description="For create_bot: a short job title."
+    )
     text: str | None = Field(
         default=None,
         description="The text to type (type), the message (reply / ask_user), or the "
@@ -133,6 +173,15 @@ class BotStep(BaseModel):
             raise ValueError("press needs `key`")
         if self.action in ("reply", "ask_user", "remember") and not (self.text or "").strip():
             raise ValueError(f"{self.action} needs `text`")
+        if self.action in ("create_bot", "ask_bot"):
+            if not (self.bot or "").strip():
+                raise ValueError(f"{self.action} needs `bot` — the helper's name")
+            if not (self.text or "").strip():
+                raise ValueError(
+                    "create_bot needs `text` — the helper's role"
+                    if self.action == "create_bot"
+                    else "ask_bot needs `text` — the task"
+                )
         return self
 
     @property
@@ -256,6 +305,12 @@ def message_id(run_id: object, step: int, kind: str) -> uuid.UUID:
     """A row a run writes. Same run, same step, same kind → same id, so a replay is a
     no-op (`ON CONFLICT DO NOTHING`) rather than a duplicated line in the transcript."""
     return uuid.uuid5(uuid.NAMESPACE_URL, f"botmsg:{run_id}:{step}:{kind}")
+
+
+def helper_id(run_id: object, step: int) -> uuid.UUID:
+    """A helper created by a run's step. Derived, so a replayed step finds the helper it
+    already made instead of making a second one."""
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"bothelper:{run_id}:{step}")
 
 
 def pending_id(run_id: object, step: int) -> uuid.UUID:

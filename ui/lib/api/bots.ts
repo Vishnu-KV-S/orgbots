@@ -25,6 +25,8 @@ export interface Bot {
   run_status: string | null;
   last_run_id: string | null;
   duplicated_from: string | null;
+  parent_bot_id: string | null;
+  created_by: "person" | "bot";
   created_at: string;
   updated_at: string;
   last_message: BotMessage | null;
@@ -46,6 +48,9 @@ export interface BotAction {
   page_url?: string;
   host?: string;
   element_label?: string;
+  /** create_bot / ask_bot / bot_answer: the helper's name. */
+  bot?: string;
+  label?: string;
 }
 
 export interface BotMessage {
@@ -66,6 +71,10 @@ export interface BotMessage {
     reason?: string;
     decision?: string;
     controller?: string;
+    helper_id?: string;
+    status?: string;
+    from_bot_id?: string;
+    from_bot_name?: string;
   };
   run_id: string | null;
   reply_to: string | null;
@@ -125,8 +134,11 @@ export const updateBot = (id: string, fields: Partial<Bot>) =>
 export const duplicateBot = (id: string) =>
   request<Bot>(`${BOTS_BASE}/${id}/duplicate`, json("POST", {}));
 
-export const deleteBot = (id: string) =>
-  request<{ deleted: string }>(`${BOTS_BASE}/${id}`, { method: "DELETE" });
+/** `withHelpers` deletes every helper under the bot too; otherwise they move up a level. */
+export const deleteBot = (id: string, withHelpers = false) =>
+  request<{ deleted: string[] }>(`${BOTS_BASE}/${id}?with_helpers=${withHelpers}`, {
+    method: "DELETE",
+  });
 
 export const markRead = (id: string, unread = false) =>
   request<unknown>(`${BOTS_BASE}/${id}/read`, json("POST", { unread }));

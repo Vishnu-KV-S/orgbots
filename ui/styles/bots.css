@@ -1353,3 +1353,93 @@ kbd {
     display: inline-flex !important;
   }
 }
+
+/* --- helper bots ---------------------------------------------------------------- */
+
+.twisty,
+.twisty-space {
+  flex: none;
+  width: 16px;
+  margin-right: -4px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.twisty {
+  border: none;
+  background: transparent;
+  padding: 0;
+  height: 20px;
+  border-radius: 4px;
+}
+
+.twisty:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.brow.helper .brow-name {
+  font-size: 13px;
+}
+
+.from-bot {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-bottom: 3px;
+  text-align: right;
+}
+
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.choice {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-panel);
+  padding: 12px 14px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.choice:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg-raised);
+}
+
+.choice strong {
+  font-size: 13.5px;
+}
+
+.choice span {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.choice.danger strong {
+  color: var(--failed);
+}
+
+.helper-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.brow-hit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}

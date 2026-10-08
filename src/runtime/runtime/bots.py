@@ -26,7 +26,7 @@ from runtime.domain.bots import actor_name_for, host_of
 from runtime.domain.ids import OrganizationId
 from runtime.domain.specs import StartRunRequest
 from runtime.observability.logging import get_logger
-from runtime.org.bots import bot_actor_spec
+from runtime.org.bots import publish_bot_actor
 from runtime.persistence.repositories.bots import BotRow
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.runtime.bootstrap import Registrar
@@ -76,10 +76,12 @@ class BotManager:
     ) -> BotRow:
         bot_id = uuid.uuid4()
         actor_name = actor_name_for(name, secrets.token_hex(3))
-        # The actor first: a bot row pointing at an actor that failed to publish would
-        # be a bot whose every message is refused for a reason nobody can see.
-        await self._registrar.publish_actor(organization_id, bot_actor_spec(actor_name))
+        # Actor and row in one transaction: a bot row pointing at an actor that failed
+        # to publish would be a bot whose every message is refused for a reason nobody
+        # can see. `publish_bot_actor` is the same path a helper takes, so a person's bot
+        # and a bot's helper are the same kind of actor with the same delegation limits.
         async with self._uow.transaction() as uow:
+            await publish_bot_actor(uow, organization_id, actor_name)
             await uow.bots.create(
                 bot_id,
                 organization_id,
@@ -125,11 +127,26 @@ class BotManager:
             await uow.bots.update(bot_id, fields)
         return await self.get(bot_id)
 
-    async def delete(self, bot_id: uuid.UUID) -> None:
-        await self.get(bot_id)
+    async def delete(self, bot_id: uuid.UUID, *, with_helpers: bool) -> list[uuid.UUID]:
+        """Delete a bot. Returns every bot id that was deleted.
+
+        The person decides what happens to the helpers under it. `with_helpers` deletes
+        the whole subtree; otherwise its direct helpers move up to its own parent (or
+        to the top level) and keep working — nothing below a deleted bot is ever
+        orphaned or deleted without being asked about.
+        """
+        bot = await self.get(bot_id)
         async with self._uow.transaction() as uow:
-            await uow.bots.set_flags(bot_id, stop_requested=True)
-            await uow.bots.soft_delete(bot_id)
+            doomed = [bot_id]
+            if with_helpers:
+                doomed += await uow.bots.descendants(bot_id)
+            else:
+                await uow.bots.reparent_children(bot_id, bot.parent_bot_id)
+            for victim in doomed:
+                await uow.bots.set_flags(victim, stop_requested=True)
+                await uow.bots.soft_delete(victim)
+        log.info("bot.deleted", bot_id=str(bot_id), with_helpers=with_helpers, count=len(doomed))
+        return doomed
 
     async def mark_read(self, bot_id: uuid.UUID, unread: bool = False) -> None:
         async with self._uow.transaction() as uow:

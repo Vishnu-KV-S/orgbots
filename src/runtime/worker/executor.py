@@ -278,7 +278,7 @@ class RunExecutor:
                 "configurable": {
                     "thread_id": ctx.spec.thread_id,
                     GRAPH_KEY: node_ctx,
-                }
+                },
             },
             durability=ctx.spec.durability,
         )

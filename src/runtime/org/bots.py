@@ -23,18 +23,24 @@ import uuid
 from typing import Any
 
 from runtime.domain.bots import (
+    BOT_DELEGATION,
+    MAX_HELPER_DEPTH,
+    MAX_HELPERS,
     MAX_HISTORY_MESSAGES,
     BotRule,
+    actor_name_for,
+    helper_id,
     message_id,
     pending_id,
     trim_memory,
 )
 from runtime.domain.enums import ActorKind, WorkClass
-from runtime.domain.ids import OrganizationId
+from runtime.domain.hashing import canonical_hash
+from runtime.domain.ids import ActorId, OrganizationId
 from runtime.domain.specs import ActorSpec, Ceilings, ModelProfile, ModelProfiles
 from runtime.org.department import FLASH, PRO
 from runtime.persistence.repositories.bots import BotMessageRow, BotPendingRow, BotRow
-from runtime.persistence.uow import UnitOfWorkFactory
+from runtime.persistence.uow import UnitOfWork, UnitOfWorkFactory
 
 BOT_GRAPH = "bot_agent@1"
 BROWSER_TOOLS = frozenset({"browser.observe@1", "browser.act@1"})
@@ -83,6 +89,33 @@ def bot_actor_spec(actor_name: str) -> ActorSpec:
             profiles={WorkClass.WORK: _STEP_PROFILE, WorkClass.SUMMARIZATION: _SUMMARY_PROFILE}
         ),
     )
+
+
+class HelperRefusedError(Exception):
+    """A helper the limits do not allow. The message is shown to the bot."""
+
+
+async def publish_bot_actor(
+    uow: UnitOfWork, organization_id: OrganizationId, actor_name: str
+) -> None:
+    """Create a bot's actor, in the caller's transaction, at version 1.
+
+    `Registrar.publish_actor` does the same for a person's bot; this is the copy a run
+    can reach, because a helper is created from inside one and `runtime.org` may not
+    import the runtime layer. It stays narrow on purpose: **the spec is always
+    `bot_actor_spec` and the delegation limits always `BOT_DELEGATION`**, so a run that
+    creates a helper chooses its name and nothing about what it may do. That is why
+    this is not the config-plane write ARCHITECTURE.md keeps out of the worker — no
+    run can use it to widen anything.
+    """
+    spec = bot_actor_spec(actor_name)
+    actor_id = ActorId(uuid.uuid5(uuid.NAMESPACE_URL, f"botactor:{organization_id}:{actor_name}"))
+    await uow.actors.create_actor(actor_id, organization_id, actor_name, spec.kind.value)
+    version_id = await uow.actors.add_version(
+        actor_id, 1, spec.model_dump(mode="json"), canonical_hash(spec)
+    )
+    await uow.actors.set_active_version(actor_id, version_id)
+    await uow.actors.set_delegation(organization_id, actor_name, dict(BOT_DELEGATION))
 
 
 class BotService:
@@ -176,6 +209,71 @@ class BotService:
             )
             await uow.bots.set_flags(bot_id, needs_attention=True, unread=True)
         return pid
+
+    async def depth(self, bot_id: uuid.UUID) -> int:
+        async with self._uow() as uow:
+            return await uow.bots.depth(bot_id)
+
+    async def helpers(self, bot_id: uuid.UUID) -> list[BotRow]:
+        async with self._uow() as uow:
+            return await uow.bots.children(bot_id)
+
+    async def create_helper(
+        self,
+        parent: BotRow,
+        *,
+        run_id: Any,
+        step: int,
+        name: str,
+        label: str,
+        role: str,
+    ) -> tuple[BotRow, bool]:
+        """Create a helper under `parent`. Returns `(helper, created)`.
+
+        Idempotent per `(run, step)`: a replayed step gets back the helper it already
+        made. Refuses past `MAX_HELPERS` live helpers or `MAX_HELPER_DEPTH`, and
+        refuses a second helper with the same name — `ask_bot` addresses helpers by
+        name, so two of them would make "ask Scout" ambiguous.
+        """
+        hid = helper_id(run_id, step)
+        async with self._uow.transaction() as uow:
+            existing = await uow.bots.get(hid)
+            if existing is not None:
+                return existing, False
+            depth = await uow.bots.depth(parent.id)
+            if depth + 1 > MAX_HELPER_DEPTH:
+                raise HelperRefusedError(
+                    f"you are already {depth} level(s) below a person's bot; helpers can "
+                    f"only go {MAX_HELPER_DEPTH} levels deep. Do the work yourself or ask "
+                    "an existing helper."
+                )
+            siblings = await uow.bots.children(parent.id)
+            if len(siblings) >= MAX_HELPERS:
+                names = ", ".join(b.name for b in siblings)
+                raise HelperRefusedError(
+                    f"you already have {MAX_HELPERS} helpers ({names}); reuse one of them"
+                )
+            if any(b.name.lower() == name.lower() for b in siblings):
+                raise HelperRefusedError(
+                    f"you already have a helper called {name!r}; ask it, or pick another name"
+                )
+            actor_name = actor_name_for(name, hid.hex[:6])
+            await publish_bot_actor(uow, parent.organization_id, actor_name)
+            await uow.bots.create(
+                hid,
+                parent.organization_id,
+                actor_name=actor_name,
+                name=name,
+                label=label,
+                description=role,
+                instructions=role,
+                avatar="",
+                parent_bot_id=parent.id,
+                created_by="bot",
+            )
+            created = await uow.bots.get(hid)
+        assert created is not None
+        return created, True
 
     async def pending(self, pending_id_: uuid.UUID) -> BotPendingRow | None:
         async with self._uow() as uow:

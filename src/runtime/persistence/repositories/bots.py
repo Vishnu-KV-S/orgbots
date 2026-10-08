@@ -16,7 +16,7 @@ from runtime.domain.ids import OrganizationId
 _BOT_COLUMNS = """
     id, organization_id, actor_name, name, label, description, instructions, avatar,
     memory, pinned, hidden, unread, needs_attention, stop_requested, turn, last_run_id,
-    duplicated_from, created_at, updated_at
+    duplicated_from, parent_bot_id, created_by, created_at, updated_at
 """
 
 EDITABLE = frozenset(
@@ -43,6 +43,8 @@ class BotRow:
     turn: int
     last_run_id: uuid.UUID | None
     duplicated_from: uuid.UUID | None
+    parent_bot_id: uuid.UUID | None
+    created_by: str
     created_at: datetime
     updated_at: datetime
 
@@ -102,6 +104,8 @@ def _bot(row: Any) -> BotRow:
         turn=int(row.turn),
         last_run_id=row.last_run_id,
         duplicated_from=row.duplicated_from,
+        parent_bot_id=row.parent_bot_id,
+        created_by=row.created_by,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -154,14 +158,18 @@ class BotRepository:
         avatar: str = "",
         memory: str = "",
         duplicated_from: uuid.UUID | None = None,
+        parent_bot_id: uuid.UUID | None = None,
+        created_by: str = "person",
     ) -> None:
         await self._s.execute(
             text(
                 """
                 INSERT INTO bots (id, organization_id, actor_name, name, label, description,
-                                  instructions, avatar, memory, duplicated_from)
+                                  instructions, avatar, memory, duplicated_from,
+                                  parent_bot_id, created_by)
                 VALUES (:id, :org, :actor, :name, :label, :description,
-                        :instructions, :avatar, :memory, :dup)
+                        :instructions, :avatar, :memory, :dup, :parent, :created_by)
+                ON CONFLICT (id) DO NOTHING
                 """
             ),
             {
@@ -175,6 +183,8 @@ class BotRepository:
                 "avatar": avatar,
                 "memory": memory,
                 "dup": duplicated_from,
+                "parent": parent_bot_id,
+                "created_by": created_by,
             },
         )
 
@@ -239,6 +249,72 @@ class BotRepository:
         await self._s.execute(
             text("UPDATE bots SET updated_at = now() WHERE id = :id"), {"id": bot_id}
         )
+
+    async def children(self, bot_id: uuid.UUID) -> list[BotRow]:
+        rows = (
+            await self._s.execute(
+                text(
+                    f"SELECT {_BOT_COLUMNS} FROM bots WHERE parent_bot_id = :id "
+                    "AND deleted_at IS NULL ORDER BY created_at"
+                ),
+                {"id": bot_id},
+            )
+        ).all()
+        return [_bot(r) for r in rows]
+
+    async def descendants(self, bot_id: uuid.UUID) -> list[uuid.UUID]:
+        """Every live bot below this one, at any depth, deepest last."""
+        rows = (
+            await self._s.execute(
+                text(
+                    """
+                    WITH RECURSIVE tree AS (
+                        SELECT id, 1 AS depth FROM bots
+                         WHERE parent_bot_id = :id AND deleted_at IS NULL
+                        UNION ALL
+                        SELECT b.id, tree.depth + 1 FROM bots b
+                          JOIN tree ON b.parent_bot_id = tree.id
+                         WHERE b.deleted_at IS NULL AND tree.depth < 16
+                    )
+                    SELECT id FROM tree ORDER BY depth
+                    """
+                ),
+                {"id": bot_id},
+            )
+        ).all()
+        return [r.id for r in rows]
+
+    async def depth(self, bot_id: uuid.UUID) -> int:
+        """0 for a person's bot, 1 for its helper, and so on."""
+        row = (
+            await self._s.execute(
+                text(
+                    """
+                    WITH RECURSIVE up AS (
+                        SELECT id, parent_bot_id, 0 AS depth FROM bots WHERE id = :id
+                        UNION ALL
+                        SELECT b.id, b.parent_bot_id, up.depth + 1 FROM bots b
+                          JOIN up ON b.id = up.parent_bot_id
+                         WHERE up.depth < 16
+                    )
+                    SELECT max(depth) AS depth FROM up
+                    """
+                ),
+                {"id": bot_id},
+            )
+        ).one()
+        return int(row.depth or 0)
+
+    async def reparent_children(self, bot_id: uuid.UUID, new_parent: uuid.UUID | None) -> int:
+        """Move a bot's direct helpers up to its own parent (or to the top level)."""
+        result = await self._s.execute(
+            text(
+                "UPDATE bots SET parent_bot_id = :new, updated_at = now() "
+                "WHERE parent_bot_id = :id AND deleted_at IS NULL"
+            ),
+            {"id": bot_id, "new": new_parent},
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def bump_turn(self, bot_id: uuid.UUID) -> int:
         """Start a new turn: clears Stop, and supersedes any run still working."""

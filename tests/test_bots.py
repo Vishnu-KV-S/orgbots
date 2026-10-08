@@ -117,6 +117,8 @@ class _Bot:
     memory: str = ""
     stop_requested: bool = False
     turn: int = 0
+    actor_name: str = "bot-scout-000000"
+    parent_bot_id: uuid.UUID | None = None
 
 
 @dataclass
@@ -142,6 +144,9 @@ class FakeBots:
         self.log: dict[uuid.UUID, _Message] = {}
         self.pendings: dict[uuid.UUID, _Pending] = {}
         self.turns_ended = 0
+        self.helpers_: list[_Bot] = []
+        self.depth_ = 0
+        self.refuse: str | None = None
 
     async def get(self, bot_id: uuid.UUID) -> _Bot:
         return self.bot
@@ -174,6 +179,28 @@ class FakeBots:
             payload={"pending_id": str(pid), "action": display},
         )
         return pid
+
+    async def helpers(self, bot_id: uuid.UUID) -> list[_Bot]:
+        return list(self.helpers_)
+
+    async def depth(self, bot_id: uuid.UUID) -> int:
+        return self.depth_
+
+    async def create_helper(self, parent, *, run_id, step, name, label, role):  # type: ignore[no-untyped-def]
+        from runtime.org.bots import HelperRefusedError
+
+        if self.refuse:
+            raise HelperRefusedError(self.refuse)
+        helper = _Bot(
+            id=uuid.uuid5(uuid.NAMESPACE_URL, f"{run_id}:{step}"),
+            name=name,
+            label=label,
+            description=role,
+            actor_name=f"bot-{name.lower()}-abc123",
+            parent_bot_id=parent.id,
+        )
+        self.helpers_.append(helper)
+        return helper, True
 
     async def pending(self, pid: uuid.UUID) -> _Pending | None:
         return self.pendings.get(pid)
@@ -268,6 +295,18 @@ class _Node:
     gateway: Any
     models: Any
     org: _Org
+    delegated: list[tuple[str, Any]] = field(default_factory=list)
+    helper_reply: str = "Scout's answer: 3 vendors found."
+
+    async def delegate(self, target_actor: str, context: Any, **_: Any) -> Any:
+        from runtime.domain.delegation import DelegationOutcome
+
+        self.delegated.append((target_actor, context))
+        return DelegationOutcome(
+            child_run_id=uuid.uuid4(),
+            status="SUCCESS",
+            output={"status": "replied", "reply": self.helper_reply},
+        )
 
 
 async def _turn(node: _Node, bot_id: uuid.UUID, **extra: Any) -> dict[str, Any]:
@@ -420,3 +459,94 @@ async def test_real_browser_fills_and_submits_a_form(tmp_path: Any) -> None:
         assert all(m.payload.get("ok") for m in acts)
     finally:
         server.shutdown()
+
+
+# --- helper bots -----------------------------------------------------------------------
+
+
+async def test_a_bot_creates_a_helper_asks_it_and_uses_the_answer() -> None:
+    bot = _Bot(id=uuid.uuid4(), name="Lead")
+    bots = FakeBots(bot)
+    model = ScriptedModel(
+        [
+            {"thought": "Need a scout", "action": "create_bot", "bot": "Scout",
+             "label": "Vendor scout", "text": "Find vendors and list them with links."},
+            {"thought": "Ask it", "action": "ask_bot", "bot": "scout",
+             "text": "Find CRM vendors under $50 per seat."},
+            {"thought": "Report", "action": "reply", "text": "Scout found 3 vendors."},
+        ]
+    )
+    node = _Node(_Ctx(), FakePageGateway(), model, _Org(bots))
+    out = await _turn(node, bot.id)
+
+    assert out["status"] == "replied"
+    (helper,) = bots.helpers_
+    assert helper.parent_bot_id == bot.id
+    ((target, context),) = node.delegated
+    assert target == helper.actor_name
+    # The helper gets the task and who asked — not the lead's conversation.
+    assert context.task.objective == "Find CRM vendors under $50 per seat."
+    assert context.task.input["bot_id"] == str(helper.id)
+    assert context.task.input["from_bot_name"] == "Lead"
+    assert context.carries_history() is False
+    # The answer is in front of the model for the step after it.
+    assert "Scout's answer: 3 vendors found." in model.prompts[2]
+
+
+async def test_a_delegated_turn_records_who_asked_and_returns_the_reply() -> None:
+    helper = _Bot(id=uuid.uuid4(), name="Scout")
+    bots = FakeBots(helper)
+    model = ScriptedModel([{"thought": "Done", "action": "reply", "text": "Three vendors."}])
+    node = _Node(_Ctx(), FakePageGateway(), model, _Org(bots))
+    out = await _turn(
+        node,
+        helper.id,
+        from_bot_id=str(uuid.uuid4()),
+        from_bot_name="Lead",
+        _delegation={"objective": "Find CRM vendors.", "facts": []},
+    )
+    assert out == {"status": "replied", "steps": 0, "kind": "reply", "reply": "Three vendors."}
+    incoming = bots.said("user")[0]
+    assert incoming.content == "Find CRM vendors."
+    assert incoming.payload["from_bot_name"] == "Lead"
+    assert "Lead (the bot that created you): Find CRM vendors." in model.prompts[0]
+
+
+async def test_a_refused_helper_is_reported_to_the_bot_not_raised() -> None:
+    bot = _Bot(id=uuid.uuid4())
+    bots = FakeBots(bot)
+    bots.refuse = "you already have 5 helpers"
+    model = ScriptedModel(
+        [
+            {"thought": "t", "action": "create_bot", "bot": "Extra", "text": "help"},
+            {"thought": "t", "action": "reply", "text": "I'll do it myself."},
+        ]
+    )
+    out = await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), bot.id)
+    assert out["status"] == "replied"
+    (failed,) = [m for m in bots.said("activity") if m.payload.get("ok") is False]
+    assert "5 helpers" in failed.payload["error"]
+    assert "could not create helper Extra" in model.prompts[1]
+
+
+async def test_asking_a_helper_that_does_not_exist_names_the_real_ones() -> None:
+    bot = _Bot(id=uuid.uuid4())
+    bots = FakeBots(bot)
+    bots.helpers_.append(_Bot(id=uuid.uuid4(), name="Scout"))
+    model = ScriptedModel(
+        [
+            {"thought": "t", "action": "ask_bot", "bot": "Writer", "text": "draft it"},
+            {"thought": "t", "action": "reply", "text": "ok"},
+        ]
+    )
+    node = _Node(_Ctx(), FakePageGateway(), model, _Org(bots))
+    await _turn(node, bot.id)
+    assert node.delegated == []
+    assert "your helpers: Scout" in model.prompts[1]
+
+
+def test_create_and_ask_need_a_name_and_text() -> None:
+    with pytest.raises(ValueError, match="bot"):
+        BotStep(thought="t", action="ask_bot", text="x")
+    with pytest.raises(ValueError, match="role"):
+        BotStep(thought="t", action="create_bot", bot="Scout")

@@ -33,17 +33,22 @@ const RULE_ACTIONS = [
  */
 export function DetailsPane({
   bot,
+  bots,
+  onSelect,
   onChanged,
   onDuplicate,
   onDelete,
 }: {
   bot: Bot;
+  bots: Bot[];
+  onSelect: (id: string) => void;
   onChanged: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
   return (
     <div>
+      <Team bot={bot} bots={bots} onSelect={onSelect} />
       <Profile bot={bot} onChanged={onChanged} />
       <Memory bot={bot} onChanged={onChanged} />
       <Rules bot={bot} />
@@ -69,6 +74,59 @@ export function DetailsPane({
         </div>
       </section>
     </div>
+  );
+}
+
+function Team({
+  bot,
+  bots,
+  onSelect,
+}: {
+  bot: Bot;
+  bots: Bot[];
+  onSelect: (id: string) => void;
+}) {
+  const parent = bots.find((b) => b.id === bot.parent_bot_id);
+  const helpers = bots.filter((b) => b.parent_bot_id === bot.id);
+  return (
+    <section className="dsec">
+      <h3>Team</h3>
+      <dl className="kv" style={{ marginBottom: 10 }}>
+        <dt>Created by</dt>
+        <dd style={{ fontFamily: "var(--sans)" }}>
+          {bot.created_by === "bot" && parent ? (
+            <button type="button" className="linklike" onClick={() => onSelect(parent.id)}>
+              {parent.name}
+            </button>
+          ) : bot.created_by === "bot" ? (
+            "a bot that has since been deleted"
+          ) : (
+            "you"
+          )}
+        </dd>
+        {parent && bot.created_by !== "bot" && (
+          <>
+            <dt>Reports to</dt>
+            <dd>{parent.name}</dd>
+          </>
+        )}
+      </dl>
+      {helpers.length > 0 ? (
+        <div className="helper-list">
+          {helpers.map((h) => (
+            <button key={h.id} type="button" className="chipbtn" onClick={() => onSelect(h.id)}>
+              {h.avatar || "🤖"} {h.name}
+              {h.working ? " · working" : ""}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="screen-help" style={{ margin: 0 }}>
+          No helpers yet. {bot.name} creates a helper bot when a task needs one, and asks it
+          for work — you&apos;ll see each handoff in this conversation.
+        </p>
+      )}
+    </section>
   );
 }
 

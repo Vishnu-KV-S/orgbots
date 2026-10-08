@@ -108,6 +108,12 @@ export function describeAction(action: BotAction | undefined): string {
       return `Wait ${action.seconds ?? 1}s`;
     case "remember":
       return "Save to memory";
+    case "create_bot":
+      return `Create helper “${action.bot ?? ""}”${action.label ? ` — ${action.label}` : ""}`;
+    case "ask_bot":
+      return `Ask ${action.bot ?? "helper"}: ${action.text ?? ""}`;
+    case "bot_answer":
+      return `${action.bot ?? "Helper"} answered`;
     case "observe":
       return "Look at the page";
     default:
@@ -128,6 +134,9 @@ export const ACTION_ICON: Record<string, string> = {
   reload: "↻",
   wait: "…",
   remember: "✎",
+  create_bot: "+",
+  ask_bot: "→",
+  bot_answer: "←",
   observe: "◎",
 };
 

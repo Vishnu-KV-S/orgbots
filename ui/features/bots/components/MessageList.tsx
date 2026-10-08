@@ -168,6 +168,9 @@ export function MessageList({
           <div key={m.id} className={isUser ? "msg user" : "msg bot"}>
             {!isUser && <Avatar name={bot.name} avatar={bot.avatar} size="sm" />}
             <div style={{ minWidth: 0, maxWidth: isUser ? "82%" : "100%" }}>
+              {m.payload.from_bot_name && (
+                <div className="from-bot">From {m.payload.from_bot_name} (bot)</div>
+              )}
               <div className="bubble" style={{ maxWidth: "100%" }}>
                 {quoted && <div className="quote">↪ {quoted.content}</div>}
                 {isUser ? m.content : <RichText text={m.content} />}

@@ -413,3 +413,105 @@ export function SettingsDialog({
     </Modal>
   );
 }
+
+// --- delete -------------------------------------------------------------------------
+
+/** Every bot under `bot`, at any depth. */
+export function helpersOf(bot: Bot, all: Bot[]): Bot[] {
+  const out: Bot[] = [];
+  const walk = (id: string) => {
+    for (const b of all) {
+      if (b.parent_bot_id === id && !out.includes(b)) {
+        out.push(b);
+        walk(b.id);
+      }
+    }
+  };
+  walk(bot.id);
+  return out;
+}
+
+/**
+ * Deleting a bot that has helpers is a choice, never a default: take the helpers
+ * with it, or keep them — they move up a level and carry on with their memory,
+ * conversations and routines intact.
+ */
+export function DeleteBotDialog({
+  bot,
+  bots,
+  onClose,
+  onDelete,
+}: {
+  bot: Bot;
+  bots: Bot[];
+  onClose: () => void;
+  onDelete: (withHelpers: boolean) => Promise<void>;
+}) {
+  const helpers = helpersOf(bot, bots);
+  const direct = helpers.filter((h) => h.parent_bot_id === bot.id);
+  const parent = bots.find((b) => b.id === bot.parent_bot_id);
+  const remove = useAction((withHelpers: boolean) => onDelete(withHelpers));
+  const names = (list: Bot[]) =>
+    list.length <= 3
+      ? list.map((h) => h.name).join(", ")
+      : `${list
+          .slice(0, 3)
+          .map((h) => h.name)
+          .join(", ")} and ${list.length - 3} more`;
+
+  return (
+    <Modal title={`Delete ${bot.name}?`} onClose={onClose}>
+      <p className="screen-help" style={{ marginTop: 0 }}>
+        {bot.name}&apos;s conversation and memory will be deleted. This cannot be undone.
+        {helpers.length > 0 &&
+          ` It has ${helpers.length} helper bot${helpers.length === 1 ? "" : "s"} under it — what should happen to ${helpers.length === 1 ? "it" : "them"}?`}
+      </p>
+      {helpers.length > 0 ? (
+        <div className="choice-list">
+          <button
+            type="button"
+            className="choice"
+            disabled={remove.pending}
+            onClick={() => void remove.run(false)}
+          >
+            <strong>Delete only {bot.name}</strong>
+            <span>
+              Keep {names(direct)} — {direct.length === 1 ? "it moves" : "they move"} up to{" "}
+              {parent ? `${parent.name}` : "the top level"} and keep{direct.length === 1 ? "s" : ""}{" "}
+              {direct.length === 1 ? "its" : "their"} memory and conversations.
+            </span>
+          </button>
+          <button
+            type="button"
+            className="choice danger"
+            disabled={remove.pending}
+            onClick={() => void remove.run(true)}
+          >
+            <strong>
+              Delete {bot.name} and {helpers.length === 1 ? "its helper" : `all ${helpers.length} helpers`}
+            </strong>
+            <span>Also deletes {names(helpers)}.</span>
+          </button>
+          <button type="button" className="pbtn" style={{ alignSelf: "flex-end" }} onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="form-actions">
+          <button type="button" className="pbtn" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="pbtn primary"
+            disabled={remove.pending}
+            onClick={() => void remove.run(false)}
+          >
+            Delete bot
+          </button>
+        </div>
+      )}
+      {remove.error && <ErrorNotice>{remove.error}</ErrorNotice>}
+    </Modal>
+  );
+}

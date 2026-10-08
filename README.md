@@ -105,9 +105,24 @@ What a turn does, and what stops it:
 - **Take control.** In the Computer pane a person can take a screen to sign in or
   solve a CAPTCHA; the computer refuses the bot's actions until it is handed back.
 
+**Helper bots.** A bot can build its own team. `create_bot` makes a helper under
+it (no approval; at most 5 helpers per bot, 2 levels deep), and `ask_bot` gives a
+helper a task and waits for the answer. Asking is the runtime's delegation: the
+helper's turn is a child run admitted against the asker's tree budget, cancelled if
+the asker stops, and handed the task only — never the asker's conversation. Both
+conversations show the handoff. Deleting a bot that has helpers asks whether to
+delete them too or keep them (they move up a level).
+
+Helpers need two settings the department leaves off:
+
+```bash
+RUNTIME_DELEGATION_ENABLED=true   # ask_bot is a delegation
+RUNTIME_WORKER_SLOTS=4            # a bot waiting on its helper holds a slot meanwhile
+```
+
 Not yet built (the next phases): skills and teach-by-demonstration, scheduled and
-event routines, plugins/connectors, group chats and bot-to-bot handoffs, file
-attachments and generated artifacts, voice chat, team bots.
+event routines, plugins/connectors, group chats with several bots, file attachments
+and generated artifacts, voice chat, team bots.
 
 ---
 
