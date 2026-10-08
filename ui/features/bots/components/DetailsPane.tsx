@@ -30,6 +30,7 @@ const RULE_ACTIONS = [
   ["sign_in", "signing in with a saved login"],
   ["run_command", "running commands in the sandbox"],
   ["run_local", "running commands on this computer"],
+  ["use_connector", "using a connected app (name it under On site)"],
 ] as const;
 
 const DECISION_LABEL = { ask: "Ask first", allow: "Allow", deny: "Never" } as const;

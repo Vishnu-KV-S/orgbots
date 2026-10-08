@@ -33,6 +33,8 @@ from runtime.api.attachments import router as attachments_router
 from runtime.api.bots import computer_router as bots_computer_router
 from runtime.api.bots import router as bots_router
 from runtime.api.bots import vault_router as bots_vault_router
+from runtime.api.connectors import marketplace_router as connectors_market_router
+from runtime.api.connectors import router as connectors_router
 from runtime.api.control import router as control_router
 from runtime.api.errors import http_errors
 from runtime.api.groups import reactions_router
@@ -135,6 +137,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Group chats between the person and their bots, and reactions on any message.
     app.include_router(groups_router)
     app.include_router(reactions_router)
+    # Connectors: MCP servers the organization connected, and the marketplace's.
+    app.include_router(connectors_router)
+    app.include_router(connectors_market_router)
     # Routines: a bot's own (`/v1/bots/{id}/routines`, behind the UI's proxy), and the
     # webhook that starts an event routine (`/v1/hooks`, which is not — it is called
     # from outside, and authenticated by its token and the sender's signature).

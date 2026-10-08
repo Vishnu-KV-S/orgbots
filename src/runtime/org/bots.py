@@ -3,8 +3,8 @@
 Two things live here.
 
 **`bot_actor_spec`** — what a bot *is* to the runtime: an `LLM_AGENT` running
-`bot_agent@1`, allowed the two browser tools and the terminal's three and nothing else,
-on DeepSeek. The spec is
+`bot_agent@1`, allowed the two browser tools, the terminal's three and connector calls,
+and nothing else, on DeepSeek. The spec is
 the same for every bot; what differs between them (name, instructions, memory) is
 conversation state read at run time, not authority. So editing a bot's instructions
 never republishes its actor, and "what was this run allowed to do" has the same answer
@@ -75,6 +75,8 @@ BOT_GRAPH = "bot_agent@1"
 BROWSER_TOOLS = frozenset({"browser.observe@1", "browser.act@1"})
 TERMINAL_TOOLS = frozenset({"terminal.run@1", "workspace.read@1", "workspace.write@1"})
 """The shell and the shared workspace on the computer (`gateway.builtin.terminal`)."""
+CONNECTOR_TOOLS = frozenset({"connector.call@1"})
+"""Tools on MCP servers the organization connected (`gateway.builtin.connectors`)."""
 
 _STEP_PROFILE = ModelProfile(
     provider="deepseek",
@@ -129,7 +131,7 @@ def bot_actor_spec(actor_name: str) -> ActorSpec:
         name=actor_name,
         kind=ActorKind.LLM_AGENT,
         graph_ref=BOT_GRAPH,
-        allowed_tools=BROWSER_TOOLS | TERMINAL_TOOLS,
+        allowed_tools=BROWSER_TOOLS | TERMINAL_TOOLS | CONNECTOR_TOOLS,
         ceilings=Ceilings(
             # Derived from MAX_STEPS, because the step budget is what a turn is meant
             # to stop on: it ends with a progress report and carries on. A ceiling

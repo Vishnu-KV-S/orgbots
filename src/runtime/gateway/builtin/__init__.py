@@ -18,6 +18,7 @@ from __future__ import annotations
 from runtime.domain.enums import BlastRadius
 from runtime.gateway.builtin import (
     browser,
+    connectors,
     fixture_sideeffect,
     publish_external,
     terminal,
@@ -42,6 +43,7 @@ def build_registry(
     publish_external.register(registry, resolved)
     browser.register(registry, resolved, uow_factory)
     terminal.register(registry, resolved)
+    connectors.register(registry, resolved, uow_factory)
     return registry
 
 
@@ -83,6 +85,7 @@ __all__ = [
     "action_floors",
     "browser",
     "build_registry",
+    "connectors",
     "default_action_floors",
     "fixture_sideeffect",
     "publish_external",

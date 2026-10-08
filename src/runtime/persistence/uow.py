@@ -25,6 +25,7 @@ from runtime.persistence.repositories.audit import AuditRepository
 from runtime.persistence.repositories.authority import AuthorityRepository
 from runtime.persistence.repositories.bots import BotRepository
 from runtime.persistence.repositories.budget import BudgetRepository
+from runtime.persistence.repositories.connectors import ConnectorRepository
 from runtime.persistence.repositories.credentials import CredentialRepository
 from runtime.persistence.repositories.delegations import DelegationRepository
 from runtime.persistence.repositories.departments import DepartmentRepository
@@ -133,6 +134,8 @@ class UnitOfWork:
         # Group chats, the bots' wake queue and reactions (migration 047). A bot's post
         # to a group and the wakes it sets off for teammates are one transaction.
         self.groups = GroupRepository(session)
+        # Connectors — MCP servers an organization connected (migration 049).
+        self.connectors = ConnectorRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

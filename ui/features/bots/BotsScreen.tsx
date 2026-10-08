@@ -20,6 +20,7 @@ import { Avatar } from "./components/Avatar";
 import { ComputerPane } from "./components/ComputerPane";
 import { Conversation, type Pane } from "./components/Conversation";
 import { DetailsPane } from "./components/DetailsPane";
+import { AppsPane } from "./components/AppsPane";
 import { FilesPane } from "./components/FilesPane";
 import { GroupConversation, GroupDialog } from "./components/GroupConversation";
 import { SkillsPane } from "./components/SkillsPane";
@@ -331,7 +332,9 @@ export function BotsScreen() {
                   ? "Team files"
                   : pane === "skills"
                     ? "Skills"
-                    : "Details"
+                    : pane === "apps"
+                      ? "Apps"
+                      : "Details"
             }
           >
             <div className="bpane-tabs">
@@ -358,6 +361,13 @@ export function BotsScreen() {
               </button>
               <button
                 type="button"
+                className={cx("tab", pane === "apps" && "on")}
+                onClick={() => setPane("apps")}
+              >
+                Apps
+              </button>
+              <button
+                type="button"
                 className={cx("tab", pane === "details" && "on")}
                 onClick={() => setPane("details")}
               >
@@ -378,6 +388,8 @@ export function BotsScreen() {
                 <ComputerPane key={selected.id} bot={selected} />
               ) : pane === "skills" ? (
                 <SkillsPane />
+              ) : pane === "apps" ? (
+                <AppsPane />
               ) : pane === "files" ? (
                 <FilesPane
                   key={selected.team_id}

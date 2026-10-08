@@ -2735,3 +2735,35 @@ button.frow:hover {
   }
 }
 
+/* --- apps (connectors) ----------------------------------------------------------------- */
+
+.app-row {
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.app-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-name {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.app-tools {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.app-tools code {
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-right: 6px;
+}
+

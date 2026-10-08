@@ -252,6 +252,20 @@ transcript, and **Ctrl/⌘+D** starts and stops dictation. Speech recognition an
 synthesis are the browser's own (best in Chrome and Edge), so no speech provider or
 key is needed.
 
+**Apps (connectors).** Bots can call apps directly through the Model Context Protocol
+(`runtime/gateway/mcp.py`, migration 049), instead of using their websites. In the
+**Apps** pane you connect a remote MCP server from the marketplace (DeepWiki, Context7,
+GitHub, Hugging Face, Stripe, Cloudflare and Microsoft docs, Exa) or by address, with a
+bearer or header token if it needs one. Adding one connects to it first: an address or
+token that doesn't work is refused there, not discovered by a bot mid-task. The tool
+list is stored, and bots see it in their prompt. A bot calls a tool with
+`use_connector`, through the `connector.call@1` gateway tool. That is the only place the
+sealed token is opened, so it never reaches a prompt, a run's state or the computer.
+A tool the server marks read-only runs directly. Anything else asks you first (*Always
+allow* files a rule for that app), *never* refuses it, and Auto Review checks it. Every
+app is shared by the organization's bots. OAuth-only servers aren't supported yet; the
+runtime uses tokens.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
@@ -263,7 +277,7 @@ rings when it asks one, and more — preview each in the designer. All of them a
 drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs one
 context, not one per bot.
 
-Not yet built (the next phases): plugins/connectors, team bots.
+Not yet built (the next phases): team bots, OAuth sign-in for connectors.
 
 ---
 
