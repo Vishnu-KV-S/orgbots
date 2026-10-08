@@ -880,6 +880,17 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
                 await node.org.groups.relay_reply(wake, bot, text, run_id=ctx.run_id)
                 where.update(replied_to=str(wake.from_bot_id))
             await say("reply", "bot", text, where)
+            if not delegation:
+                # The person's devices hear about it; a helper answering its parent bot
+                # is not news for the person.
+                await bots.notify(
+                    bot,
+                    "question" if step.action == "ask_user" else "reply",
+                    text,
+                    run_id=ctx.run_id,
+                    step=n,
+                    url=f"/?group={group_id}" if group_id is not None else "",
+                )
             asked = next((m.content for m in reversed(conversation) if m.role == "user"), "")
             await bots.write_episode(
                 bot_id,

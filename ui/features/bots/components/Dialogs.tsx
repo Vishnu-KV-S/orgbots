@@ -10,10 +10,12 @@ import {
   createBot,
   resetComputer,
   searchBots,
+  pushTest,
 } from "@/lib/api/bots";
 import { useAction } from "@/lib/hooks/useAction";
 import { cx } from "@/lib/cx";
 import { Designer, randomAppearance } from "../avatar";
+import { type PushState, disablePush, enablePush, pushState } from "../lib/push";
 import { TEMPLATES } from "../lib/templates";
 import { Avatar } from "./Avatar";
 import { BriefFields } from "./BriefEditor";
@@ -403,6 +405,7 @@ export function SettingsDialog({
           />
           Notify me when a bot replies or needs attention while this tab is in the background
         </label>
+        <PushSetting />
       </section>
 
       <section className="dsec">
@@ -561,5 +564,59 @@ export function DeleteBotDialog({
       )}
       {remove.error && <ErrorNotice>{remove.error}</ErrorNotice>}
     </Modal>
+  );
+}
+
+/** Push to this device — notifications that arrive with the app closed. */
+function PushSetting() {
+  const [state, setState] = useState<PushState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tested, setTested] = useState(false);
+  useEffect(() => {
+    void pushState().then(setState, () => setState("unsupported"));
+  }, []);
+  if (state === null) return null;
+  const toggle = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setState(state === "on" ? await disablePush() : await enablePush());
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={state === "on"}
+          disabled={busy || state === "unsupported" || state === "denied"}
+          onChange={() => void toggle()}
+        />
+        Push to this device, even when the app is closed
+      </label>
+      <p className="screen-help" style={{ margin: "4px 0 0 24px" }}>
+        {state === "unsupported"
+          ? "This browser cannot receive pushes. Install the app (from the browser's menu) or use Chrome, Edge or Firefox."
+          : state === "denied"
+            ? "Notifications are blocked for this site in the browser's settings."
+            : "Replies, questions, approvals and sign-in requests. Install the app from the browser's menu to get its own window and icon."}
+      </p>
+      {state === "on" && (
+        <button
+          type="button"
+          className="linklike"
+          style={{ marginLeft: 24 }}
+          onClick={() => void pushTest().then(() => setTested(true))}
+        >
+          {tested ? "Sent — it arrives within a few seconds" : "Send a test"}
+        </button>
+      )}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
+    </div>
   );
 }

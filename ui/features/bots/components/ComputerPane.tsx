@@ -44,12 +44,12 @@ export function ComputerPane({ bot }: { bot: Bot }) {
   const [view, setView] = useState<"screen" | "workspace">("screen");
   return (
     <div>
-      <div className="seg" role="tablist" aria-label="Computer">
+      <div className="seg subtabs" role="tablist" aria-label="Computer">
         <button
           type="button"
           role="tab"
           aria-selected={view === "screen"}
-          className={cx("seg-btn", view === "screen" && "on")}
+          className={cx(view === "screen" && "on")}
           onClick={() => setView("screen")}
         >
           Screen
@@ -58,7 +58,7 @@ export function ComputerPane({ bot }: { bot: Bot }) {
           type="button"
           role="tab"
           aria-selected={view === "workspace"}
-          className={cx("seg-btn", view === "workspace" && "on")}
+          className={cx(view === "workspace" && "on")}
           onClick={() => setView("workspace")}
         >
           Workspace &amp; terminal

@@ -598,6 +598,17 @@ class BotService:
                 run_id=uuid.UUID(str(run_id)),
             )
             await uow.bots.set_flags(bot_id, needs_attention=True, unread=True)
+            bot = await uow.bots.get(bot_id)
+            if bot is not None:
+                await uow.push.notify(
+                    message_id(run_id, step, "notify:approval"),
+                    bot.organization_id,
+                    bot_id=bot_id,
+                    kind="approval",
+                    title=f"{bot.name} needs your approval",
+                    body=" ".join(thought.split())[:240],
+                    url=f"/?bot={bot_id}",
+                )
         return pid
 
     async def depth(self, bot_id: uuid.UUID) -> int:
@@ -695,6 +706,27 @@ class BotService:
         async with self._uow() as uow:
             return await uow.bots.get_pending(pending_id_)
 
+    async def notify(
+        self, bot: Any, kind: str, body: str, *, run_id: Any, step: int, url: str = ""
+    ) -> None:
+        """Tell the person's devices (`runtime.runtime.notifier` sends it). Idempotent
+        per `(run, step)`, like the line in the conversation it is about."""
+        title = {
+            "question": f"{bot.name} has a question",
+            "approval": f"{bot.name} needs your approval",
+            "sign_in": f"{bot.name} needs you to sign in",
+        }.get(kind, bot.name)
+        async with self._uow.transaction() as uow:
+            await uow.push.notify(
+                message_id(run_id, step, f"notify:{kind}"),
+                bot.organization_id,
+                bot_id=bot.id,
+                kind=kind,
+                title=title,
+                body=" ".join(body.split())[:240],
+                url=url or f"/?bot={bot.id}",
+            )
+
     async def end_turn(self, bot_id: uuid.UUID, *, needs_attention: bool = False) -> None:
         async with self._uow.transaction() as uow:
             await uow.bots.set_flags(
@@ -771,6 +803,15 @@ class BotService:
                 run_id=uuid.UUID(str(run_id)),
             )
             await uow.bots.set_flags(bot.id, needs_attention=True, unread=True)
+            await uow.push.notify(
+                message_id(run_id, step, "notify:sign_in"),
+                bot.organization_id,
+                bot_id=bot.id,
+                kind="sign_in",
+                title=f"{bot.name} needs you to sign in",
+                body=f"{site_of(host)} — {purpose.replace('_', ' ')}",
+                url=f"/?bot={bot.id}",
+            )
         return rid
 
     async def credential_request(self, request_id: uuid.UUID) -> CredentialRequestRow | None:

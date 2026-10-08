@@ -1000,3 +1000,20 @@ export const installConnector = (key: string, token?: string) =>
     json("POST", token ? { token } : {}),
   );
 
+// --- push notifications -----------------------------------------------------------------
+
+export const PUSH_BASE = "/rt/v1/push";
+
+export const pushKey = () => request<{ public_key: string }>(PUSH_BASE, {});
+
+export const pushSubscribe = (subscription: PushSubscriptionJSON, device: string) =>
+  request<{ subscribed: boolean }>(
+    `${PUSH_BASE}/subscribe`,
+    json("POST", { ...subscription, device }),
+  );
+
+export const pushUnsubscribe = (endpoint: string) =>
+  request<{ subscribed: boolean }>(`${PUSH_BASE}/unsubscribe`, json("POST", { endpoint }));
+
+export const pushTest = () => request<{ queued: boolean }>(`${PUSH_BASE}/test`, json("POST", {}));
+

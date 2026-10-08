@@ -36,6 +36,10 @@ dependencies = [
     # when it is stored so `read_file` reads a PDF like any other file. Pure Python, no
     # system libraries.
     "pypdf>=5",
+    # Push notifications to the installed app (and any subscribed browser) when a bot
+    # replies or needs the person: Web Push's encryption and VAPID signing, which the
+    # standard library does not have. Only `runtime.gateway.push` imports it.
+    "pywebpush>=2",
 ]
 
 [project.optional-dependencies]
@@ -124,6 +128,11 @@ ignore_missing_imports = true
 # `RUNTIME_MEMORY_STORE=native` and `mem0_store` is never imported.
 [[tool.mypy.overrides]]
 module = ["mem0.*"]
+ignore_missing_imports = true
+
+# `pywebpush` ships no type information; only `runtime.gateway.push` calls it.
+[[tool.mypy.overrides]]
+module = ["pywebpush.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

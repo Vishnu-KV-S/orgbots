@@ -32,6 +32,7 @@ import {
   notificationsEnabled,
 } from "./components/Dialogs";
 import { Sidebar, type BotCommands } from "./components/Sidebar";
+import { registerServiceWorker } from "./lib/push";
 import { TEMPLATES } from "./lib/templates";
 
 const LIST_MS = 2500;
@@ -137,6 +138,12 @@ export function BotsScreen() {
       setSelectedId(list.find((b) => !b.hidden)?.id ?? list[0].id);
     }
   }, [list, selectedId]);
+
+  // The service worker that shows push notifications (it caches nothing). Registered on
+  // load so a device that turned push on keeps receiving after the worker updates.
+  useEffect(() => {
+    void registerServiceWorker();
+  }, []);
 
   // --- ⌘K -----------------------------------------------------------------------------
   useEffect(() => {

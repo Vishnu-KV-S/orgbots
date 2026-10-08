@@ -48,6 +48,10 @@ _TRUNCATE_ORDER = [
     "bot_skills",
     # Groups, wakes and reactions (047): wakes and reactions reference no organization.
     "bot_connectors",
+    # Push (050): subscriptions belong to organizations; the outbox and the key do not.
+    "bot_notifications",
+    "push_subscriptions",
+    "push_keys",
     "bot_reactions",
     "bot_wakes",
     "bot_group_messages",

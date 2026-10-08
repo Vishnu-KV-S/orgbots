@@ -370,6 +370,10 @@ class Settings(BaseSettings):
     show an event routine's webhook URL; unset, the URL is built from the request, which
     is right for a sender on the same machine and wrong for GitHub or Slack."""
 
+    push_contact: str = "mailto:bots@localhost"
+    """Who runs this runtime, for the push services (Web Push's VAPID `sub` claim). Some
+    services reject a push without one; set a real `mailto:` or `https:` address."""
+
     bot_routines_enabled: bool = True
     """Whether the worker starts bots' routines (`runtime.runtime.routines`).
 
