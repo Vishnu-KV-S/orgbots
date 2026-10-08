@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Bot, BotMessage } from "@/lib/api/bots";
-import { ACTION_ICON, RichText, describeAction } from "../lib/text";
+import { ACTION_ICON, OPENS_FILE, RichText, describeAction } from "../lib/text";
 import { ApprovalCard } from "./ApprovalCard";
+import { CredentialCard } from "./CredentialCard";
 import { Avatar } from "./Avatar";
 
 type Item =
@@ -51,7 +52,15 @@ function useReactions() {
   return { reactions, react };
 }
 
-function WorkBlock({ steps, live }: { steps: BotMessage[]; live: boolean }) {
+function WorkBlock({
+  steps,
+  live,
+  onOpenFile,
+}: {
+  steps: BotMessage[];
+  live: boolean;
+  onOpenFile: (path: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const expanded = open || live;
   const latest = steps[steps.length - 1];
@@ -71,11 +80,28 @@ function WorkBlock({ steps, live }: { steps: BotMessage[]; live: boolean }) {
         <div className="steps">
           {(live ? steps.slice(-8) : steps).map((s) => {
             const action = s.payload.action;
+            const file =
+              s.payload.ok && OPENS_FILE.has(action?.type ?? "")
+                ? (action?.to ?? action?.path)
+                : undefined;
             return (
               <div key={s.id} className="stepline">
                 <span className="ico">{ACTION_ICON[action?.type ?? ""] ?? "•"}</span>
                 <div>
-                  <div className="what">{describeAction(action)}</div>
+                  <div className="what">
+                    {file ? (
+                      <button
+                        type="button"
+                        className="linklike"
+                        title="Open in Files"
+                        onClick={() => onOpenFile(file)}
+                      >
+                        {describeAction(action)}
+                      </button>
+                    ) : (
+                      describeAction(action)
+                    )}
+                  </div>
                   {s.content && <div className="why">{s.content}</div>}
                   {s.payload.ok === false && s.payload.error && (
                     <div className="fail">{s.payload.error}</div>
@@ -96,16 +122,20 @@ export function MessageList({
   bot,
   messages,
   pending,
+  asking,
   working,
   onReply,
   onDecided,
+  onOpenFile,
 }: {
   bot: Bot;
   messages: BotMessage[];
   pending: Set<string>;
+  asking: Set<string>;
   working: boolean;
   onReply: (m: BotMessage) => void;
   onDecided: () => void;
+  onOpenFile: (path: string) => void;
 }) {
   const items = useMemo(() => group(messages), [messages]);
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
@@ -114,6 +144,16 @@ export function MessageList({
     for (const m of messages) {
       if (m.role === "system" && m.payload.pending_id && m.payload.decision) {
         out.set(m.payload.pending_id, m.payload.decision);
+      }
+    }
+    return out;
+  }, [messages]);
+  const answered = useMemo(() => {
+    const out = new Map<string, { kind: string; saved: boolean }>();
+    for (const m of messages) {
+      const rid = m.payload.credential_request_id;
+      if (m.role === "system" && rid && m.payload.decision) {
+        out.set(rid, { kind: m.payload.decision, saved: m.payload.saved === true });
       }
     }
     return out;
@@ -129,6 +169,7 @@ export function MessageList({
               key={item.id}
               steps={item.steps}
               live={working && index === items.length - 1}
+              onOpenFile={onOpenFile}
             />
           );
         }
@@ -146,9 +187,23 @@ export function MessageList({
             />
           );
         }
+        if (m.role === "credentials") {
+          const rid = m.payload.credential_request_id ?? "";
+          return (
+            <CredentialCard
+              key={m.id}
+              botId={bot.id}
+              botName={bot.name}
+              message={m}
+              live={asking.has(rid)}
+              decision={answered.get(rid) ?? null}
+              onDone={onDecided}
+            />
+          );
+        }
         if (m.role === "system") {
           // Decision notes are shown on the card they decide.
-          if (m.payload.pending_id) return null;
+          if (m.payload.pending_id || m.payload.credential_request_id) return null;
           return (
             <div key={m.id} className="sysline">
               {m.content}

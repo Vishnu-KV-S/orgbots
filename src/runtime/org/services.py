@@ -18,6 +18,7 @@ from runtime.artifacts.store import ArtifactStore
 from runtime.org.approvals import ApprovalService
 from runtime.org.bots import BotService
 from runtime.org.evaluation import EvaluationService
+from runtime.org.files import TeamDrive
 from runtime.org.goals import GoalService
 from runtime.org.inbox import InboxService
 from runtime.org.metrics import MetricsService
@@ -36,10 +37,14 @@ class OrgServices:
     approvals: ApprovalService
     metrics: MetricsService
     bots: BotService
+    files: TeamDrive
 
 
 def build_org_services(
-    uow_factory: UnitOfWorkFactory, artifacts: ArtifactStore | None = None
+    uow_factory: UnitOfWorkFactory,
+    artifacts: ArtifactStore | None = None,
+    *,
+    bot_chunks: int = 1,
 ) -> OrgServices:
     """Wire the services so they share one inbox and one task service.
 
@@ -58,5 +63,6 @@ def build_org_services(
         evaluation=EvaluationService(uow_factory, tasks=tasks, inbox=inbox),
         approvals=ApprovalService(uow_factory),
         metrics=MetricsService(uow_factory),
-        bots=BotService(uow_factory),
+        bots=BotService(uow_factory, inbox=inbox, max_chunks=bot_chunks),
+        files=TeamDrive(uow_factory),
     )

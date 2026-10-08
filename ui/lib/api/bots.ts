@@ -31,6 +31,8 @@ export interface Bot {
   last_run_id: string | null;
   duplicated_from: string | null;
   parent_bot_id: string | null;
+  /** The team whose files this bot shares: a bot and every helper under it. */
+  team_id: string;
   created_by: "person" | "bot";
   /** The 3D body; `{}` means "derive one from the id". See `features/bots/avatar`. */
   appearance: Partial<import("@/features/bots/avatar/appearance").Appearance>;
@@ -88,7 +90,45 @@ export interface BotMemory {
   updated_at: string;
 }
 
-export type MessageRole = "user" | "bot" | "activity" | "approval" | "system" | "error";
+export type MessageRole =
+  | "user"
+  | "bot"
+  | "activity"
+  | "approval"
+  | "system"
+  | "error"
+  | "credentials";
+
+export type CredentialKind =
+  | "email"
+  | "username"
+  | "phone"
+  | "password"
+  | "new_password"
+  | "confirm_password"
+  | "otp"
+  | "name"
+  | "text";
+
+/** One field a credential card asks for. Read off the page by the runtime. */
+export interface CredentialField {
+  key: string;
+  kind: CredentialKind;
+  label: string;
+}
+
+/** A saved login, as any list shows it: site and hint, never a value. */
+export interface VaultEntry {
+  id: string;
+  host: string;
+  label: string;
+  kinds: string[];
+  auto_use: boolean;
+  use_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface BotAction {
   type: string;
@@ -108,6 +148,12 @@ export interface BotAction {
    * the helper whose memory or brief changed, or empty for the bot's own. */
   bot?: string;
   label?: string;
+  /** sign_in: how the form was filled — a saved login, or what the person entered. */
+  via?: "saved" | "once";
+  fields?: string[];
+  /** File steps: the path in the team files; `to` is where a move put it. */
+  path?: string;
+  to?: string;
 }
 
 export interface BotMessage {
@@ -135,6 +181,18 @@ export interface BotMessage {
     outcome?: string;
     changed?: string[];
     found?: number;
+    /** role "credentials": the card. Never carries a value. */
+    credential_request_id?: string;
+    host?: string;
+    page_url?: string;
+    purpose?: "sign_in" | "sign_up" | "verify";
+    fields?: CredentialField[];
+    saved?: { id: string; label: string }[] | boolean;
+    retry?: boolean;
+    /** File steps: the file and the version the step left it at. */
+    file_id?: string;
+    version?: number;
+    chars?: number;
   };
   run_id: string | null;
   reply_to: string | null;
@@ -144,6 +202,8 @@ export interface BotMessage {
 export interface MessagePage {
   messages: BotMessage[];
   pending: string[];
+  /** Credential cards still waiting for the person. */
+  credential_requests: string[];
   working: boolean;
   run_status: string | null;
 }
@@ -233,6 +293,39 @@ export const sendMessage = (id: string, text: string, replyTo?: string | null) =
 export const decide = (id: string, pendingId: string, decision: "once" | "always" | "deny") =>
   request<Sent>(`${BOTS_BASE}/${id}/pending/${pendingId}`, json("POST", { decision }));
 
+/**
+ * Answer a credential card. The values go in this one request body and nowhere else —
+ * not into state the caller keeps, not into a URL. The server seals them into the
+ * vault; the bot is told the form was filled, never with what.
+ */
+export const submitCredentials = (
+  id: string,
+  requestId: string,
+  values: Record<string, string>,
+  save: boolean,
+) =>
+  request<Sent>(`${BOTS_BASE}/${id}/credentials/${requestId}`, json("POST", { values, save }));
+
+export const chooseSavedLogin = (id: string, requestId: string, entryId: string) =>
+  request<Sent>(
+    `${BOTS_BASE}/${id}/credentials/${requestId}`,
+    json("POST", { use_entry_id: entryId }),
+  );
+
+export const cancelCredentials = (id: string, requestId: string) =>
+  request<Sent>(`${BOTS_BASE}/${id}/credentials/${requestId}/cancel`, json("POST", {}));
+
+export const VAULT_BASE = "/rt/v1/vault";
+
+export const listVault = (signal?: AbortSignal) =>
+  request<{ entries: VaultEntry[] }>(VAULT_BASE, { signal });
+
+export const setVaultAutoUse = (entryId: string, autoUse: boolean) =>
+  request<unknown>(`${VAULT_BASE}/${entryId}`, json("PATCH", { auto_use: autoUse }));
+
+export const deleteVaultEntry = (entryId: string) =>
+  request<unknown>(`${VAULT_BASE}/${entryId}`, { method: "DELETE" });
+
 export const listRules = (id: string, signal?: AbortSignal) =>
   request<{ rules: BotRule[] }>(`${BOTS_BASE}/${id}/rules`, { signal });
 
@@ -294,3 +387,99 @@ export const computerStatus = (signal?: AbortSignal) =>
   request<ComputerStatus>(COMPUTER_BASE, { signal });
 
 export const resetComputer = () => request<unknown>(`${COMPUTER_BASE}/reset`, json("POST", {}));
+
+/** A file in a team's shared drive. Listings carry no `content`; one file does. */
+export interface TeamFile {
+  id: string;
+  path: string;
+  name: string;
+  folder: string;
+  chars: number;
+  version: number;
+  /** Only the person may change a locked file; bots are refused. */
+  locked: boolean;
+  created_by_kind: "person" | "bot";
+  created_by_name: string;
+  updated_by_kind: "person" | "bot";
+  updated_by_bot_id: string | null;
+  updated_by_name: string;
+  created_at: string;
+  updated_at: string;
+  /** Set when the file is in the trash. */
+  deleted_at: string | null;
+  content?: string;
+  /** A search match: the text around the first hit. */
+  snippet?: string;
+}
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  label: string;
+  parent_bot_id: string | null;
+}
+
+export interface TeamFiles {
+  team: { id: string; members: TeamMember[] };
+  files: TeamFile[];
+  trash: TeamFile[];
+  /** Only when searched. */
+  matches?: TeamFile[];
+}
+
+export interface FileRevision {
+  id: string;
+  version: number;
+  op: "create" | "write" | "append" | "edit" | "move" | "delete" | "restore";
+  path: string;
+  content: string;
+  editor_kind: "person" | "bot";
+  editor_name: string;
+  run_id: string | null;
+  note: string;
+  created_at: string;
+}
+
+export type FileChange = { file: TeamFile; op: string };
+
+const filesOf = (id: string) => `${BOTS_BASE}/${id}/files`;
+
+/** The drive of the team `id` is on — any bot on the team gives the same drive. */
+export const listFiles = (id: string, q = "", signal?: AbortSignal) =>
+  request<TeamFiles>(`${filesOf(id)}${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`, {
+    signal,
+  });
+
+export const getFile = (id: string, fileId: string, signal?: AbortSignal) =>
+  request<TeamFile>(`${filesOf(id)}/${fileId}`, { signal });
+
+export const createFile = (id: string, path: string, content: string) =>
+  request<FileChange>(filesOf(id), json("POST", { path, content }));
+
+/** Save new content. `baseVersion` is the version that was opened: saving over a newer
+ * change (a bot's, say) is refused with a 409 rather than silently undoing it. */
+export const saveFile = (id: string, fileId: string, content: string, baseVersion: number) =>
+  request<FileChange>(
+    `${filesOf(id)}/${fileId}`,
+    json("PATCH", { content, base_version: baseVersion }),
+  );
+
+/** Rename, or move into a folder (a path ending in `/`). */
+export const moveFile = (id: string, fileId: string, path: string) =>
+  request<FileChange>(`${filesOf(id)}/${fileId}`, json("PATCH", { path }));
+
+export const lockFile = (id: string, fileId: string, locked: boolean) =>
+  request<{ file: TeamFile }>(`${filesOf(id)}/${fileId}`, json("PATCH", { locked }));
+
+export const deleteFile = (id: string, fileId: string, baseVersion?: number) =>
+  request<FileChange>(
+    `${filesOf(id)}/${fileId}${baseVersion ? `?base_version=${baseVersion}` : ""}`,
+    { method: "DELETE" },
+  );
+
+export const listFileRevisions = (id: string, fileId: string, signal?: AbortSignal) =>
+  request<{ revisions: FileRevision[] }>(`${filesOf(id)}/${fileId}/revisions`, { signal });
+
+/** Out of the trash, or back to an earlier revision's content (as a new revision). */
+export const restoreFile = (id: string, fileId: string, version?: number) =>
+  request<FileChange>(`${filesOf(id)}/${fileId}/restore`, json("POST", { version }));

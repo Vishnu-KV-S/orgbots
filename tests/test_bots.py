@@ -126,6 +126,13 @@ class _Bot:
     turn: int = 0
     actor_name: str = "bot-scout-000000"
     parent_bot_id: uuid.UUID | None = None
+    organization_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    team_id: uuid.UUID | None = None
+
+    def __post_init__(self) -> None:
+        # A bot nobody put on a team starts its own, as `bots.create` does.
+        if self.team_id is None:
+            self.team_id = self.id
 
 
 @dataclass
@@ -263,6 +270,8 @@ class FakeBots:
             description=role,
             actor_name=f"bot-{name.lower()}-abc123",
             parent_bot_id=parent.id,
+            organization_id=parent.organization_id,
+            team_id=parent.team_id,
             brief=(brief or BotBrief(mission=role)).model_dump(),
         )
         self.helpers_.append(helper)
@@ -355,9 +364,18 @@ class _Ctx:
         return {"run_id": str(self.run_id)}
 
 
+class EmptyDrive:
+    """A team with nothing in its drive, for the tests that are not about files. The
+    ones that are (`tests/test_team_files.py`) use the real `TeamDrive` on Postgres."""
+
+    async def summary(self, team: Any, limit: int) -> tuple[int, list[Any]]:
+        return 0, []
+
+
 @dataclass
 class _Org:
     bots: FakeBots
+    files: Any = field(default_factory=EmptyDrive)
 
 
 @dataclass
@@ -368,6 +386,8 @@ class _Node:
     org: _Org
     delegated: list[tuple[str, Any]] = field(default_factory=list)
     helper_reply: str = "Scout's answer: 3 vendors found."
+    artifacts: Any = None
+    """Only read when a result was externalised; the fake gateway never does that."""
 
     async def delegate(self, target_actor: str, context: Any, **_: Any) -> Any:
         from runtime.domain.delegation import DelegationOutcome
@@ -389,7 +409,9 @@ async def _turn(node: _Node, bot_id: uuid.UUID, **extra: Any) -> dict[str, Any]:
     return dict(result.get("output", {}))
 
 
-async def test_a_turn_parks_a_password_then_resumes_exactly_that_action() -> None:
+async def test_a_turn_parks_a_consequential_click_then_resumes_exactly_that_action() -> None:
+    """Park and resume. (A password used to be the example here; typing one is now a
+    sign_in and never reaches the gate — see tests/test_vault.py.)"""
     bot = _Bot(id=uuid.uuid4())
     bots = FakeBots(bot)
     page = FakePageGateway()
@@ -397,7 +419,7 @@ async def test_a_turn_parks_a_password_then_resumes_exactly_that_action() -> Non
         [
             {"thought": "Open the site", "action": "navigate", "url": "https://site.test"},
             {"thought": "Go to login", "action": "click", "element": 1},
-            {"thought": "Enter the password", "action": "type", "element": 1, "text": "hunter2"},
+            {"thought": "Submit it", "action": "click", "element": 2, "sensitive": True},
         ]
     )
     node = _Node(_Ctx(), page, model, _Org(bots))
@@ -405,8 +427,7 @@ async def test_a_turn_parks_a_password_then_resumes_exactly_that_action() -> Non
 
     assert out["status"] == "awaiting_approval"
     (card,) = bots.said("approval")
-    assert card.payload["action"]["secret"] is True
-    assert "hunter2" not in json.dumps(card.payload)
+    assert card.payload["action"]["type"] == "click"
     assert [c["action"]["type"] for c in page.calls if c["tool"] == "browser.act@1"] == [
         "navigate",
         "click",
@@ -421,10 +442,9 @@ async def test_a_turn_parks_a_password_then_resumes_exactly_that_action() -> Non
     out2 = await _turn(node2, bot.id, resume_pending_id=str(pending.id))
 
     assert out2["status"] == "replied"
-    typed = [c for c in page.calls if c["tool"] == "browser.act@1"][-1]["action"]
-    assert typed == {"type": "type", "element": 1, "text": "hunter2", "submit": False}
+    clicked = [c for c in page.calls if c["tool"] == "browser.act@1"][-1]["action"]
+    assert clicked == {"type": "click", "element": 2}
     assert len(model2.prompts) == 1, "the approved action must not be re-decided"
-    assert "hunter2" not in "".join(json.dumps(m.payload) + m.content for m in bots.log.values())
     assert bots.said("bot")[-1].content == "Logged in."
 
 

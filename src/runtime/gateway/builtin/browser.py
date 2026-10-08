@@ -24,10 +24,21 @@ site — a decision the blast-radius floor cannot express.
 The screen id is the bot's id, passed by the graph. The computer refuses an action
 with 409 while a person holds the screen; that surfaces here as a failed result the
 bot reads, not as an exception that fails the run.
+
+**`fill_credentials` is an `act`, and the only one that opens the vault.** Its
+action names vault entries and the fields they go into — ids and element numbers, so
+that is all the journal, the audit row and the run's checkpoint ever hold. The values
+are opened here (`runtime.gateway.vault.Vault.open`, which also decides the site from
+the entries themselves), sent to the computer's `/fill`, and dropped. It rides on
+`browser.act@1` rather than being a third tool because it has exactly `act`'s
+consequence — it types and may submit — and a new tool would mean republishing every
+bot's actor to grant it.
 """
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -35,7 +46,10 @@ from pydantic import BaseModel, Field
 
 from runtime.domain.enums import BlastRadius, RecoveryPolicy
 from runtime.domain.errors import TransientFault
+from runtime.domain.vault import PASSWORD_KINDS, lookup
 from runtime.gateway.tools import EffectCapabilities, ToolContext, ToolDef, ToolRegistry
+from runtime.gateway.vault import Vault, VaultRefusedError, VaultUnavailableError
+from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.settings import Settings
 
 TIMEOUT_S = 60.0
@@ -44,6 +58,11 @@ TIMEOUT_S = 60.0
 class ObserveArgs(BaseModel):
     screen_id: str = Field(min_length=1, max_length=64)
     label: str = Field(default="", max_length=120)
+    screenshot: bool = False
+    """Also capture the viewport as a masked JPEG, for a bot's `look`. The result is
+    then well over the gateway's inline limit, so it is externalised to the artifact
+    store and journalled by reference like any large result — the screenshot is kept
+    at rest exactly as the page text of every observation already is."""
 
 
 class ActArgs(BaseModel):
@@ -61,6 +80,8 @@ class BrowserResult(BaseModel):
     rendered: str = ""
     """The page as the model reads it — see `runtime.computer.snapshot.render`."""
     elements: list[dict[str, Any]] = Field(default_factory=list)
+    screenshot: str = Field(default="", repr=False)
+    """Base64 JPEG of the viewport, masked, when one was asked for."""
 
 
 def _result(body: dict[str, Any], *, ok: bool = True, error: str | None = None) -> BrowserResult:
@@ -73,11 +94,26 @@ def _result(body: dict[str, Any], *, ok: bool = True, error: str | None = None) 
         controller=str(body.get("controller", "bot")),
         rendered=str(body.get("rendered", "")),
         elements=list(snap.get("elements", [])),
+        screenshot=str(body.get("screenshot", "")),
     )
 
 
-def build(settings: Settings) -> tuple[tuple[ToolDef, Any], tuple[ToolDef, Any]]:
+def build(
+    settings: Settings, uow_factory: UnitOfWorkFactory | None = None
+) -> tuple[tuple[ToolDef, Any], tuple[ToolDef, Any]]:
     base = settings.computer_url.rstrip("/")
+    vault_holder: list[Vault] = []
+
+    def vault() -> Vault:
+        # Built on first use, so a worker with no encryption key runs every other
+        # browser action and refuses a fill with the reason, rather than not starting.
+        if not vault_holder:
+            if uow_factory is None:
+                raise VaultUnavailableError("this gateway was built without a vault")
+            vault_holder.append(Vault.from_settings(uow_factory, settings))
+        return vault_holder[0]
+
+    fill = _filler(base, vault)
 
     async def _post(path: str, payload: dict[str, Any]) -> httpx.Response:
         try:
@@ -92,14 +128,18 @@ def build(settings: Settings) -> tuple[tuple[ToolDef, Any], tuple[ToolDef, Any]]
     async def observe(ctx: ToolContext, args: Any) -> BrowserResult:
         _ = ctx
         typed: ObserveArgs = args
-        response = await _post(f"/screens/{typed.screen_id}/observe", {"label": typed.label})
+        response = await _post(
+            f"/screens/{typed.screen_id}/observe",
+            {"label": typed.label, "screenshot": typed.screenshot},
+        )
         if response.status_code >= 400:
             return BrowserResult(ok=False, error=_detail(response))
         return _result(response.json())
 
     async def act(ctx: ToolContext, args: Any) -> BrowserResult:
-        _ = ctx
         typed: ActArgs = args
+        if typed.action.get("type") == "fill_credentials":
+            return await fill(ctx, typed)
         response = await _post(
             f"/screens/{typed.screen_id}/act", {"action": typed.action, "label": typed.label}
         )
@@ -137,15 +177,81 @@ def build(settings: Settings) -> tuple[tuple[ToolDef, Any], tuple[ToolDef, Any]]
     return (observe_def, observe), (act_def, act)
 
 
-def _detail(response: httpx.Response) -> str:
+def _filler(
+    base: str, vault: Callable[[], Vault]
+) -> Callable[[ToolContext | None, ActArgs], Awaitable[BrowserResult]]:
+    async def fill(ctx: ToolContext | None, typed: ActArgs) -> BrowserResult:
+        action = typed.action
+        if ctx is None:
+            return BrowserResult(ok=False, error="a fill needs a run context")
+        try:
+            entries = [uuid.UUID(str(e)) for e in action.get("entries", [])]
+            site, values = await vault().open(
+                uuid.UUID(ctx.organization_id), entries, bot_id=uuid.UUID(typed.screen_id)
+            )
+        except (VaultUnavailableError, VaultRefusedError, ValueError) as exc:
+            return BrowserResult(ok=False, error=str(exc).splitlines()[0])
+        fields: list[dict[str, Any]] = []
+        missing: list[str] = []
+        for spec in action.get("fields", []):
+            elements = [int(e) for e in spec.get("elements", [])]
+            if not elements:
+                continue
+            kind = str(spec.get("kind", "text"))
+            value = lookup(kind, values, str(spec.get("key", "")))
+            if value is None:
+                missing.append(kind)
+                continue
+            fields.append(
+                {"elements": elements, "value": value, "password": kind in PASSWORD_KINDS}
+            )
+        values.clear()
+        if missing:
+            return BrowserResult(
+                ok=False, error=f"the vault has no {', '.join(missing)} for {site}"
+            )
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
+                response = await client.post(
+                    f"{base}/screens/{typed.screen_id}/fill",
+                    json={
+                        "expect_host": site,
+                        "fields": fields,
+                        "submit": bool(action.get("submit", True)),
+                        "label": typed.label,
+                    },
+                )
+        except httpx.TransportError as exc:
+            raise TransientFault(
+                f"the computer at {base} is not reachable ({type(exc).__name__})"
+            ) from exc
+        finally:
+            fields.clear()
+        if response.status_code == 409:
+            return BrowserResult(ok=False, error=_detail(response), controller="human")
+        if response.status_code >= 400:
+            # A validation error from the computer echoes its input, and its input
+            # was the values. Only our own messages, which are strings, are relayed.
+            detail = _detail(response, safe_only=True)
+            return BrowserResult(ok=False, error=detail)
+        return _result(response.json())
+
+    return fill
+
+
+def _detail(response: httpx.Response, *, safe_only: bool = False) -> str:
     try:
         body = response.json()
     except ValueError:
         return f"computer answered {response.status_code}"
     detail = body.get("detail") if isinstance(body, dict) else None
+    if safe_only and not isinstance(detail, str):
+        return f"the computer refused the fill ({response.status_code})"
     return str(detail or f"computer answered {response.status_code}")
 
 
-def register(registry: ToolRegistry, settings: Settings) -> None:
-    for definition, fn in build(settings):
+def register(
+    registry: ToolRegistry, settings: Settings, uow_factory: UnitOfWorkFactory | None = None
+) -> None:
+    for definition, fn in build(settings, uow_factory):
         registry.register(definition, fn)

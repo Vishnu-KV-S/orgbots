@@ -2,8 +2,9 @@
 
 Two audiences and they get different verbs:
 
-- **Bots**, through the gateway tools: `observe` and `act`. Refused with 409 while a
-  person holds the screen.
+- **Bots**, through the gateway tools: `observe`, `act`, and `fill` — the vault's
+  sign-in values, which `browser.act@1` opens and sends here so no run holds them.
+  Refused with 409 while a person holds the screen.
 - **People**, through the API proxy: `screenshot`, `control` and `input`. `input` is
   refused unless the person holds the screen, so watching can never become driving by
   accident.
@@ -14,13 +15,14 @@ that can reach it can drive a browser that may be signed in to real accounts.
 
 from __future__ import annotations
 
+import base64
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from runtime.computer.browser import (
     ACTION_TYPES,
@@ -37,6 +39,24 @@ class ActBody(BaseModel):
 
 
 class ObserveBody(BaseModel):
+    label: str = ""
+    screenshot: bool = False
+    """Also return a masked JPEG of the viewport, base64, for the bot's vision step."""
+
+
+class FillField(BaseModel):
+    elements: list[int] = Field(max_length=12)
+    value: SecretStr
+    password: bool = False
+
+
+class FillBody(BaseModel):
+    """The values arrive as `SecretStr` so a validation error, a repr or a log line
+    shows asterisks. Only the gateway's `browser.act@1` sends this."""
+
+    expect_host: str = Field(min_length=1, max_length=253)
+    fields: list[FillField] = Field(min_length=1, max_length=12)
+    submit: bool = True
     label: str = ""
 
 
@@ -111,7 +131,11 @@ def create_app(profile_dir: Path, *, headless: bool = True) -> FastAPI:
             snap = await computer.observe(screen)
         except ComputerError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return _view(screen, snap)
+        view = _view(screen, snap)
+        if body.screenshot:
+            image = await computer.bot_screenshot(screen)
+            view["screenshot"] = base64.b64encode(image).decode("ascii")
+        return view
 
     @app.post("/screens/{screen_id}/act")
     async def act(screen_id: str, body: ActBody) -> dict[str, Any]:
@@ -128,6 +152,29 @@ def create_app(profile_dir: Path, *, headless: bool = True) -> FastAPI:
             except ComputerError:
                 snap = {}
             return {**_view(screen, snap), "ok": False, "error": str(exc)}
+        return {**_view(screen, snap), "ok": True, "error": None}
+
+    @app.post("/screens/{screen_id}/fill")
+    async def fill(screen_id: str, body: FillBody) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, label=body.label)
+        fields = [
+            {"elements": f.elements, "value": f.value.get_secret_value(), "password": f.password}
+            for f in body.fields
+        ]
+        try:
+            snap = await computer.fill(
+                screen, expect_host=body.expect_host, fields=fields, submit=body.submit
+            )
+        except HumanInControlError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ComputerError as exc:
+            try:
+                snap = await computer.observe(screen)
+            except ComputerError:
+                snap = {}
+            return {**_view(screen, snap), "ok": False, "error": str(exc)}
+        finally:
+            fields.clear()
         return {**_view(screen, snap), "ok": True, "error": None}
 
     @app.get("/screens/{screen_id}/screenshot")

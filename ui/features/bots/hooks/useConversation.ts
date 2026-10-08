@@ -10,6 +10,8 @@ export interface Conversation {
   messages: BotMessage[];
   /** Pending-action ids still waiting on a decision. */
   pending: Set<string>;
+  /** Credential cards still waiting for the person. */
+  asking: Set<string>;
   working: boolean;
   runStatus: string | null;
   error: string | null;
@@ -28,6 +30,7 @@ export interface Conversation {
 export function useConversation(botId: string | null): Conversation {
   const [messages, setMessages] = useState<BotMessage[]>([]);
   const [pending, setPending] = useState<Set<string>>(new Set());
+  const [asking, setAsking] = useState<Set<string>>(new Set());
   const [working, setWorking] = useState(false);
   const [runStatus, setRunStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +56,7 @@ export function useConversation(botId: string | null): Conversation {
         });
       }
       setPending(new Set(page.pending));
+      setAsking(new Set(page.credential_requests ?? []));
       setWorking(page.working);
       setRunStatus(page.run_status);
       setError(null);
@@ -74,6 +78,7 @@ export function useConversation(botId: string | null): Conversation {
     cursor.current = 0;
     setMessages([]);
     setPending(new Set());
+    setAsking(new Set());
     setWorking(false);
     setRunStatus(null);
     setError(null);
@@ -90,5 +95,5 @@ export function useConversation(botId: string | null): Conversation {
     void tick();
   }, [tick]);
 
-  return { messages, pending, working, runStatus, error, loaded, poke };
+  return { messages, pending, asking, working, runStatus, error, loaded, poke };
 }

@@ -31,6 +31,7 @@ from sqlalchemy import text
 
 from runtime.api.bots import computer_router as bots_computer_router
 from runtime.api.bots import router as bots_router
+from runtime.api.bots import vault_router as bots_vault_router
 from runtime.api.control import router as control_router
 from runtime.api.errors import http_errors
 from runtime.api.observe import router as observe_router
@@ -118,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # every run it creates goes through `RunService.start_run()` like the rest.
     app.include_router(bots_router)
     app.include_router(bots_computer_router)
+    app.include_router(bots_vault_router)
 
     def uow_factory(request: Request) -> UnitOfWorkFactory:
         factory: UnitOfWorkFactory = request.app.state.uow

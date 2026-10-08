@@ -560,6 +560,7 @@ kbd {
 
 .stepline .why {
   color: var(--text-dim);
+  white-space: pre-line;
 }
 
 .stepline .fail {
@@ -638,6 +639,86 @@ kbd {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* --- credential card: a sign-in form whose values go to the vault ------------- */
+
+.creds-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.creds-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.creds-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.creds-input input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  color: var(--text);
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.creds-input input:focus {
+  outline: none;
+  border-color: var(--text-faint);
+}
+
+.creds-input .ibtn {
+  width: auto;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.creds-keep,
+.creds-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.creds-auto input,
+.creds-keep input {
+  accent-color: var(--accent);
+}
+
+.creds-note {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.creds-saved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.creds-or {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.creds-warn {
+  color: var(--text);
 }
 
 .pbtn {
@@ -1757,4 +1838,172 @@ kbd {
 
 .form label .importance {
   height: 34px;
+}
+
+/* team files ------------------------------------------------------------------------ */
+
+.files .files-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.files .files-bar .urlbox {
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.files .mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.files .fadd {
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.ftree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ftree .ftree {
+  margin-left: 9px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-soft);
+}
+
+.frow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 13px;
+}
+
+button.frow:hover {
+  background: var(--bg-hover);
+}
+
+.frow .fico {
+  width: 14px;
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: center;
+}
+
+.frow .fname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frow.folder .fname {
+  font-weight: 560;
+  color: var(--text-dim);
+}
+
+.frow .fmeta {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.frow.match {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.frow.match .fname {
+  width: 100%;
+}
+
+.frow .snippet {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.frow.static {
+  align-items: center;
+}
+
+.ftrash {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px;
+}
+
+.ftrash .ftree {
+  margin-top: 6px;
+}
+
+.fpath {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.fmeta-line {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.ftools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 10px 0;
+  font-size: 12.5px;
+}
+
+.fbody {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.files .fedit {
+  margin-top: 10px;
+}
+
+.files .fedit textarea {
+  min-height: 340px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.files .history h3 {
+  margin-top: 0;
+}
+
+.files .rev-head .linklike + .linklike {
+  margin-left: 0;
 }

@@ -18,7 +18,7 @@ from runtime.domain.ids import OrganizationId
 _BOT_COLUMNS = """
     id, organization_id, actor_name, name, label, description, avatar, brief, brief_locked,
     brief_rev, pinned, hidden, unread, needs_attention, stop_requested, turn, last_run_id,
-    duplicated_from, parent_bot_id, created_by, appearance, created_at, updated_at
+    duplicated_from, parent_bot_id, team_id, created_by, appearance, created_at, updated_at
 """
 
 EDITABLE = frozenset(
@@ -59,6 +59,9 @@ class BotRow:
     last_run_id: uuid.UUID | None
     duplicated_from: uuid.UUID | None
     parent_bot_id: uuid.UUID | None
+    team_id: uuid.UUID
+    """The team whose drive this bot shares (migration 042). Its own id for a bot a
+    person made; its parent's team for a helper. Never changes."""
     created_by: str
     appearance: dict[str, Any]
     created_at: datetime
@@ -190,6 +193,7 @@ def _bot(row: Any) -> BotRow:
         last_run_id=row.last_run_id,
         duplicated_from=row.duplicated_from,
         parent_bot_id=row.parent_bot_id,
+        team_id=row.team_id,
         created_by=row.created_by,
         appearance=dict(row.appearance or {}),
         created_at=row.created_at,
@@ -251,9 +255,11 @@ class BotRepository:
                 """
                 INSERT INTO bots (id, organization_id, actor_name, name, label, description,
                                   avatar, duplicated_from, parent_bot_id, created_by,
-                                  appearance)
+                                  appearance, team_id)
                 VALUES (:id, :org, :actor, :name, :label, :description,
-                        :avatar, :dup, :parent, :created_by, CAST(:appearance AS jsonb))
+                        :avatar, :dup, :parent, :created_by, CAST(:appearance AS jsonb),
+                        -- A helper joins its parent's team; anyone else starts one.
+                        COALESCE((SELECT p.team_id FROM bots p WHERE p.id = :parent), :id))
                 ON CONFLICT (id) DO NOTHING
                 """
             ),
@@ -349,6 +355,19 @@ class BotRepository:
                     "AND deleted_at IS NULL ORDER BY created_at"
                 ),
                 {"id": bot_id},
+            )
+        ).all()
+        return [_bot(r) for r in rows]
+
+    async def team(self, team_id: uuid.UUID) -> list[BotRow]:
+        """Every live bot on a team, leads first."""
+        rows = (
+            await self._s.execute(
+                text(
+                    f"SELECT {_BOT_COLUMNS} FROM bots WHERE team_id = :team "
+                    "AND deleted_at IS NULL ORDER BY parent_bot_id NULLS FIRST, created_at"
+                ),
+                {"team": team_id},
             )
         ).all()
         return [_bot(r) for r in rows]

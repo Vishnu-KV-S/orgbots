@@ -41,12 +41,14 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from runtime.domain.bots import BOT_TURN_PRIORITY
 from runtime.domain.ids import OrganizationId, RunId, TaskId
 from runtime.domain.specs import StartRunRequest
 from runtime.observability.logging import get_logger
 from runtime.org.department import ALL_ACTORS, HEAD
 from runtime.org.inbox import (
     KIND_APPROVAL_DECIDED,
+    KIND_BOT_CONTINUE,
     KIND_TASK_ASSIGNED,
     KIND_TASK_CLOSED,
     KIND_TASK_REWORK,
@@ -66,11 +68,16 @@ MODE_FOR_KIND: dict[str, str] = {
     KIND_TASK_SUBMITTED: "evaluate",
     KIND_APPROVAL_DECIDED: "publish_gate",
     KIND_TRIGGER_FIRED: "",  # taken from the message body
+    KIND_BOT_CONTINUE: "continue",
 }
 """Which entry point a message wakes. `task.closed` and `note` are absent: they are
 notifications, and a notification that started a run would double the loop."""
 
 TERMINAL_KINDS = frozenset({KIND_TASK_CLOSED, "note"})
+
+PRIORITY_FOR_KIND: dict[str, int] = {KIND_BOT_CONTINUE: BOT_TURN_PRIORITY}
+"""Queue order for the runs a kind starts; anything not listed gets the default (50).
+A bot's next chunk is the rest of a turn someone is watching, not background work."""
 
 ACTOR_CACHE_TTL_SECONDS = 10.0
 """How long a resolved actor list is trusted. Same number as the kill switch's cache
@@ -187,6 +194,7 @@ class Dispatcher:
                     task_id=TaskId(message.task_id) if message.task_id else None,
                     correlation_id=str(message.correlation_id),
                     session_id=None,
+                    priority=PRIORITY_FOR_KIND.get(message.kind, 50),
                 )
             )
         except Exception:

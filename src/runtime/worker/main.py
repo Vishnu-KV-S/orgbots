@@ -12,8 +12,13 @@ a run or an inbox message into a run: `runtime.cli tick` did, once, when a human
 it. `docs/MEASUREMENT_PROTOCOL.md` §4 asks for two consecutive weeks with the
 long-lived processes running and left alone, and counts any intervention as a reset —
 so a runtime whose only crank is a person typing `tick` cannot have a clean run at all.
-It is on by default for that reason. `RUNTIME_CONDUCTOR_ENABLED=false` is for the case
-where something *else* is driving the loop, not for turning the loop off.
+The dispatcher is on by default for that reason. `RUNTIME_CONDUCTOR_ENABLED=false` is for
+the case where something *else* is driving the loop, not for turning the loop off.
+
+The scheduler is the exception: it also needs `RUNTIME_SCHEDULER_ENABLED=true`. Off,
+nothing starts because a clock came round — runs start when a person or a delegating
+run asks for them, which is how a bot is meant to work. A department meant to run
+itself, like §4's clean run, turns it on.
 
 Neither half executes a run. Both only call `RunService.start_run`, which writes and
 returns; the run is picked up from the stream by the worker loop below, exactly as it
@@ -104,7 +109,8 @@ async def run() -> None:
     dispatcher: Dispatcher | None = None
     if settings.conductor_enabled:
         service = RunService(uow, settings=settings)
-        scheduler = Scheduler(uow, service, settings=settings)
+        if settings.scheduler_enabled:
+            scheduler = Scheduler(uow, service, settings=settings)
         dispatcher = Dispatcher(uow, service, settings=settings, actors=None)
 
     async with checkpointer(settings) as saver:
@@ -157,6 +163,7 @@ async def run() -> None:
             "worker.started",
             worker_id=str(worker.worker_id),
             conductor=settings.conductor_enabled,
+            scheduler=scheduler is not None,
             slots=settings.worker_slots,
         )
         tasks = [
@@ -169,8 +176,9 @@ async def run() -> None:
             asyncio.create_task(reaper.run_forever(), name="reaper"),
             asyncio.create_task(sweeper.run_forever(), name="sweeper"),
         ]
-        if scheduler is not None and dispatcher is not None:
+        if scheduler is not None:
             tasks.append(asyncio.create_task(scheduler.run_forever(), name="scheduler"))
+        if dispatcher is not None:
             tasks.append(asyncio.create_task(dispatcher.run_forever(), name="dispatcher"))
         if memory_worker is not None:
             tasks.append(asyncio.create_task(memory_worker.run_forever(), name="memory"))

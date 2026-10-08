@@ -39,7 +39,7 @@ def build_registry(
     fixture_sideeffect.register(registry, uow_factory)
     web_search.register(registry, resolved)
     publish_external.register(registry, resolved)
-    browser.register(registry, resolved)
+    browser.register(registry, resolved, uow_factory)
     return registry
 
 

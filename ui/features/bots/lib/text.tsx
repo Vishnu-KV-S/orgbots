@@ -122,6 +122,30 @@ export function describeAction(action: BotAction | undefined): string {
       return `${action.bot ?? "Helper"} answered`;
     case "observe":
       return "Look at the page";
+    case "plan":
+      return "Plan";
+    case "look":
+      return `Look at the screen: “${action.text ?? ""}”`;
+    case "sign_in":
+      return action.via === "saved"
+        ? `Sign in to ${action.host ?? ""} with saved login ${action.label ?? ""}`.trim()
+        : `Fill in the ${action.host ?? ""} form with your details`;
+    case "list_files":
+      return action.text
+        ? `Search team files for “${action.text}”`
+        : `Look in ${action.path && action.path !== "/" ? action.path : "the team files"}`;
+    case "read_file":
+      return `Read ${action.path ?? "a file"}`;
+    case "write_file":
+      return `Write ${action.path ?? "a file"}`;
+    case "append_file":
+      return `Add to ${action.path ?? "a file"}`;
+    case "edit_file":
+      return `Edit ${action.path ?? "a file"}`;
+    case "move_file":
+      return `Move ${action.path ?? "a file"} to ${action.to ?? ""}`;
+    case "delete_file":
+      return `Delete ${action.path ?? "a file"}`;
     default:
       return action.type;
   }
@@ -147,7 +171,26 @@ export const ACTION_ICON: Record<string, string> = {
   ask_bot: "→",
   bot_answer: "←",
   observe: "◎",
+  plan: "☑",
+  sign_in: "🔑",
+  look: "👁",
+  list_files: "⌕",
+  read_file: "▤",
+  write_file: "▦",
+  append_file: "⊕",
+  edit_file: "✐",
+  move_file: "⇢",
+  delete_file: "✕",
 };
+
+/** File steps a person can follow into the Files pane (a deleted file is in the trash). */
+export const OPENS_FILE = new Set([
+  "read_file",
+  "write_file",
+  "append_file",
+  "edit_file",
+  "move_file",
+]);
 
 export function timeAgo(iso: string): string {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);

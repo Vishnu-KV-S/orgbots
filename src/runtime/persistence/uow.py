@@ -29,6 +29,7 @@ from runtime.persistence.repositories.credentials import CredentialRepository
 from runtime.persistence.repositories.delegations import DelegationRepository
 from runtime.persistence.repositories.departments import DepartmentRepository
 from runtime.persistence.repositories.effects import EffectRepository
+from runtime.persistence.repositories.files import TeamFileRepository
 from runtime.persistence.repositories.inbox import InboxRepository
 from runtime.persistence.repositories.killswitch import KillSwitchRepository
 from runtime.persistence.repositories.memory import (
@@ -47,6 +48,7 @@ from runtime.persistence.repositories.sessions import SessionRepository
 from runtime.persistence.repositories.spec import SpecRepository
 from runtime.persistence.repositories.tasks import EvaluationRepository, TaskRepository
 from runtime.persistence.repositories.triggers import TriggerRepository
+from runtime.persistence.repositories.vault import VaultRepository
 from runtime.settings import Settings
 
 
@@ -108,9 +110,17 @@ class UnitOfWork:
         # class was built for, extended one table.
         self.delegations = DelegationRepository(session)
         self.departments = DepartmentRepository(session)
+        # The login vault: ciphertext and the requests that fill it. Bound here so a
+        # submission's entry, its request and its line in the conversation are one
+        # transaction — a request marked filled with no entry behind it is a bot told
+        # it is signed in when nothing was typed.
+        self.vault = VaultRepository(session)
         # Bots (migration 037): the conversations, rules and pending actions that sit
         # on top of an actor.
         self.bots = BotRepository(session)
+        # Team drives (migration 042). Bound here so a file, its revision and the team
+        # lock that makes the write's checks true are one transaction.
+        self.files = TeamFileRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()
