@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { cx } from "@/lib/cx";
 import {
   type Appearance,
-  BODY_COLORS,
   GLOW_COLORS,
   PRESETS,
   SHAPES,
@@ -103,12 +102,6 @@ export function Designer({
         </div>
         <Choice label="Body" options={SHAPES} value={value.shape} onPick={(v) => set("shape", v)} />
         <Choice label="Top" options={TOPS} value={value.top} onPick={(v) => set("top", v)} />
-        <Swatches
-          label="Shell"
-          colors={BODY_COLORS}
-          value={value.body}
-          onPick={(v) => set("body", v)}
-        />
         <Swatches
           label="Accent"
           colors={GLOW_COLORS}

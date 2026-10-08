@@ -27,6 +27,9 @@ import { textures } from "./textures";
  * damped every frame, so moods blend instead of snapping.
  */
 
+/** Every bot's shell is pure white; the accent colour is what tells them apart. */
+const SHELL = "#ffffff";
+
 interface Layout {
   /** The screen mesh's vertical offset in the body; eye coordinates are relative to it. */
   screenY: number;
@@ -147,7 +150,7 @@ function useMaterials(a: Appearance) {
   const materials = useMemo(() => {
     // Soft-touch shell: matte, a fine grain, a little velvet at grazing angles.
     const shell = new THREE.MeshPhysicalMaterial({
-      color: a.body,
+      color: SHELL,
       roughness: 0.58,
       roughnessMap: tex.plasticRough,
       bumpMap: tex.softGrain,
@@ -198,7 +201,7 @@ function useMaterials(a: Appearance) {
     const screen = screenMaterial(a);
     const seam = new THREE.MeshStandardMaterial({ color: "#1d1d1f", roughness: 0.8 });
     return { shell, rubber, metal, accent, glass, screen, seam };
-  }, [a.body, a.glow, tex]);
+  }, [a.glow, tex]);
 
   useEffect(() => () => Object.values(materials).forEach((m) => m.dispose()), [materials]);
   return materials;

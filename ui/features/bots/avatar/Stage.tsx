@@ -96,7 +96,7 @@ function Studio() {
   const scene = useThree((s) => s.scene);
   useEffect(() => {
     scene.environment = studioEnvironment(gl);
-    scene.environmentIntensity = 0.8;
+    scene.environmentIntensity = 1.25;
   }, [gl, scene]);
   return null;
 }
@@ -131,7 +131,7 @@ export function BotStage({ children }: { children: React.ReactNode }) {
             // AgX: a filmic curve that rolls bright LEDs off toward white without
             // shifting their hue, the way a camera sensor does.
             gl.toneMapping = THREE.AgXToneMapping;
-            gl.toneMappingExposure = 1.1;
+            gl.toneMappingExposure = 1.25;
           }}
         >
           <View.Port />
@@ -222,10 +222,10 @@ export function BotFace({
       />
       <Studio />
       {/* A neutral three-point studio rig: warm key, cool fill, white rim. */}
-      <ambientLight intensity={0.15} />
-      <directionalLight position={[2.2, 3.2, 2.8]} intensity={1.5} color="#fff6ec" />
-      <directionalLight position={[-2.8, 0.8, 1.5]} intensity={0.6} color="#e8f0ff" />
-      <directionalLight position={[0, 2, -3]} intensity={0.8} color="#ffffff" />
+      <ambientLight intensity={0.5} />
+      <directionalLight position={[2.2, 3.2, 2.8]} intensity={2.6} color="#ffffff" />
+      <directionalLight position={[-2.8, 0.8, 1.5]} intensity={1.3} color="#ffffff" />
+      <directionalLight position={[0, 2, -3]} intensity={1.4} color="#ffffff" />
       <BotModel appearance={appearance} mood={mood} detail={level} phase={phase} />
     </>
   );
@@ -239,7 +239,7 @@ export function BotFace({
             // AgX: a filmic curve that rolls bright LEDs off toward white without
             // shifting their hue, the way a camera sensor does.
             gl.toneMapping = THREE.AgXToneMapping;
-            gl.toneMappingExposure = 1.1;
+            gl.toneMappingExposure = 1.25;
           }}
         >
           {scene}
