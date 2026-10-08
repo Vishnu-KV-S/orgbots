@@ -17,13 +17,17 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field, SecretStr
 
 from runtime.api.bots import _organization, _settings, _uow
+from runtime.api.identity import current_member
+from runtime.api.trail import audit
 from runtime.domain.connectors import MAX_CONNECTORS, ConnectorError, connector_name
+from runtime.domain.policies import Policy
 from runtime.gateway.builtin.connectors import open_auth, token_aad
 from runtime.gateway.mcp import Auth, Connect, MCPError, connect
 from runtime.gateway.vault import VaultUnavailableError, load_cipher
@@ -92,6 +96,21 @@ class _Ref:
         self.id = connector_id
 
 
+async def _may_manage(request: Request) -> Policy:
+    """Apps are the organization's, and their tokens are: with members, owners and
+    admins connect and change them, unless the policy lets members too."""
+    org = await _organization(request)
+    async with _uow(request)() as uow:
+        policy = await uow.policies.get(org)
+    member = await current_member(request)
+    if member is not None and not member.is_admin and not policy.members_add_apps:
+        raise HTTPException(
+            status_code=403,
+            detail="your organization's admins connect apps; ask one of them",
+        )
+    return policy
+
+
 async def _add(
     request: Request,
     *,
@@ -104,12 +123,19 @@ async def _add(
     catalog_key: str | None,
 ) -> ConnectorRow:
     org = await _organization(request)
+    policy = await _may_manage(request)
     try:
         slug = connector_name(name or title)
     except ConnectorError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not url.startswith(("https://", "http://")):
         raise HTTPException(status_code=422, detail="the address must start with https://")
+    if not policy.url_allowed(url):
+        raise HTTPException(
+            status_code=422,
+            detail="your organization's network allowlist does not include "
+            f"{urlparse(url).hostname}",
+        )
     async with _uow(request)() as uow:
         if await uow.connectors.by_name(org, slug) is not None:
             raise HTTPException(status_code=409, detail=f"there is already a connector {slug!r}")
@@ -135,6 +161,7 @@ async def _add(
         await uow.connectors.update(connector_id, fields)
         row = await uow.connectors.get(connector_id)
     assert row is not None
+    await audit(request, "connector.added", slug, {"url": row.url, "catalog_key": catalog_key})
     return row
 
 
@@ -192,6 +219,7 @@ async def add_connector(body: AddBody, request: Request) -> dict[str, Any]:
 @router.post("/{connector_id}/refresh")
 async def refresh_connector(connector_id: UUID, request: Request) -> dict[str, Any]:
     row = await _own(request, connector_id)
+    await _may_manage(request)
     try:
         auth = open_auth(row, _settings(request))
     except Exception as exc:
@@ -218,6 +246,7 @@ async def refresh_connector(connector_id: UUID, request: Request) -> dict[str, A
 @router.patch("/{connector_id}")
 async def update_connector(connector_id: UUID, body: PatchBody, request: Request) -> dict[str, Any]:
     row = await _own(request, connector_id)
+    await _may_manage(request)
     fields: dict[str, Any] = {}
     if body.title is not None:
         fields["title"] = body.title.strip()
@@ -242,9 +271,11 @@ async def update_connector(connector_id: UUID, body: PatchBody, request: Request
 
 @router.delete("/{connector_id}")
 async def delete_connector(connector_id: UUID, request: Request) -> dict[str, Any]:
-    await _own(request, connector_id)
+    row = await _own(request, connector_id)
+    await _may_manage(request)
     async with _uow(request).transaction() as uow:
         await uow.connectors.soft_delete(connector_id)
+    await audit(request, "connector.removed", row.name)
     return {"deleted": str(connector_id)}
 
 

@@ -339,6 +339,48 @@ has people (`runtime/domain/members.py`, migration 052):
   `/v1/observe`) needs an owner or admin. It shows the whole runtime, so give each
   organization its own runtime if they must not see each other.
 
+**Enterprise: policies, team secrets, SCIM, audit and telemetry.** Owners and admins
+manage these under **👥 Team** (`runtime/domain/policies.py`, migration 053). Without
+members, the one person manages them.
+
+- **Network allowlist.** `Open` (the default) or `only these hosts`, where a host
+  covers its subdomains. Under an allowlist:
+  - The computer's browser aborts every request to any other host: pages, redirects,
+    frames, images and scripts. A screen still showing a host the new policy forbids
+    goes blank.
+  - The browser tool refuses the navigation itself, so the bot can explain why.
+  - Apps on other hosts can't be connected or called.
+  - Sandboxed commands run with no network at all. A host list can't be enforced on
+    arbitrary programs without a proxy, so none is the honest choice.
+  - Every block is recorded in the audit log as `network.blocked`.
+- **Other policies.** *Require Auto Review* turns review on for every bot, whatever its
+  own switch says. Template links can be turned off for everyone, and links already
+  made stop working. Members can be allowed to connect apps; otherwise only admins can.
+- **Team secrets.** These are environment variables for bots' sandboxed commands, such
+  as a CLI's API token.
+  - Values are sealed and never shown again, and bots are told only the names.
+  - Each value is registered with the scrubber, so a command that prints one returns
+    `[REDACTED]`.
+  - Values reach the sandbox through its environment, never its command line.
+  - A person's own shell never gets them.
+  - Limits: 100 secrets, 32 KB each, 96 KB in total.
+- **SCIM 2.0 provisioning.** Give the identity provider `{RUNTIME_PUBLIC_URL}/scim/v2`
+  and a token from *Team → Provisioning*; only its hash is kept.
+  - Users can be listed, filtered (`userName eq`), fetched, created, replaced, patched
+    (both Okta's and Microsoft Entra's shapes) and deleted.
+  - Deactivating someone signs them out everywhere. Nobody is deleted, so names stay on
+    what they said.
+  - The organization's last owner can't be deactivated.
+- **Audit log.** Every control-plane change is recorded with who, what and to what:
+  sign-ins, invitations, roles, SSO, SCIM, policies, secrets (by name), bots, template
+  links, apps, routines and network blocks. It is never a value. Read it under
+  *Team → Audit log*.
+- **OpenTelemetry export.** *Team → Telemetry* sends the audit log, and optionally every
+  tool call with how it ended (`tool.call`), to your collector as OTLP/HTTP logs
+  (`runtime/runtime/telemetry.py`, a worker loop). Arguments, results, messages and
+  files are never sent. Emails are only sent if you opt in. Headers such as an API key
+  are sealed. A batch the collector refuses is retried, and the reason is shown.
+
 Not yet built: per-member private chats with a team bot (a team bot's conversation is
 shared), and OAuth sign-in for connectors.
 

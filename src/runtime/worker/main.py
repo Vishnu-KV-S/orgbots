@@ -87,6 +87,7 @@ from runtime.runtime.routines import RoutineRunner
 from runtime.runtime.run_service import RunService
 from runtime.runtime.scheduler import Scheduler
 from runtime.runtime.sweeper import GovernanceSweeper
+from runtime.runtime.telemetry import TelemetryExporter
 from runtime.runtime.wakes import WakeRunner
 from runtime.settings import get_settings
 from runtime.worker.lease import Reaper
@@ -121,6 +122,7 @@ async def run() -> None:
     routines: RoutineRunner | None = None
     wakes: WakeRunner | None = None
     notifier: Notifier | None = None
+    telemetry: TelemetryExporter | None = None
     if settings.conductor_enabled:
         service = RunService(uow, settings=settings)
         if settings.scheduler_enabled:
@@ -133,6 +135,9 @@ async def run() -> None:
         wakes = WakeRunner(uow, BotManager(uow, service))
         # Pushes to the person's devices when a bot needs them (the outbox → Web Push).
         notifier = Notifier(uow, PushSender(uow, settings))
+        # Each organization's audit trail and tool calls to its own collector, when an
+        # admin set one up (`runtime.runtime.telemetry`).
+        telemetry = TelemetryExporter(uow, settings)
 
     async with checkpointer(settings) as saver:
         worker = Worker(uow, streams, settings=settings, checkpointer=saver)
@@ -179,6 +184,8 @@ async def run() -> None:
                 wakes.stop()
             if notifier is not None:
                 notifier.stop()
+            if telemetry is not None:
+                telemetry.stop()
             if memory_worker is not None:
                 memory_worker.stop()
 
@@ -214,6 +221,8 @@ async def run() -> None:
             tasks.append(asyncio.create_task(wakes.run_forever(), name="wakes"))
         if notifier is not None:
             tasks.append(asyncio.create_task(notifier.run_forever(), name="notifier"))
+        if telemetry is not None:
+            tasks.append(asyncio.create_task(telemetry.run_forever(), name="telemetry"))
         if memory_worker is not None:
             tasks.append(asyncio.create_task(memory_worker.run_forever(), name="memory"))
         await stopping.wait()

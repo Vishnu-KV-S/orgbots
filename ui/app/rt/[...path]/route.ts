@@ -14,11 +14,11 @@ import { type NextRequest } from "next/server";
  *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*,
  *                                /v1/vault*, /v1/skills*, /v1/marketplace*, /v1/groups*,
  *                                /v1/connectors*, /v1/push*, /v1/templates*, /v1/auth*,
- *                                /v1/members*, /healthz
+ *                                /v1/members*, /v1/admin*, /healthz
  *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer*, /v1/vault*,
  *                                /v1/skills*, /v1/marketplace*, /v1/groups*,
  *                                /v1/connectors*, /v1/push*, /v1/templates*, /v1/auth*,
- *                                /v1/members* only
+ *                                /v1/members*, /v1/admin* only
  *
  * `/v1/observe` stays GET-only because it is read-only *by construction* — every
  * statement in `runtime/api/observe.py` is a SELECT — and a proxy that forwarded a
@@ -71,6 +71,7 @@ const BOTS = [
   "v1/templates",
   "v1/auth",
   "v1/members",
+  "v1/admin",
 ];
 const SESSION_COOKIE = "aor_session";
 const READABLE = ["v1/observe/", "v1/control/", "healthz", ...BOTS];

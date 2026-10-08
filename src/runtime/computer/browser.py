@@ -136,6 +136,23 @@ def check_profile(profile: str) -> str:
     return profile
 
 
+_NO_NETWORK = ("about:", "data:", "blob:", "javascript:")
+
+
+def url_allowed(url: str, hosts: tuple[str, ...] | None) -> bool:
+    """`hosts` None is an open network. Otherwise a host covers its subdomains — the
+    same rule as `domain.policies`, which this process may not import."""
+    if hosts is None or url.startswith(_NO_NETWORK):
+        return True
+    scheme, _, rest = url.partition("://")
+    if scheme not in ("http", "https", "ws", "wss"):
+        return False
+    host = rest.split("/", 1)[0].rsplit("@", 1)[-1]
+    host = host.rsplit(":", 1)[0] if not host.startswith("[") else host
+    host = host.lower().rstrip(".")
+    return any(host == h or host.endswith("." + h) for h in hosts)
+
+
 @dataclass
 class Screen:
     screen_id: str
@@ -207,6 +224,10 @@ class Computer:
         self._shown = shown or (lambda path, profile: str(path))
         self._pw: Playwright | None = None
         self._contexts: dict[str, BrowserContext] = {}
+        self._allow: dict[str, tuple[str, ...] | None] = {}
+        """Per profile: the hosts its browser may reach, or None for any. Set by the
+        runtime with every call (`set_allow`), from the organization's policy."""
+        self._guarded: set[str] = set()
         self._browser: Browser | None = None
         self._screens: dict[str, Screen] = {}
         self._start_lock = asyncio.Lock()
@@ -247,9 +268,44 @@ class Computer:
             context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
             # The persistent context opens with one blank page; it is nobody's screen.
             self._contexts[profile] = context
+            await self._guard(profile, context)
             if self.started_at is None:
                 self.started_at = time.time()
             return context
+
+    async def set_allow(self, profile: str, hosts: tuple[str, ...] | None) -> None:
+        """The organization's network policy for a profile: only `hosts` (and their
+        subdomains) from now on, or anywhere with None. Every request the profile's
+        browser makes — pages, redirects, frames, images, scripts — is held to it."""
+        check_profile(profile)
+        if self._allow.get(profile, None) == hosts and profile in self._allow:
+            return
+        self._allow[profile] = hosts
+        context = self._contexts.get(profile)
+        if context is not None:
+            await self._guard(profile, context)
+        # A page opened before the policy said no is still on its screen, readable; a
+        # screen showing a host that is no longer allowed goes blank.
+        for screen in self.screens():
+            if screen.profile == profile and not url_allowed(screen.page.url, hosts):
+                with contextlib.suppress(PlaywrightError):
+                    await screen.page.goto(HOME_URL)
+
+    async def _guard(self, profile: str, context: BrowserContext) -> None:
+        wanted = self._allow.get(profile) is not None
+        if wanted and profile not in self._guarded:
+
+            async def check(route: Any) -> None:
+                if url_allowed(route.request.url, self._allow.get(profile)):
+                    await route.continue_()
+                else:
+                    await route.abort("blockedbyclient")
+
+            await context.route("**/*", check)
+            self._guarded.add(profile)
+        elif not wanted and profile in self._guarded:
+            await context.unroute("**/*")
+            self._guarded.discard(profile)
 
     async def stop(self) -> None:
         async with self._start_lock:
@@ -258,6 +314,7 @@ class Computer:
                 with contextlib.suppress(PlaywrightError):
                     await context.close()
             self._contexts.clear()
+            self._guarded.clear()
             if self._pw is not None:
                 await self._pw.stop()
                 self._pw = None

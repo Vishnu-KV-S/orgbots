@@ -46,8 +46,16 @@ from pydantic import BaseModel, Field
 
 from runtime.domain.enums import BlastRadius, RecoveryPolicy
 from runtime.domain.errors import TransientFault
+from runtime.domain.policies import Policy
 from runtime.domain.vault import PASSWORD_KINDS, lookup
-from runtime.gateway.builtin.profiles import profile_of, run_bot
+from runtime.gateway.builtin.profiles import (
+    allow_header,
+    org_policy,
+    profile_of,
+    record_block,
+    refusal,
+    run_bot,
+)
 from runtime.gateway.tools import EffectCapabilities, ToolContext, ToolDef, ToolRegistry
 from runtime.gateway.vault import Vault, VaultRefusedError, VaultUnavailableError
 from runtime.persistence.uow import UnitOfWorkFactory
@@ -127,10 +135,17 @@ def build(
 
     fill = _filler(base, vault, profile)
 
-    async def _post(path: str, payload: dict[str, Any], profile: str) -> httpx.Response:
+    async def _post(
+        path: str, payload: dict[str, Any], profile: str, policy: Policy
+    ) -> httpx.Response:
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
-                return await client.post(f"{base}{path}", json=payload, params={"profile": profile})
+                return await client.post(
+                    f"{base}{path}",
+                    json=payload,
+                    params={"profile": profile},
+                    headers=allow_header(policy),
+                )
         except httpx.TransportError as exc:
             raise TransientFault(
                 f"the computer at {base} is not reachable ({type(exc).__name__}); "
@@ -147,6 +162,7 @@ def build(
             f"/screens/{typed.screen_id}/observe",
             {"label": typed.label, "screenshot": typed.screenshot},
             where,
+            await org_policy(uow_factory, ctx),
         )
         if response.status_code >= 400:
             return BrowserResult(ok=False, error=_detail(response))
@@ -160,10 +176,19 @@ def build(
             where = await profile(ctx, typed.screen_id)
         except ScreenRefusedError as exc:
             return BrowserResult(ok=False, error=str(exc))
+        policy = await org_policy(uow_factory, ctx)
+        if typed.action.get("type") == "navigate":
+            refused = refusal(policy, str(typed.action.get("url", "")))
+            if refused:
+                await record_block(
+                    uow_factory, ctx, str(typed.action.get("url", "")), "browser.act@1"
+                )
+                return BrowserResult(ok=False, error=refused)
         response = await _post(
             f"/screens/{typed.screen_id}/act",
             {"action": typed.action, "label": typed.label},
             where,
+            policy,
         )
         if response.status_code == 409:
             return BrowserResult(ok=False, error=_detail(response), controller="human")

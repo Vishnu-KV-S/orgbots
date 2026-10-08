@@ -58,6 +58,7 @@ from runtime.domain.files import (
 from runtime.domain.ids import OrganizationId, RunId
 from runtime.domain.members import can_edit, can_see, computer_profile
 from runtime.gateway.vault import Vault, VaultUnavailableError
+from runtime.org.audit import record
 from runtime.org.files import Change, TeamDrive
 from runtime.persistence.repositories.bots import (
     BotMemoryRow,
@@ -145,6 +146,18 @@ async def _organization(request: Request) -> OrganizationId:
         ready.add(str(org))
         request.app.state.bot_orgs_ready = ready
     return org
+
+
+async def audit(
+    request: Request, action: str, target: str = "", detail: dict[str, Any] | None = None
+) -> None:
+    """One line in the organization's audit trail (`org.audit`), for a change whose
+    service does not record it: a bot made, shared or deleted, a template link, an app,
+    a routine. Recorded after the change, as the signed-in member — or "the person"."""
+    org = await _organization(request)
+    member = await current_member(request)
+    async with _uow(request).transaction() as uow:
+        await record(uow, org, action, actor=member, target=target, detail=detail)
 
 
 async def _bot_or_404(request: Request, bot_id: UUID) -> BotRow:
@@ -484,6 +497,7 @@ async def create_bot(body: CreateBody, request: Request) -> dict[str, Any]:
             appearance=appearance,
             owner_member_id=member.id if member else None,
         )
+    await audit(request, "bot.created", bot.name, {"bot_id": str(bot.id)})
     return _bot_view(bot)
 
 
@@ -525,10 +539,14 @@ async def update_bot(bot_id: UUID, body: UpdateBody, request: Request) -> dict[s
     )
     bot = await manager.update(bot_id, fields)
     if body.visibility is not None:
+        was = bot.visibility
         try:
             bot = await manager.share(bot_id, body.visibility)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if was != bot.visibility:
+            action = "bot.shared" if bot.visibility == "team" else "bot.unshared"
+            await audit(request, action, bot.name, {"bot_id": str(bot.id)})
     if body.brief is not None or body.brief_locked is not None:
         bot = await manager.set_brief(
             bot_id,
@@ -615,6 +633,7 @@ async def duplicate_bot(bot_id: UUID, request: Request) -> dict[str, Any]:
         bot = await _manager(request).duplicate(
             bot_id, owner_member_id=member.id if member else None
         )
+    await audit(request, "bot.created", bot.name, {"bot_id": str(bot.id), "copy_of": str(bot_id)})
     return _bot_view(bot)
 
 
@@ -624,10 +643,11 @@ async def delete_bot(
 ) -> dict[str, Any]:
     """Delete a bot. `with_helpers=true` deletes every helper under it too; the default
     keeps them and moves its direct helpers up a level. The UI asks which."""
-    await _bot_or_404(request, bot_id)
+    bot = await _bot_or_404(request, bot_id)
     deleted = await _manager(request).delete(bot_id, with_helpers=with_helpers)
     for victim in deleted:
         await _computer_call(request, "DELETE", f"/screens/{victim}", quiet=True)
+    await audit(request, "bot.deleted", bot.name, {"bot_id": str(bot_id), "bots": len(deleted)})
     return {"deleted": [str(d) for d in deleted]}
 
 
@@ -1063,12 +1083,22 @@ async def _computer_call(
     profile: str | None = None,
 ) -> httpx.Response | None:
     """`profile` is the bot's browser profile (`domain.members.computer_profile`), for a
-    call about a screen or a workspace."""
+    call about a screen or a workspace. Such a call also carries the organization's
+    network policy (`X-Allow-Hosts`), so a person driving a screen is held to it too."""
     base = _settings(request).computer_url.rstrip("/")
     params = {"profile": profile} if profile is not None else None
+    headers: dict[str, str] = {}
+    if profile is not None:
+        async with _uow(request)() as uow:
+            policy = await uow.policies.get(await _organization(request))
+        headers["x-allow-hosts"] = (
+            "*" if policy.network == "open" else ",".join(policy.allowed_hosts)
+        )
     try:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
-            return await client.request(method, f"{base}{path}", json=json, params=params)
+            return await client.request(
+                method, f"{base}{path}", json=json, params=params, headers=headers
+            )
     except httpx.TransportError as exc:
         if quiet:
             return None

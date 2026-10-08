@@ -7,6 +7,7 @@ import {
   type BotRule,
   deleteRule,
   deleteVaultEntry,
+  getPolicy,
   listMembers,
   listRules,
   listVault,
@@ -302,6 +303,9 @@ function Rules({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
   const remove = useAction((id: string) => deleteRule(bot.id, id), {
     onDone: rules.refresh,
   });
+  // An organization can require Auto Review for every bot (Team → Policies).
+  const policy = useResource(getPolicy);
+  const required = policy.data?.require_review ?? false;
   const review = useAction((on: boolean) => updateBot(bot.id, { auto_review: on }), {
     onDone: onChanged,
   });
@@ -318,15 +322,16 @@ function Rules({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
       <label className="check-row review-toggle">
         <input
           type="checkbox"
-          checked={bot.auto_review}
-          disabled={review.pending}
+          checked={bot.auto_review || required}
+          disabled={review.pending || required}
           onChange={(e) => void review.run(e.target.checked)}
         />
         <span>
-          <strong>Auto Review</strong> — a second model checks {bot.name}&apos;s risky steps
-          (sending, buying, deleting, commands, handing work to other bots) against what you
-          asked. A concern asks you; a clear mismatch is refused. An “allow” rule then only lets
-          a step through when the reviewer has no concerns.
+          <strong>Auto Review</strong>
+          {required && <span className="muted"> (required by your organization)</span>} — a second
+          model checks {bot.name}&apos;s risky steps (sending, buying, deleting, commands, handing
+          work to other bots) against what you asked. A concern asks you; a clear mismatch is
+          refused. An “allow” rule then only lets a step through when the reviewer has no concerns.
         </span>
       </label>
       {review.error && <ErrorNotice>{review.error}</ErrorNotice>}

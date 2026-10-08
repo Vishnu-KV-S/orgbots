@@ -22,6 +22,7 @@ Nothing here calls a model or the browser. Those go through the gateways.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import uuid
 from dataclasses import dataclass
@@ -398,8 +399,19 @@ class BotService:
             await uow.bots.set_flags(bot_id, last_run_id=uuid.UUID(str(run_id)))
 
     async def get(self, bot_id: uuid.UUID) -> BotRow | None:
+        """The bot as its turn sees it: with Auto Review on when its organization
+        requires it, whatever the bot's own switch says (`domain.policies`)."""
         async with self._uow() as uow:
-            return await uow.bots.get(bot_id)
+            bot = await uow.bots.get(bot_id)
+            required = (
+                bot is not None
+                and not bot.auto_review
+                and (await uow.policies.get(bot.organization_id)).require_review
+            )
+        if required:
+            assert bot is not None
+            bot = dataclasses.replace(bot, auto_review=True)
+        return bot
 
     async def by_actor(self, organization_id: OrganizationId, actor_name: str) -> BotRow | None:
         async with self._uow() as uow:

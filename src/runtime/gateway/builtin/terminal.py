@@ -21,6 +21,7 @@ retried either.
 from __future__ import annotations
 
 import base64
+import uuid
 from typing import Any
 
 import httpx
@@ -28,8 +29,10 @@ from pydantic import BaseModel, Field
 
 from runtime.domain.enums import BlastRadius, RecoveryPolicy
 from runtime.domain.errors import TransientFault
-from runtime.gateway.builtin.profiles import profile_of, run_bot
+from runtime.gateway.builtin.profiles import org_policy, profile_of, run_bot
+from runtime.gateway.team_secrets import open_secrets
 from runtime.gateway.tools import EffectCapabilities, ToolContext, ToolDef, ToolRegistry
+from runtime.gateway.vault import VaultUnavailableError
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.settings import Settings
 
@@ -121,12 +124,31 @@ def build(
                 "use the sandbox",
                 mode=mode,
             )
+        policy = await org_policy(uow_factory, ctx)
+        secrets: dict[str, str] = {}
+        if not typed.local and uow_factory is not None:
+            try:
+                secrets = await open_secrets(uow_factory, settings, uuid.UUID(ctx.organization_id))
+            except VaultUnavailableError as exc:
+                return RunResult(
+                    ok=False,
+                    error="the team's secrets could not be opened: " + str(exc).splitlines()[0],
+                    mode=mode,
+                )
         response = await _call(
             "POST",
             "/terminal/run",
             wait_s=typed.timeout_s + 15,
-            json={**typed.model_dump(), "profile": profile_of(bot)},
+            json={
+                **typed.model_dump(),
+                "profile": profile_of(bot),
+                # A list of hosts cannot be held against arbitrary programs: under an
+                # allowlist, commands get no network at all.
+                "network": policy.network == "open",
+                "secrets": secrets,
+            },
         )
+        secrets.clear()
         if response.status_code >= 400:
             return RunResult(
                 ok=False, error=_detail(response), mode="local" if typed.local else "sandbox"

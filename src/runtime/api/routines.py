@@ -32,7 +32,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field, SecretStr
 
-from runtime.api.bots import _bot_or_404, _manager, _settings, _uow
+from runtime.api.bots import _bot_or_404, _manager, _settings, _uow, audit
 from runtime.domain.routines import (
     RUNS_KEPT,
     EventFacts,
@@ -202,6 +202,12 @@ async def create_routine(bot_id: UUID, body: RoutineBody, request: Request) -> d
     if body.signing_secret is not None and routine.kind == "event":
         await _seal_secret(request, routine, body.signing_secret)
         routine = await _routine_or_404(request, bot_id, routine.id)
+    await audit(
+        request,
+        "routine.created",
+        routine.name,
+        {"bot_id": str(bot_id), "kind": routine.kind, "cron": routine.cron},
+    )
     return _routine_view(request, routine)
 
 
@@ -238,8 +244,9 @@ async def update_routine(
 
 @router.delete("/{bot_id}/routines/{routine_id}")
 async def delete_routine(bot_id: UUID, routine_id: UUID, request: Request) -> dict[str, Any]:
-    await _routine_or_404(request, bot_id, routine_id)
+    routine = await _routine_or_404(request, bot_id, routine_id)
     await _service(request).delete(routine_id)
+    await audit(request, "routine.deleted", routine.name, {"bot_id": str(bot_id)})
     return {"deleted": str(routine_id)}
 
 
