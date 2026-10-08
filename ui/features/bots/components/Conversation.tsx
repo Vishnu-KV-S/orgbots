@@ -5,6 +5,7 @@ import { ErrorNotice } from "@/components/ui";
 import { type Bot, type BotMessage, markRead, sendMessage, stopBot } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
 import { useConversation } from "../hooks/useConversation";
+import { moodOfConversation } from "../avatar";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
@@ -89,6 +90,10 @@ export function Conversation({
     }
   };
 
+  const mood = moodOfConversation(convo.messages, {
+    working: convo.working,
+    pending: convo.pending.size,
+  });
   const status = convo.working
     ? "Working…"
     : convo.pending.size > 0
@@ -101,7 +106,7 @@ export function Conversation({
         <button type="button" className="ibtn mobile-only" onClick={onBack} aria-label="Back">
           ←
         </button>
-        <Avatar name={bot.name} avatar={bot.avatar} working={convo.working} />
+        <Avatar bot={bot} mood={mood} size={52} live />
         <div className="convo-title">
           <h2>{bot.name}</h2>
           <p>{status}</p>
@@ -134,7 +139,7 @@ export function Conversation({
         <div className="convo-inner">
           {convo.loaded && convo.messages.length === 0 && (
             <div className="welcome" style={{ padding: "60px 0" }}>
-              <Avatar name={bot.name} avatar={bot.avatar} size="lg" />
+              <Avatar bot={bot} mood={mood} size={200} live />
               <h1>{bot.name}</h1>
               <p>
                 {bot.description ||

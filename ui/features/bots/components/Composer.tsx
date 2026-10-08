@@ -126,7 +126,11 @@ export function Composer({
     const upto = value.slice(0, caret);
     const mention = /(^|\s)@([\w-]*)$/.exec(upto);
     if (mention) {
-      setPopup({ kind: "mention", query: mention[2], at: upto.length - mention[2].length - 1 });
+      setPopup({
+        kind: "mention",
+        query: mention[2],
+        at: upto.length - mention[2].length - 1,
+      });
       setSel(0);
       return;
     }
@@ -180,9 +184,7 @@ export function Composer({
                   o.apply();
                 }}
               >
-                {o.avatar ? (
-                  <Avatar name={o.avatar.name} avatar={o.avatar.avatar} size="sm" />
-                ) : null}
+                {o.avatar ? <Avatar bot={o.avatar} size={22} /> : null}
                 <span>{o.label}</span>
                 <small>{o.hint}</small>
               </button>
@@ -192,7 +194,12 @@ export function Composer({
         {replyTo && (
           <div className="replying">
             ↪ <span>Replying to: {replyTo.content}</span>
-            <button type="button" className="ibtn" onClick={onCancelReply} aria-label="Cancel reply">
+            <button
+              type="button"
+              className="ibtn"
+              onClick={onCancelReply}
+              aria-label="Cancel reply"
+            >
               ✕
             </button>
           </div>

@@ -2,17 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
-import {
-  type Bot,
-  type BotRule,
-  deleteRule,
-  listRules,
-  putRule,
-  updateBot,
-} from "@/lib/api/bots";
+import { type Bot, type BotRule, deleteRule, listRules, putRule, updateBot } from "@/lib/api/bots";
 import { useAction } from "@/lib/hooks/useAction";
 import { useResource } from "@/lib/hooks/useResource";
-import { AVATARS } from "../lib/templates";
+import { type Appearance, Designer, appearanceFor } from "../avatar";
 
 const RULE_ACTIONS = [
   ["*", "any action"],
@@ -49,6 +42,7 @@ export function DetailsPane({
   return (
     <div>
       <Team bot={bot} bots={bots} onSelect={onSelect} />
+      <Looks bot={bot} onChanged={onChanged} />
       <Profile bot={bot} onChanged={onChanged} />
       <Memory bot={bot} onChanged={onChanged} />
       <Rules bot={bot} />
@@ -77,15 +71,7 @@ export function DetailsPane({
   );
 }
 
-function Team({
-  bot,
-  bots,
-  onSelect,
-}: {
-  bot: Bot;
-  bots: Bot[];
-  onSelect: (id: string) => void;
-}) {
+function Team({ bot, bots, onSelect }: { bot: Bot; bots: Bot[]; onSelect: (id: string) => void }) {
   const parent = bots.find((b) => b.id === bot.parent_bot_id);
   const helpers = bots.filter((b) => b.parent_bot_id === bot.id);
   return (
@@ -122,10 +108,40 @@ function Team({
         </div>
       ) : (
         <p className="screen-help" style={{ margin: 0 }}>
-          No helpers yet. {bot.name} creates a helper bot when a task needs one, and asks it
-          for work — you&apos;ll see each handoff in this conversation.
+          No helpers yet. {bot.name} creates a helper bot when a task needs one, and asks it for
+          work — you&apos;ll see each handoff in this conversation.
         </p>
       )}
+    </section>
+  );
+}
+
+function Looks({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
+  const saved = appearanceFor(bot);
+  const [look, setLook] = useState<Appearance>(saved);
+  useEffect(() => setLook(appearanceFor(bot)), [bot.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = useAction(() => updateBot(bot.id, { appearance: look }), {
+    onDone: onChanged,
+  });
+  const dirty = JSON.stringify(look) !== JSON.stringify(saved);
+  return (
+    <section className="dsec">
+      <h3>Appearance</h3>
+      <Designer value={look} onChange={setLook} previewSize={170} />
+      {save.error && <ErrorNotice>{save.error}</ErrorNotice>}
+      <div className="form-actions" style={{ marginTop: 10 }}>
+        <button type="button" className="pbtn" disabled={!dirty} onClick={() => setLook(saved)}>
+          Reset
+        </button>
+        <button
+          type="button"
+          className="pbtn primary"
+          disabled={!dirty || save.pending}
+          onClick={() => void save.run()}
+        >
+          Save look
+        </button>
+      </div>
     </section>
   );
 }
@@ -140,19 +156,6 @@ function Profile({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
     <section className="dsec">
       <h3>Profile</h3>
       <div className="form">
-        <div className="emoji-row" role="radiogroup" aria-label="Avatar">
-          {AVATARS.map((a) => (
-            <button
-              key={a}
-              type="button"
-              className={form.avatar === a ? "on" : undefined}
-              onClick={() => setForm({ ...form, avatar: a })}
-              aria-label={`Avatar ${a}`}
-            >
-              {a}
-            </button>
-          ))}
-        </div>
         <div className="form-row">
           <label>
             Name
@@ -279,15 +282,17 @@ function Rules({ bot }: { bot: Bot }) {
       rules.refresh();
     },
   });
-  const remove = useAction((id: string) => deleteRule(bot.id, id), { onDone: rules.refresh });
+  const remove = useAction((id: string) => deleteRule(bot.id, id), {
+    onDone: rules.refresh,
+  });
 
   return (
     <section className="dsec">
       <h3>Approvals</h3>
       <p className="screen-help" style={{ marginTop: 0 }}>
-        By default {bot.name} asks before typing into password fields and before anything it
-        judges consequential (orders, sending, posting, deleting). Add rules to change that. When
-        rules conflict, <strong>ask first</strong> wins.
+        By default {bot.name} asks before typing into password fields and before anything it judges
+        consequential (orders, sending, posting, deleting). Add rules to change that. When rules
+        conflict, <strong>ask first</strong> wins.
       </p>
       {rules.data?.rules.map((r) => (
         <div key={r.id} className="rule">
@@ -298,7 +303,8 @@ function Rules({ bot }: { bot: Bot }) {
             {RULE_ACTIONS.find(([k]) => k === r.action_type)?.[1] ?? r.action_type}
             {r.host ? (
               <>
-                {" "}on <code>{r.host}</code>
+                {" "}
+                on <code>{r.host}</code>
               </>
             ) : (
               " everywhere"
@@ -322,7 +328,12 @@ function Rules({ bot }: { bot: Bot }) {
             When
             <select
               value={draft.decision}
-              onChange={(e) => setDraft({ ...draft, decision: e.target.value as "ask" | "allow" })}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  decision: e.target.value as "ask" | "allow",
+                })
+              }
             >
               <option value="ask">Ask first</option>
               <option value="allow">Allow automatically</option>

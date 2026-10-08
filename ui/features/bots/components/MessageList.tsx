@@ -61,8 +61,8 @@ function WorkBlock({ steps, live }: { steps: BotMessage[]; live: boolean }) {
       <button type="button" className="work-head" onClick={() => setOpen((o) => !o)}>
         {live ? <span className="spinner" /> : <span>✓</span>}
         <span>
-          {live ? describeAction(latest.payload.action) || "Working" : "Worked"} ·{" "}
-          {steps.length} step{steps.length === 1 ? "" : "s"}
+          {live ? describeAction(latest.payload.action) || "Working" : "Worked"} · {steps.length}{" "}
+          step{steps.length === 1 ? "" : "s"}
           {failures > 0 && ` · ${failures} retried`}
         </span>
         <span className="chev">{expanded ? "▾" : "▸"}</span>
@@ -166,7 +166,7 @@ export function MessageList({
         const isUser = m.role === "user";
         return (
           <div key={m.id} className={isUser ? "msg user" : "msg bot"}>
-            {!isUser && <Avatar name={bot.name} avatar={bot.avatar} size="sm" />}
+            {!isUser && <Avatar bot={bot} size={24} />}
             <div style={{ minWidth: 0, maxWidth: isUser ? "82%" : "100%" }}>
               {m.payload.from_bot_name && (
                 <div className="from-bot">From {m.payload.from_bot_name} (bot)</div>
@@ -176,7 +176,10 @@ export function MessageList({
                 {isUser ? m.content : <RichText text={m.content} />}
               </div>
               {reactions[m.id] && (
-                <div className="reactions" style={{ justifyContent: isUser ? "flex-end" : "start" }}>
+                <div
+                  className="reactions"
+                  style={{ justifyContent: isUser ? "flex-end" : "start" }}
+                >
                   <span className="reaction">{reactions[m.id]}</span>
                 </div>
               )}
@@ -185,10 +188,7 @@ export function MessageList({
               <button type="button" onClick={() => onReply(m)}>
                 Reply
               </button>
-              <button
-                type="button"
-                onClick={() => void navigator.clipboard?.writeText(m.content)}
-              >
+              <button type="button" onClick={() => void navigator.clipboard?.writeText(m.content)}>
                 Copy
               </button>
               {!isUser && (

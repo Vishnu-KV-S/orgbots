@@ -1,22 +1,34 @@
-import { cx } from "@/lib/cx";
-import { initials } from "../lib/text";
+"use client";
 
-/** A bot's face: its emoji if it has one, its initials otherwise. */
+import { type Appearance, BotFace, FlatFace, type Mood, appearanceFor } from "../avatar";
+
+/**
+ * A bot's face. `live` draws the animated 3D bot (in the shared canvas); otherwise a
+ * flat CSS face in the same colours — for places with many small faces at once,
+ * like every bot message in a long transcript.
+ */
 export function Avatar({
-  name,
-  avatar,
-  working,
-  size,
+  bot,
+  appearance,
+  mood = "idle",
+  size = 32,
+  live = false,
 }: {
-  name: string;
-  avatar?: string;
-  working?: boolean;
-  size?: "sm" | "lg";
+  bot?: { id: string; appearance?: Partial<Appearance> | null };
+  appearance?: Appearance;
+  mood?: Mood;
+  size?: number;
+  live?: boolean;
 }) {
+  const look = appearance ?? appearanceFor(bot ?? { id: "anonymous" });
+  if (!live) return <FlatFace appearance={look} size={size} />;
   return (
-    <span className={cx("avatar", size)} aria-hidden>
-      {avatar || initials(name)}
-      {working && <span className="working" title="Working" />}
-    </span>
+    <BotFace
+      appearance={look}
+      mood={mood}
+      size={size}
+      seed={bot?.id ?? ""}
+      framing={size < 80 ? "head" : "full"}
+    />
   );
 }

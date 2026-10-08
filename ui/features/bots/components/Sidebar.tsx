@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { Bot, ComputerStatus } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
 import { timeAgo } from "../lib/text";
+import { moodOfBot } from "../avatar";
 import { Avatar } from "./Avatar";
 import { Menu, type MenuItem } from "./Menu";
 
@@ -49,8 +50,14 @@ function BotRow({
   const items: MenuItem[] = [
     { label: "Edit profile", onSelect: () => commands.edit(bot) },
     { label: "Duplicate", onSelect: () => commands.duplicate(bot) },
-    { label: bot.pinned ? "Unpin" : "Pin", onSelect: () => commands.togglePin(bot) },
-    { label: bot.hidden ? "Unhide" : "Hide", onSelect: () => commands.toggleHidden(bot) },
+    {
+      label: bot.pinned ? "Unpin" : "Pin",
+      onSelect: () => commands.togglePin(bot),
+    },
+    {
+      label: bot.hidden ? "Unhide" : "Hide",
+      onSelect: () => commands.toggleHidden(bot),
+    },
     {
       label: bot.unread ? "Mark as read" : "Mark as unread",
       onSelect: () => commands.toggleRead(bot),
@@ -94,17 +101,23 @@ function BotRow({
           onSelect();
         }}
       >
-      <Avatar name={bot.name} avatar={bot.avatar} working={bot.working} size={depth > 0 ? "sm" : undefined} />
-      <div className="brow-main">
-        <div className="brow-name">
-          {bot.name}
-          {bot.pinned && <span className="pin" title="Pinned">●</span>}
+        <Avatar bot={bot} mood={moodOfBot(bot)} size={depth > 0 ? 30 : 38} live />
+        <div className="brow-main">
+          <div className="brow-name">
+            {bot.name}
+            {bot.pinned && (
+              <span className="pin" title="Pinned">
+                ●
+              </span>
+            )}
+          </div>
+          <div className="brow-sub">
+            {helperCount > 0 && collapsed
+              ? `${helperCount} helper${helperCount === 1 ? "" : "s"} · `
+              : ""}
+            {preview(bot)}
+          </div>
         </div>
-        <div className="brow-sub">
-          {helperCount > 0 && collapsed ? `${helperCount} helper${helperCount === 1 ? "" : "s"} · ` : ""}
-          {preview(bot)}
-        </div>
-      </div>
       </button>
       <div className="brow-marks">
         {bot.needs_attention ? (
@@ -206,7 +219,11 @@ export function Sidebar({
       </button>
 
       <nav className="bside-list" aria-label="Bots">
-        {error && !bots && <p className="brow-sub" style={{ padding: 8 }}>API unreachable</p>}
+        {error && !bots && (
+          <p className="brow-sub" style={{ padding: 8 }}>
+            API unreachable
+          </p>
+        )}
         {bots && bots.length === 0 && (
           <p className="brow-sub" style={{ padding: 8, whiteSpace: "normal" }}>
             No bots yet. Create one to get started.
@@ -232,14 +249,9 @@ export function Sidebar({
         <button type="button" className="bside-link" onClick={onSettings}>
           ⚙ Settings
           <span
-            className={cx(
-              "status-dot",
-              computer?.reachable ? "ok" : computer ? "bad" : undefined,
-            )}
+            className={cx("status-dot", computer?.reachable ? "ok" : computer ? "bad" : undefined)}
             title={
-              computer?.reachable
-                ? "Cloud computer is running"
-                : "Cloud computer is not reachable"
+              computer?.reachable ? "Cloud computer is running" : "Cloud computer is not reachable"
             }
           />
         </button>

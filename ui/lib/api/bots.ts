@@ -27,6 +27,8 @@ export interface Bot {
   duplicated_from: string | null;
   parent_bot_id: string | null;
   created_by: "person" | "bot";
+  /** The 3D body; `{}` means "derive one from the id". See `features/bots/avatar`. */
+  appearance: Partial<import("@/features/bots/avatar/appearance").Appearance>;
   created_at: string;
   updated_at: string;
   last_message: BotMessage | null;
@@ -111,10 +113,17 @@ export interface ComputerStatus {
   reachable: boolean;
   url: string;
   ok?: boolean;
-  screens?: { screen_id: string; label: string; controller: string; url: string }[];
+  screens?: {
+    screen_id: string;
+    label: string;
+    controller: string;
+    url: string;
+  }[];
 }
 
-export type BotDraft = Pick<Bot, "name" | "label" | "description" | "instructions" | "avatar">;
+export type BotDraft = Pick<Bot, "name" | "label" | "description" | "instructions" | "avatar"> & {
+  appearance?: import("@/features/bots/avatar/appearance").Appearance;
+};
 
 const json = (method: string, body?: unknown, signal?: AbortSignal): RequestInit => ({
   method,
@@ -147,13 +156,12 @@ export const stopBot = (id: string) =>
   request<unknown>(`${BOTS_BASE}/${id}/stop`, json("POST", {}));
 
 export const fetchMessages = (id: string, after: number, signal?: AbortSignal) =>
-  request<MessagePage>(`${BOTS_BASE}/${id}/messages?after=${after}`, { signal });
+  request<MessagePage>(`${BOTS_BASE}/${id}/messages?after=${after}`, {
+    signal,
+  });
 
 export const sendMessage = (id: string, text: string, replyTo?: string | null) =>
-  request<Sent>(
-    `${BOTS_BASE}/${id}/messages`,
-    json("POST", { text, reply_to: replyTo ?? null }),
-  );
+  request<Sent>(`${BOTS_BASE}/${id}/messages`, json("POST", { text, reply_to: replyTo ?? null }));
 
 export const decide = (id: string, pendingId: string, decision: "once" | "always" | "deny") =>
   request<Sent>(`${BOTS_BASE}/${id}/pending/${pendingId}`, json("POST", { decision }));
@@ -168,7 +176,9 @@ export const deleteRule = (id: string, ruleId: string) =>
   request<unknown>(`${BOTS_BASE}/${id}/rules/${ruleId}`, { method: "DELETE" });
 
 export const searchBots = (q: string, signal?: AbortSignal) =>
-  request<SearchResult>(`${BOTS_BASE}/search?q=${encodeURIComponent(q)}`, { signal });
+  request<SearchResult>(`${BOTS_BASE}/search?q=${encodeURIComponent(q)}`, {
+    signal,
+  });
 
 export const screenshotUrl = (id: string, nonce: number) =>
   `${BOTS_BASE}/${id}/computer/screenshot?quality=60&t=${nonce}`;
@@ -185,10 +195,7 @@ export type HumanInput =
   | { kind: "back" | "forward" | "reload" };
 
 export const sendInput = (id: string, input: HumanInput) =>
-  request<{ ok: boolean; url: string }>(
-    `${BOTS_BASE}/${id}/computer/input`,
-    json("POST", input),
-  );
+  request<{ ok: boolean; url: string }>(`${BOTS_BASE}/${id}/computer/input`, json("POST", input));
 
 export const computerStatus = (signal?: AbortSignal) =>
   request<ComputerStatus>(COMPUTER_BASE, { signal });

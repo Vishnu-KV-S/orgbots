@@ -13,7 +13,8 @@ import {
 } from "@/lib/api/bots";
 import { useAction } from "@/lib/hooks/useAction";
 import { cx } from "@/lib/cx";
-import { AVATARS, TEMPLATES } from "../lib/templates";
+import { Designer, randomAppearance } from "../avatar";
+import { TEMPLATES } from "../lib/templates";
 import { Avatar } from "./Avatar";
 
 function Modal({
@@ -63,8 +64,8 @@ export function NewBotDialog({
     return (
       <Modal title="Create a new bot" onClose={onClose}>
         <p className="screen-help" style={{ marginTop: 0 }}>
-          A bot is a persistent AI employee: give it a role, and it remembers your preferences
-          and its previous work. Pick a starting point — everything is editable later.
+          A bot is a persistent AI employee: give it a role, and it remembers your preferences and
+          its previous work. Pick a starting point — everything is editable later.
         </p>
         <div className="templates">
           {TEMPLATES.map((t) => (
@@ -79,10 +80,11 @@ export function NewBotDialog({
                   description: t.description,
                   instructions: t.instructions,
                   avatar: t.avatar,
+                  appearance: t.name === "Assistant" ? randomAppearance() : t.appearance,
                 })
               }
             >
-              <Avatar name={t.name} avatar={t.avatar} size="sm" />
+              <Avatar appearance={t.appearance} size={34} />
               <strong>{t.name}</strong>
               <span>{t.blurb}</span>
             </button>
@@ -95,19 +97,12 @@ export function NewBotDialog({
   return (
     <Modal title="Create a new bot" onClose={onClose}>
       <div className="form">
-        <div className="emoji-row" role="radiogroup" aria-label="Avatar">
-          {AVATARS.map((a) => (
-            <button
-              key={a}
-              type="button"
-              className={cx(form.avatar === a && "on")}
-              onClick={() => setForm({ ...form, avatar: a })}
-              aria-label={`Avatar ${a}`}
-            >
-              {a}
-            </button>
-          ))}
-        </div>
+        <Designer
+          value={form.appearance ?? randomAppearance()}
+          onChange={(appearance) => setForm({ ...form, appearance })}
+          standalone
+          previewSize={190}
+        />
         <div className="form-row">
           <label>
             Name
@@ -209,7 +204,12 @@ export function CommandPalette({
     const needle = q.toLowerCase();
     const commands: PaletteEntry[] = [
       { key: "new", label: "Create new bot", hint: "Command", run: onNew },
-      { key: "settings", label: "Open settings", hint: "Command", run: onSettings },
+      {
+        key: "settings",
+        label: "Open settings",
+        hint: "Command",
+        run: onSettings,
+      },
       {
         key: "companies",
         label: "Open companies console",
@@ -230,7 +230,10 @@ export function CommandPalette({
       }));
     const messageEntries: PaletteEntry[] = (results?.messages ?? []).map((m) => ({
       key: `msg-${m.id}`,
-      label: m.content.replace(/\*\*|`/g, "").replace(/\s+/g, " ").slice(0, 90),
+      label: m.content
+        .replace(/\*\*|`/g, "")
+        .replace(/\s+/g, " ")
+        .slice(0, 90),
       hint: m.bot_name,
       run: () => onSelectBot(m.bot_id),
     }));
@@ -267,7 +270,11 @@ export function CommandPalette({
           }}
         />
         <div className="palette-list" role="listbox">
-          {entries.length === 0 && <p className="screen-help" style={{ padding: 10 }}>No matches.</p>}
+          {entries.length === 0 && (
+            <p className="screen-help" style={{ padding: 10 }}>
+              No matches.
+            </p>
+          )}
           {entries.map((entry, i) => (
             <button
               key={entry.key}
@@ -276,8 +283,14 @@ export function CommandPalette({
               onMouseEnter={() => setSel(i)}
               onClick={() => choose(entry)}
             >
-              {entry.bot && <Avatar name={entry.bot.name} avatar={entry.bot.avatar} size="sm" />}
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {entry.bot && <Avatar bot={entry.bot} size={22} />}
+              <span
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {entry.label}
               </span>
               <small>{entry.hint}</small>
@@ -354,7 +367,14 @@ export function SettingsDialog({
 
       <section className="dsec">
         <h3>Notifications</h3>
-        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+        <label
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            fontSize: 13,
+          }}
+        >
           <input
             type="checkbox"
             checked={notify}
@@ -386,8 +406,8 @@ export function SettingsDialog({
           <dd>{computer?.screens?.length ?? 0} open</dd>
         </dl>
         <p className="screen-help">
-          All your bots share one cloud computer — the same browser profile, sign-ins and
-          cookies — and each has its own screen. Recover restarts the browser; sign-ins survive.
+          All your bots share one cloud computer — the same browser profile, sign-ins and cookies —
+          and each has its own screen. Recover restarts the browser; sign-ins survive.
         </p>
         {reset.error && <ErrorNotice>{reset.error}</ErrorNotice>}
         <div className="control-row">
@@ -399,15 +419,17 @@ export function SettingsDialog({
           >
             {reset.pending ? "Restarting…" : "Recover computer"}
           </button>
-          {reset.result !== null && !reset.pending && <span className="screen-help">Restarted.</span>}
+          {reset.result !== null && !reset.pending && (
+            <span className="screen-help">Restarted.</span>
+          )}
         </div>
       </section>
 
       <section className="dsec">
         <h3>Model</h3>
         <p className="screen-help" style={{ marginTop: 0 }}>
-          Bots run on DeepSeek (<code>deepseek-v4-pro</code> for each step). Every run is
-          admitted, budgeted and audited by the runtime like any company run.
+          Bots run on DeepSeek (<code>deepseek-v4-pro</code> for each step). Every run is admitted,
+          budgeted and audited by the runtime like any company run.
         </p>
       </section>
     </Modal>
@@ -477,8 +499,9 @@ export function DeleteBotDialog({
             <strong>Delete only {bot.name}</strong>
             <span>
               Keep {names(direct)} — {direct.length === 1 ? "it moves" : "they move"} up to{" "}
-              {parent ? `${parent.name}` : "the top level"} and keep{direct.length === 1 ? "s" : ""}{" "}
-              {direct.length === 1 ? "its" : "their"} memory and conversations.
+              {parent ? `${parent.name}` : "the top level"} and keep
+              {direct.length === 1 ? "s" : ""} {direct.length === 1 ? "its" : "their"} memory and
+              conversations.
             </span>
           </button>
           <button
@@ -488,11 +511,17 @@ export function DeleteBotDialog({
             onClick={() => void remove.run(true)}
           >
             <strong>
-              Delete {bot.name} and {helpers.length === 1 ? "its helper" : `all ${helpers.length} helpers`}
+              Delete {bot.name} and{" "}
+              {helpers.length === 1 ? "its helper" : `all ${helpers.length} helpers`}
             </strong>
             <span>Also deletes {names(helpers)}.</span>
           </button>
-          <button type="button" className="pbtn" style={{ alignSelf: "flex-end" }} onClick={onClose}>
+          <button
+            type="button"
+            className="pbtn"
+            style={{ alignSelf: "flex-end" }}
+            onClick={onClose}
+          >
             Cancel
           </button>
         </div>

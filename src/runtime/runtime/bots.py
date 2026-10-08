@@ -73,6 +73,7 @@ class BotManager:
         avatar: str = "",
         memory: str = "",
         duplicated_from: uuid.UUID | None = None,
+        appearance: dict[str, Any] | None = None,
     ) -> BotRow:
         bot_id = uuid.uuid4()
         actor_name = actor_name_for(name, secrets.token_hex(3))
@@ -93,6 +94,7 @@ class BotManager:
                 avatar=avatar,
                 memory=memory,
                 duplicated_from=duplicated_from,
+                appearance=appearance,
             )
             row = await uow.bots.get(bot_id)
         assert row is not None
@@ -116,6 +118,7 @@ class BotManager:
             instructions=source.instructions,
             avatar=source.avatar,
             duplicated_from=source.id,
+            appearance=source.appearance,
         )
         async with self._uow.transaction() as uow:
             await uow.bots.copy_rules(source.id, copy.id)

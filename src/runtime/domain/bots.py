@@ -209,6 +209,26 @@ class BotStep(BaseModel):
 BOT_STEP_V1 = SCHEMAS.register(BotStep, version=1)
 
 
+# --- appearance -------------------------------------------------------------------------
+
+
+class BotAppearance(BaseModel):
+    """A bot's 3D body. Presentation only — nothing here reaches a prompt or a spec.
+
+    Closed vocabularies rather than free strings, because the UI builds the model from
+    these names and an unknown one would render as nothing. Colours are `#rrggbb`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    shape: Literal["orb", "cube", "capsule", "pod", "tv"] = "orb"
+    body: str = Field(default="#e9e4f2", pattern=r"^#[0-9a-fA-F]{6}$")
+    glow: str = Field(default="#e040fb", pattern=r"^#[0-9a-fA-F]{6}$")
+    eyes: Literal["pill", "round", "square", "visor", "dot"] = "pill"
+    top: Literal["ring", "knobs", "antenna", "ears", "halo", "none"] = "ring"
+    finish: Literal["gloss", "matte", "metal", "pearl"] = "gloss"
+
+
 # --- the approval gate -----------------------------------------------------------------
 
 

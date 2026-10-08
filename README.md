@@ -120,6 +120,17 @@ RUNTIME_DELEGATION_ENABLED=true   # ask_bot is a delegation
 RUNTIME_WORKER_SLOTS=4            # a bot waiting on its helper holds a slot meanwhile
 ```
 
+**3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
+its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
+(or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
+helper a bot created, gets a stable look derived from its id. The body animates by
+what the bot is doing: idle floating and blinking, thinking, scanning while it
+browses, squash-and-stretch clicks, a typing jitter, a puzzled "?" when it needs you,
+X-eyes on an error, a happy hop when done, a spin when it creates a helper, signal
+rings when it asks one, and more — preview each in the designer. All of them are
+drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs one
+context, not one per bot.
+
 Not yet built (the next phases): skills and teach-by-demonstration, scheduled and
 event routines, plugins/connectors, group chats with several bots, file attachments
 and generated artifacts, voice chat, team bots.

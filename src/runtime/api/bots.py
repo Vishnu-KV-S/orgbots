@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
 from runtime.api.errors import http_errors
+from runtime.domain.bots import BotAppearance
 from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
 from runtime.domain.ids import OrganizationId, RunId
 from runtime.persistence.repositories.bots import BotMessageRow, BotRow
@@ -124,6 +125,7 @@ def _bot_view(
         "duplicated_from": str(bot.duplicated_from) if bot.duplicated_from else None,
         "parent_bot_id": str(bot.parent_bot_id) if bot.parent_bot_id else None,
         "created_by": bot.created_by,
+        "appearance": bot.appearance,
         "created_at": bot.created_at.isoformat(),
         "updated_at": bot.updated_at.isoformat(),
         "last_message": _message_view(last) if last else None,
@@ -153,6 +155,7 @@ class CreateBody(BaseModel):
     description: str = Field(default="", max_length=2_000)
     instructions: str = Field(default="", max_length=8_000)
     avatar: str = Field(default="", max_length=16)
+    appearance: BotAppearance | None = None
 
 
 class UpdateBody(BaseModel):
@@ -164,6 +167,7 @@ class UpdateBody(BaseModel):
     memory: str | None = Field(default=None, max_length=4_000)
     pinned: bool | None = None
     hidden: bool | None = None
+    appearance: BotAppearance | None = None
 
 
 class MessageBody(BaseModel):
@@ -225,7 +229,9 @@ async def list_bots(request: Request) -> dict[str, Any]:
 async def create_bot(body: CreateBody, request: Request) -> dict[str, Any]:
     org = await _organization(request)
     with http_errors():
-        bot = await _manager(request).create(org, **body.model_dump())
+        fields = body.model_dump(exclude={"appearance"})
+        appearance = body.appearance.model_dump() if body.appearance else None
+        bot = await _manager(request).create(org, **fields, appearance=appearance)
     return _bot_view(bot)
 
 

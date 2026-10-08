@@ -16,12 +16,23 @@ from runtime.domain.ids import OrganizationId
 _BOT_COLUMNS = """
     id, organization_id, actor_name, name, label, description, instructions, avatar,
     memory, pinned, hidden, unread, needs_attention, stop_requested, turn, last_run_id,
-    duplicated_from, parent_bot_id, created_by, created_at, updated_at
+    duplicated_from, parent_bot_id, created_by, appearance, created_at, updated_at
 """
 
 EDITABLE = frozenset(
-    {"name", "label", "description", "instructions", "avatar", "memory", "pinned", "hidden"}
+    {
+        "name",
+        "label",
+        "description",
+        "instructions",
+        "avatar",
+        "memory",
+        "pinned",
+        "hidden",
+        "appearance",
+    }
 )
+_JSON_FIELDS = frozenset({"appearance"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +56,7 @@ class BotRow:
     duplicated_from: uuid.UUID | None
     parent_bot_id: uuid.UUID | None
     created_by: str
+    appearance: dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
@@ -106,6 +118,7 @@ def _bot(row: Any) -> BotRow:
         duplicated_from=row.duplicated_from,
         parent_bot_id=row.parent_bot_id,
         created_by=row.created_by,
+        appearance=dict(row.appearance or {}),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -160,15 +173,17 @@ class BotRepository:
         duplicated_from: uuid.UUID | None = None,
         parent_bot_id: uuid.UUID | None = None,
         created_by: str = "person",
+        appearance: dict[str, Any] | None = None,
     ) -> None:
         await self._s.execute(
             text(
                 """
                 INSERT INTO bots (id, organization_id, actor_name, name, label, description,
                                   instructions, avatar, memory, duplicated_from,
-                                  parent_bot_id, created_by)
+                                  parent_bot_id, created_by, appearance)
                 VALUES (:id, :org, :actor, :name, :label, :description,
-                        :instructions, :avatar, :memory, :dup, :parent, :created_by)
+                        :instructions, :avatar, :memory, :dup, :parent, :created_by,
+                        CAST(:appearance AS jsonb))
                 ON CONFLICT (id) DO NOTHING
                 """
             ),
@@ -185,6 +200,7 @@ class BotRepository:
                 "dup": duplicated_from,
                 "parent": parent_bot_id,
                 "created_by": created_by,
+                "appearance": json.dumps(appearance or {}),
             },
         )
 
@@ -227,10 +243,17 @@ class BotRepository:
             raise ValueError(f"not editable: {sorted(unknown)}")
         if not fields:
             return
-        assignments = ", ".join(f"{name} = :{name}" for name in sorted(fields))
+        assignments = ", ".join(
+            f"{name} = CAST(:{name} AS jsonb)" if name in _JSON_FIELDS else f"{name} = :{name}"
+            for name in sorted(fields)
+        )
+        params = {
+            name: json.dumps(value) if name in _JSON_FIELDS else value
+            for name, value in fields.items()
+        }
         await self._s.execute(
             text(f"UPDATE bots SET {assignments}, updated_at = now() WHERE id = :id"),
-            {**fields, "id": bot_id},
+            {**params, "id": bot_id},
         )
 
     async def set_flags(self, bot_id: uuid.UUID, **flags: Any) -> None:

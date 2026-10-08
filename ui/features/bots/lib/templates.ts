@@ -1,7 +1,14 @@
 import type { BotDraft } from "@/lib/api/bots";
+import { type Appearance, PRESETS } from "../avatar/appearance";
+
+const look = (name: string): Appearance =>
+  (PRESETS.find((p) => p.name === name) ?? PRESETS[0]).appearance;
 
 /** Starting points for a new bot. Everything here is editable after creation. */
-export const TEMPLATES: (BotDraft & { blurb: string })[] = [
+export const TEMPLATES: (BotDraft & {
+  blurb: string;
+  appearance: Appearance;
+})[] = [
   {
     avatar: "🔎",
     name: "Researcher",
@@ -10,6 +17,7 @@ export const TEMPLATES: (BotDraft & { blurb: string })[] = [
     instructions:
       "Prefer primary sources. Always include links. When comparing options, give a short table-like list with the trade-offs.",
     blurb: "Find and compare information, with sources",
+    appearance: look("Orbit"),
   },
   {
     avatar: "🛒",
@@ -19,6 +27,7 @@ export const TEMPLATES: (BotDraft & { blurb: string })[] = [
     instructions:
       "Never place an order or enter payment details without asking me first. Report prices with the store name and link.",
     blurb: "Compare products and prices across stores",
+    appearance: look("Cubey"),
   },
   {
     avatar: "✉️",
@@ -28,6 +37,7 @@ export const TEMPLATES: (BotDraft & { blurb: string })[] = [
     instructions:
       "Draft replies but never send anything without my approval. Keep drafts short and in my voice.",
     blurb: "Triage and draft replies in web mail",
+    appearance: look("Beacon"),
   },
   {
     avatar: "📣",
@@ -36,6 +46,7 @@ export const TEMPLATES: (BotDraft & { blurb: string })[] = [
     description: "Monitors mentions and drafts posts for your social accounts.",
     instructions: "Never post publicly without asking me first.",
     blurb: "Watch mentions and draft posts",
+    appearance: look("Telly"),
   },
   {
     avatar: "🤖",
@@ -44,16 +55,17 @@ export const TEMPLATES: (BotDraft & { blurb: string })[] = [
     description: "",
     instructions: "",
     blurb: "A blank bot you configure yourself",
+    appearance: look("Sprout"),
   },
-];
-
-export const AVATARS = [
-  "🤖", "🔎", "🛒", "✉️", "📣", "📊", "🧭", "🧠", "📝", "💼", "🗂️", "🧾", "🛠️", "📅", "🎯", "🚀",
 ];
 
 /** The `/` menu. Built-in prompts until saved skills land. */
 export const QUICK_PROMPTS: { cmd: string; text: string; hint: string }[] = [
-  { cmd: "continue", text: "Continue where you left off.", hint: "Resume the last task" },
+  {
+    cmd: "continue",
+    text: "Continue where you left off.",
+    hint: "Resume the last task",
+  },
   {
     cmd: "summarize",
     text: "Summarize the page you have open: the key points, in a short list.",
