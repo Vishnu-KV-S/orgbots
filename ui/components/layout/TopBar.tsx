@@ -1,10 +1,17 @@
 import Link from "next/link";
 
-/** The bar across the top of every screen. Children are its right-hand side. */
+/**
+ * The bar across the top of every company-console screen. Children are its
+ * right-hand side. The brand goes to the company list; the bots workspace is the
+ * home screen and has its own sidebar instead of this bar.
+ */
 export function TopBar({ children }: { children?: React.ReactNode }) {
   return (
     <header className="topbar">
-      <Link href="/" className="brand">
+      <Link href="/" className="crumb back-to-bots" title="Back to your bots">
+        ← Bots
+      </Link>
+      <Link href="/companies" className="brand">
         <span className="dot" />
         agent-org-runtime
       </Link>

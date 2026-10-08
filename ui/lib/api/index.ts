@@ -25,3 +25,4 @@ export {
   writeSpecFile,
   type PlanOptions,
 } from "./control";
+export * as bots from "./bots";

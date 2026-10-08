@@ -61,3 +61,39 @@
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: dark;
 }
+
+/*
+ * Light. The same ranking by brightness, inverted: surfaces step *down* from white,
+ * text steps up from grey to near-black. Chosen by `data-theme` on <html>, which an
+ * inline script in `app/layout.tsx` sets from the saved preference (or the system
+ * one) before first paint.
+ */
+:root[data-theme="light"] {
+  --bg: #fafafa;
+  --bg-panel: #ffffff;
+  --bg-raised: #f4f4f4;
+  --bg-hover: #ececec;
+  --bg-active: #e2e2e2;
+
+  --line: #e3e3e3;
+  --line-soft: #efefef;
+  --line-strong: #cdcdcd;
+
+  --text: #171717;
+  --text-dim: #5c5c5c;
+  --text-faint: #8f8f8f;
+
+  --accent: #2b2b2b;
+  --accent-wash: rgba(0, 0, 0, 0.05);
+
+  --running: #2b2b2b;
+  --queued: #7a7a7a;
+  --idle: #a6a6a6;
+
+  --halted: #b4493f;
+  --failed: #b4493f;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.14);
+  color-scheme: light;
+}

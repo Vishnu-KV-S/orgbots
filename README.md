@@ -67,6 +67,50 @@ adjust them against.
 
 ---
 
+## Bots
+
+Persistent AI employees, GrokBot-style, built **on** the runtime rather than beside
+it: every bot is an actor (`bot_agent@1`), and every message you send it is a run
+through `RunService.start_run()` — so a bot is admitted, budgeted, kill-switched,
+journaled and audited exactly like the marketing department.
+
+Each bot has its own **screen** on one shared **cloud computer**: a separate process
+holding a persistent Chromium profile (sign-ins are shared by every bot) and one tab
+per bot. Bots see a page as a numbered list of its interactive elements plus its
+text, DeepSeek picks one action per step (`BotStep@1`), and the action reaches the
+browser only through `browser.observe@1` / `browser.act@1` in the tool gateway.
+
+```bash
+uv pip install -e ".[dev,computer]"
+export RUNTIME_DEEPSEEK_API_KEY=...          # or put it in .env (gitignored)
+
+uv run python -m runtime.computer.main      # the shared browser, :8020
+uv run uvicorn runtime.api.app:app --port 8000
+uv run python -m runtime.worker.main
+cd ui && npm run dev                        # http://localhost:3000
+```
+
+What a turn does, and what stops it:
+
+- **One action per step, re-reading the page each time**, capped at 24 actions per
+  turn; a longer task reports progress and you say "continue".
+- **Approvals.** Typing into a password-like field, and any step the model marks as
+  consequential (ordering, sending, posting, deleting), is *parked*: the run ends
+  with an approval card showing the real action — URL, element, text (dots for a
+  secret). *Allow once*, *Always allow* (becomes a rule for that action on that
+  site) or *Deny* starts a fresh run whose first step is exactly that action. Rules
+  live in the bot's Details; **ask first wins** over allow.
+- **Stop and redirect.** Stop ends the turn at the next step. Sending a new
+  message while a bot works supersedes the old turn (`bots.turn`).
+- **Take control.** In the Computer pane a person can take a screen to sign in or
+  solve a CAPTCHA; the computer refuses the bot's actions until it is handed back.
+
+Not yet built (the next phases): skills and teach-by-demonstration, scheduled and
+event routines, plugins/connectors, group chats and bot-to-bot handoffs, file
+attachments and generated artifacts, voice chat, team bots.
+
+---
+
 ## Run it
 
 ### With Docker

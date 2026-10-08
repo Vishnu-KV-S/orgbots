@@ -11,8 +11,8 @@ import { type NextRequest } from "next/server";
  * **This file is where the surface's shape is enforced, and it is asymmetric on
  * purpose:**
  *
- *     GET                  /v1/observe/*, /v1/control/*, /healthz
- *     POST, PUT, DELETE    /v1/control/* only
+ *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*, /healthz
+ *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer* only
  *
  * `/v1/observe` stays GET-only because it is read-only *by construction* — every
  * statement in `runtime/api/observe.py` is a SELECT — and a proxy that forwarded a
@@ -25,14 +25,21 @@ import { type NextRequest } from "next/server";
  * spec-root confinement check. The viewer is no longer only a viewer, and the
  * honest statement of what it may do is this allowlist.
  *
- * A method that is not one of the four is unroutable: Next only calls the
+ * `/v1/bots` and `/v1/computer` are the bot surface, and they are writable for the
+ * same reason `/v1/control` is: every message typed to a bot becomes a run through
+ * `RunService`, and every click a person makes on a bot's screen is refused by the
+ * computer unless that person has taken control of it. The screenshot is the one
+ * non-JSON response that passes through here; the body is forwarded untouched.
+ *
+ * A method that is not one of the five is unroutable: Next only calls the
  * handlers a route file exports.
  */
 
 const UPSTREAM = process.env.RUNTIME_API_URL ?? "http://127.0.0.1:8000";
 
-const READABLE = ["v1/observe/", "v1/control/", "healthz"];
-const WRITABLE = ["v1/control/"];
+const BOTS = ["v1/bots", "v1/computer"];
+const READABLE = ["v1/observe/", "v1/control/", "healthz", ...BOTS];
+const WRITABLE = ["v1/control/", ...BOTS];
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +51,12 @@ function refuse(target: string, method: string) {
 }
 
 async function forward(request: NextRequest, target: string, allowed: string[]) {
-  if (!allowed.some((prefix) => target === prefix || target.startsWith(prefix))) {
+  const permitted = allowed.some((prefix) =>
+    prefix.endsWith("/")
+      ? target.startsWith(prefix)
+      : target === prefix || target.startsWith(`${prefix}/`),
+  );
+  if (!permitted) {
     return refuse(target, request.method);
   }
 
@@ -61,6 +73,9 @@ async function forward(request: NextRequest, target: string, allowed: string[]) 
       method: request.method,
       headers: {
         accept: request.headers.get("accept") ?? "application/json",
+        ...(request.headers.get("x-organization-id")
+          ? { "x-organization-id": request.headers.get("x-organization-id") as string }
+          : {}),
         ...(hasBody
           ? { "content-type": request.headers.get("content-type") ?? "application/json" }
           : {}),
@@ -102,6 +117,11 @@ export async function POST(request: NextRequest, context: Context) {
 }
 
 export async function PUT(request: NextRequest, context: Context) {
+  const { path } = await context.params;
+  return forward(request, path.join("/"), WRITABLE);
+}
+
+export async function PATCH(request: NextRequest, context: Context) {
   const { path } = await context.params;
   return forward(request, path.join("/"), WRITABLE);
 }

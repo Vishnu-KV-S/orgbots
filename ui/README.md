@@ -63,7 +63,11 @@ RUNTIME_API_URL=http://127.0.0.1:8010 npm run dev
 
 ## What you get
 
-**`/`** — every organization the runtime knows, with its live-run count, failure
+**`/`** — your bots. Sidebar → conversation → computer/details, with ⌘K search.
+See *Bots* in the repository README. Needs the computer process
+(`python -m runtime.computer.main`) for the live screen.
+
+**`/companies`** — every organization the runtime knows, with its live-run count, failure
 count and open tasks. `running` means at least one run is queued or executing.
 `halted` means a kill switch is engaged, which deliberately outranks `running`:
 the runs still counted as live in a halted org are the ones draining.
