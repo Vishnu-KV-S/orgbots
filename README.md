@@ -217,6 +217,21 @@ beats *allow*, for commands and clicks alike. `copy_file` moves files between
 attachment). The Computer pane's *Workspace & terminal* tab browses, downloads and
 uploads, and runs your own sandboxed commands. Needs `bwrap` on the computer's machine.
 
+**Group chats and bots messaging bots.** A group is a chat with you and two to six bots
+(migration 047). `@Name` gives a bot the request, `@everyone` gives it to all of them,
+and a message that names nobody goes to the group's lead. Each bot reads the group's
+conversation on its turn and answers there. It hands a part to a teammate by naming
+them, and the teammate picks it up and answers in the group. *Reply in thread* keeps
+feedback on one result together. Outside groups, `message_bot` sends any of your other
+bots a message without waiting: the recipient works on it when it is free, and its
+answer comes back as a message that wakes the sender. With `handoff`, the recipient
+owns the task and reports to you. Deliveries between bots are queued and started by
+the worker's wake runner when the recipient is free (`runtime/runtime/wakes.py`); they
+never supersede the recipient's current work. Your own message in a group starts the
+bots it names at once, like a message does. Bot-to-bot chains stop at 4 hops, each bot
+may send 60 such messages a day, and a reply never asks for a reply back. Your
+reactions are kept on the server, for both chats and groups.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
@@ -228,8 +243,7 @@ rings when it asks one, and more — preview each in the designer. All of them a
 drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs one
 context, not one per bot.
 
-Not yet built (the next phases): plugins/connectors, group chats with several bots,
-voice chat, team bots.
+Not yet built (the next phases): plugins/connectors, voice chat, team bots.
 
 ---
 

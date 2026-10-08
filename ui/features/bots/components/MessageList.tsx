@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { type Attachment, type Bot, type BotMessage, rawFileUrl } from "@/lib/api/bots";
+import {
+  type Attachment,
+  type Bot,
+  type BotMessage,
+  rawFileUrl,
+  reactToBotMessage,
+} from "@/lib/api/bots";
 import { ACTION_ICON, OPENS_FILE, RichText, describeAction } from "../lib/text";
 import { ApprovalCard } from "./ApprovalCard";
 import { CredentialCard } from "./CredentialCard";
@@ -26,30 +32,22 @@ function group(messages: BotMessage[]): Item[] {
   return items;
 }
 
-const REACTIONS_KEY = "bot-reactions";
-
-function useReactions() {
-  const [reactions, setReactions] = useState<Record<string, string>>({});
-  useEffect(() => {
+/** The person's reactions, kept on the server: each message brings its own, and a
+ * toggle keeps what the server answered (the transcript only appends new rows). */
+function useReactions(botId: string) {
+  const [overrides, setOverrides] = useState<Record<string, string[]>>({});
+  useEffect(() => setOverrides({}), [botId]);
+  const of = (m: BotMessage) => overrides[m.id] ?? m.reactions ?? [];
+  const react = async (m: BotMessage, emoji: string) => {
+    const on = !of(m).includes(emoji);
     try {
-      setReactions(JSON.parse(localStorage.getItem(REACTIONS_KEY) ?? "{}"));
+      const result = await reactToBotMessage(botId, m.id, emoji, on);
+      setOverrides((o) => ({ ...o, [m.id]: result.reactions }));
     } catch {
-      /* storage unavailable: reactions just won't persist */
+      /* a reaction that did not save just does not show */
     }
-  }, []);
-  const react = (id: string, emoji: string) =>
-    setReactions((prev) => {
-      const next = { ...prev };
-      if (next[id] === emoji) delete next[id];
-      else next[id] = emoji;
-      try {
-        localStorage.setItem(REACTIONS_KEY, JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  return { reactions, react };
+  };
+  return { of, react };
 }
 
 function WorkBlock({
@@ -227,7 +225,7 @@ export function MessageList({
     }
     return out;
   }, [messages]);
-  const { reactions, react } = useReactions();
+  const { of: reactionsOf, react } = useReactions(bot.id);
 
   return (
     <>
@@ -296,6 +294,14 @@ export function MessageList({
                 <div className="from-bot">From {m.payload.from_bot_name} (bot)</div>
               )}
               {m.payload.demonstration && <div className="from-bot">🎓 Demonstration</div>}
+              {!isUser && m.payload.group_id && (
+                <div className="gm-author">
+                  Posted in a group
+                  {m.payload.handed_to?.length
+                    ? ` · handed to ${m.payload.handed_to.join(", ")}`
+                    : ""}
+                </div>
+              )}
               {m.payload.routine && (
                 <div className="from-bot">
                   {m.payload.trigger === "test"
@@ -321,12 +327,16 @@ export function MessageList({
                   <Attachments bot={bot} files={m.payload.attachments} onOpen={onOpenFile} />
                 )}
               </div>
-              {reactions[m.id] && (
+              {reactionsOf(m).length > 0 && (
                 <div
                   className="reactions"
                   style={{ justifyContent: isUser ? "flex-end" : "start" }}
                 >
-                  <span className="reaction">{reactions[m.id]}</span>
+                  {reactionsOf(m).map((emoji) => (
+                    <span key={emoji} className="reaction">
+                      {emoji}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -339,10 +349,10 @@ export function MessageList({
               </button>
               {!isUser && (
                 <>
-                  <button type="button" onClick={() => react(m.id, "👍")} aria-label="Good">
+                  <button type="button" onClick={() => void react(m, "👍")} aria-label="Good">
                     👍
                   </button>
-                  <button type="button" onClick={() => react(m.id, "👎")} aria-label="Bad">
+                  <button type="button" onClick={() => void react(m, "👎")} aria-label="Bad">
                     👎
                   </button>
                 </>

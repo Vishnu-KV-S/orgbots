@@ -30,6 +30,7 @@ from runtime.persistence.repositories.delegations import DelegationRepository
 from runtime.persistence.repositories.departments import DepartmentRepository
 from runtime.persistence.repositories.effects import EffectRepository
 from runtime.persistence.repositories.files import TeamFileRepository
+from runtime.persistence.repositories.groups import GroupRepository
 from runtime.persistence.repositories.inbox import InboxRepository
 from runtime.persistence.repositories.killswitch import KillSwitchRepository
 from runtime.persistence.repositories.memory import (
@@ -129,6 +130,9 @@ class UnitOfWork:
         self.routines = RoutineRepository(session)
         # The skills library and demonstrations (migration 044).
         self.skills = SkillRepository(session)
+        # Group chats, the bots' wake queue and reactions (migration 047). A bot's post
+        # to a group and the wakes it sets off for teammates are one transaction.
+        self.groups = GroupRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

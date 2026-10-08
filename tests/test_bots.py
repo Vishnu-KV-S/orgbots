@@ -395,12 +395,23 @@ class NoSkills:
         return None
 
 
+class NoGroups:
+    """A bot in no group, with no other bots (`tests/test_bot_groups.py` has some)."""
+
+    async def peers(self, bot: Any) -> list[Any]:
+        return []
+
+    async def wake(self, wake_id: Any) -> None:
+        return None
+
+
 @dataclass
 class _Org:
     bots: FakeBots
     files: Any = field(default_factory=EmptyDrive)
     routines: Any = field(default_factory=NoRoutines)
     skills: Any = field(default_factory=NoSkills)
+    groups: Any = field(default_factory=NoGroups)
 
 
 @dataclass

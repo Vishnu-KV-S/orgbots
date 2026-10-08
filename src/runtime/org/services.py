@@ -20,6 +20,7 @@ from runtime.org.bots import BotService
 from runtime.org.evaluation import EvaluationService
 from runtime.org.files import TeamDrive
 from runtime.org.goals import GoalService
+from runtime.org.groups import GroupService
 from runtime.org.inbox import InboxService
 from runtime.org.metrics import MetricsService
 from runtime.org.routines import RoutineService
@@ -42,6 +43,7 @@ class OrgServices:
     files: TeamDrive
     routines: RoutineService
     skills: SkillService
+    groups: GroupService
 
 
 def build_org_services(
@@ -71,4 +73,5 @@ def build_org_services(
         files=TeamDrive(uow_factory),
         routines=RoutineService(uow_factory),
         skills=SkillService(uow_factory),
+        groups=GroupService(uow_factory),
     )

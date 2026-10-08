@@ -12,9 +12,10 @@ import { type NextRequest } from "next/server";
  * purpose:**
  *
  *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*,
- *                                /v1/vault*, /v1/skills*, /v1/marketplace*, /healthz
+ *                                /v1/vault*, /v1/skills*, /v1/marketplace*, /v1/groups*,
+ *                                /healthz
  *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer*, /v1/vault*,
- *                                /v1/skills*, /v1/marketplace* only
+ *                                /v1/skills*, /v1/marketplace*, /v1/groups* only
  *
  * `/v1/observe` stays GET-only because it is read-only *by construction* — every
  * statement in `runtime/api/observe.py` is a SELECT — and a proxy that forwarded a
@@ -46,7 +47,14 @@ import { type NextRequest } from "next/server";
 
 const UPSTREAM = process.env.RUNTIME_API_URL ?? "http://127.0.0.1:8000";
 
-const BOTS = ["v1/bots", "v1/computer", "v1/vault", "v1/skills", "v1/marketplace"];
+const BOTS = [
+  "v1/bots",
+  "v1/computer",
+  "v1/vault",
+  "v1/skills",
+  "v1/marketplace",
+  "v1/groups",
+];
 const READABLE = ["v1/observe/", "v1/control/", "healthz", ...BOTS];
 const WRITABLE = ["v1/control/", ...BOTS];
 

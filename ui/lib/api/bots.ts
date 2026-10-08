@@ -204,6 +204,13 @@ export interface BotMessage {
     recording_id?: string;
     steps?: number;
     teach?: "started" | "cancelled";
+    /** A message from another of the person's bots (not the bot's creator). */
+    peer?: boolean;
+    handoff?: boolean;
+    /** A reply posted in a group, and the teammates it handed parts to. */
+    group_id?: string;
+    group_name?: string;
+    handed_to?: string[];
     /** run_command's result: the tail of what it printed. */
     output?: string;
     exit_code?: number | null;
@@ -220,6 +227,8 @@ export interface BotMessage {
   run_id: string | null;
   reply_to: string | null;
   created_at: string;
+  /** The person's reactions, kept on the server. */
+  reactions?: string[];
 }
 
 export interface MessagePage {
@@ -810,5 +819,90 @@ export const runSandboxCommand = (command: string, timeoutS = 60) =>
   request<CommandResult>(
     `${COMPUTER_BASE}/terminal`,
     json("POST", { command, timeout_s: timeoutS }),
+  );
+
+// --- reactions -------------------------------------------------------------------------
+
+export const REACTIONS = ["👍", "👎", "❤️", "🎉", "✅", "👀", "😂", "🙏"] as const;
+
+export const reactToBotMessage = (botId: string, messageId: string, emoji: string, on: boolean) =>
+  request<{ message_id: string; reactions: string[] }>(
+    `${BOTS_BASE}/${botId}/messages/${messageId}/reactions`,
+    json("POST", { emoji, on }),
+  );
+
+// --- group chats -----------------------------------------------------------------------
+
+export const GROUPS_BASE = "/rt/v1/groups";
+
+export interface GroupMember {
+  id: string;
+  name: string;
+  label: string;
+  working: boolean;
+}
+
+export interface GroupMessage {
+  id: string;
+  seq: number;
+  group_id: string;
+  author_kind: "person" | "bot" | "system";
+  author_bot_id: string | null;
+  author_name: string;
+  content: string;
+  payload: Record<string, unknown>;
+  /** Set on a reply in a thread: the message the thread hangs off. */
+  thread_root: string | null;
+  run_id: string | null;
+  created_at: string;
+  reactions: string[];
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  /** Answers a message that names nobody. */
+  lead_bot_id: string | null;
+  members: GroupMember[];
+  unread: boolean;
+  created_at: string;
+  updated_at: string;
+  last_message: GroupMessage | null;
+}
+
+export const listGroups = (signal?: AbortSignal) =>
+  request<{ groups: Group[] }>(GROUPS_BASE, { signal });
+
+export const createGroup = (name: string, members: string[], lead?: string | null) =>
+  request<Group>(GROUPS_BASE, json("POST", { name, members, lead: lead ?? null }));
+
+export const updateGroup = (
+  id: string,
+  fields: { name?: string; members?: string[]; lead?: string | null },
+) => request<Group>(`${GROUPS_BASE}/${id}`, json("PATCH", fields));
+
+export const deleteGroup = (id: string) =>
+  request<{ deleted: string }>(`${GROUPS_BASE}/${id}`, { method: "DELETE" });
+
+export const groupMessages = (id: string, after: number, signal?: AbortSignal) =>
+  request<{ messages: GroupMessage[]; working: string[] }>(
+    `${GROUPS_BASE}/${id}/messages?after=${after}`,
+    { signal },
+  );
+
+/** Post to the group. The bots it @names — or the lead, if it names nobody — start on it. */
+export const postToGroup = (id: string, text: string, threadRoot?: string | null) =>
+  request<{ message_id: string; runs: Sent[] }>(
+    `${GROUPS_BASE}/${id}/messages`,
+    json("POST", { text, thread_root: threadRoot ?? null }),
+  );
+
+export const markGroupRead = (id: string) =>
+  request<unknown>(`${GROUPS_BASE}/${id}/read`, json("POST", {}));
+
+export const reactInGroup = (id: string, messageId: string, emoji: string, on: boolean) =>
+  request<{ message_id: string; reactions: string[] }>(
+    `${GROUPS_BASE}/${id}/messages/${messageId}/reactions`,
+    json("POST", { emoji, on }),
   );
 
