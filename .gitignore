@@ -25,3 +25,4 @@ htmlcov/
 # The computer's browser profile: cookies and sign-ins for every site a person or a
 # bot has logged into. Never committed.
 .computer/
+dump.rdb
