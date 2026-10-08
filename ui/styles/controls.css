@@ -32,7 +32,7 @@
 
 .btn.on:hover,
 .btn[aria-pressed="true"]:hover {
-  background: #303030;
+  background: var(--bg-hover);
   border-color: transparent;
 }
 
