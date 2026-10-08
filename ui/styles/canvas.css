@@ -126,7 +126,8 @@
    underneath it. */
 .node.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
 }
 
 /* Something is running in here. Brightness of the outline is the only cue

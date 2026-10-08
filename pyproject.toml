@@ -46,6 +46,13 @@ dependencies = [
 memory = [
     "mem0ai>=2.0.18,<3",
 ]
+# The computer (`python -m runtime.computer.main`): the shared browser bots drive.
+# Optional because only the process that runs it needs a browser; the API and the
+# worker reach it over HTTP. Pinned to the release whose Chromium build is installed
+# alongside it (`playwright install chromium`, or PLAYWRIGHT_BROWSERS_PATH).
+computer = [
+    "playwright==1.56.0",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

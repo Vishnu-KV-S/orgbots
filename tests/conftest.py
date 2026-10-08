@@ -39,6 +39,14 @@ _TRUNCATE_ORDER = [
     # is a change from M4, where a department was a string on an actor and had no
     # lifetime of its own.
     "delegations",
+    # Bots (037): conversations, rules and pending actions are test state, and all
+    # three reference `bots`, so they come first.
+    "bot_brief_revisions",
+    "bot_memories",
+    "bot_pending_actions",
+    "bot_rules",
+    "bot_messages",
+    "bots",
     # M4: `apply_events` references `apply_plans`, and both reference
     # organizations. Listed explicitly even though the `organizations CASCADE` below
     # would reach them, because that is the point of this list — adding a table forces

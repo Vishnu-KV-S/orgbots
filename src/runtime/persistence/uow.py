@@ -23,6 +23,7 @@ from runtime.persistence.repositories.approvals import ApprovalRepository
 from runtime.persistence.repositories.artifacts import ArtifactRepository
 from runtime.persistence.repositories.audit import AuditRepository
 from runtime.persistence.repositories.authority import AuthorityRepository
+from runtime.persistence.repositories.bots import BotRepository
 from runtime.persistence.repositories.budget import BudgetRepository
 from runtime.persistence.repositories.credentials import CredentialRepository
 from runtime.persistence.repositories.delegations import DelegationRepository
@@ -107,6 +108,9 @@ class UnitOfWork:
         # class was built for, extended one table.
         self.delegations = DelegationRepository(session)
         self.departments = DepartmentRepository(session)
+        # Bots (migration 037): the conversations, rules and pending actions that sit
+        # on top of an actor.
+        self.bots = BotRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

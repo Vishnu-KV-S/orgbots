@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from runtime.artifacts.store import ArtifactStore
 from runtime.org.approvals import ApprovalService
+from runtime.org.bots import BotService
 from runtime.org.evaluation import EvaluationService
 from runtime.org.goals import GoalService
 from runtime.org.inbox import InboxService
@@ -34,6 +35,7 @@ class OrgServices:
     evaluation: EvaluationService
     approvals: ApprovalService
     metrics: MetricsService
+    bots: BotService
 
 
 def build_org_services(
@@ -56,4 +58,5 @@ def build_org_services(
         evaluation=EvaluationService(uow_factory, tasks=tasks, inbox=inbox),
         approvals=ApprovalService(uow_factory),
         metrics=MetricsService(uow_factory),
+        bots=BotService(uow_factory),
     )

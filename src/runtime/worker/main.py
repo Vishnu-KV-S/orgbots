@@ -50,6 +50,7 @@ import asyncio
 import contextlib
 import signal
 
+import runtime.graphs.bot_agent
 import runtime.graphs.delegator
 import runtime.graphs.echo_agent
 import runtime.handlers  # noqa: F401  registers hasher@1 and analytics@1
@@ -108,6 +109,13 @@ async def run() -> None:
 
     async with checkpointer(settings) as saver:
         worker = Worker(uow, streams, settings=settings, checkpointer=saver)
+        # `RUNTIME_WORKER_SLOTS - 1` more loops in this process, each its own worker with
+        # its own id and stream consumer. They share the checkpointer's pool and nothing
+        # else that holds run state; claiming stays the conditional UPDATE it always was.
+        extra_workers = [
+            Worker(uow, streams, settings=settings, checkpointer=saver)
+            for _ in range(settings.worker_slots - 1)
+        ]
         memory_worker: MemoryWorker | None = None
         if settings.memory_enabled:
             # Built against the worker's *own* ModelGateway, then attached — see
@@ -115,8 +123,12 @@ async def run() -> None:
             memory = MemorySubsystem(uow, worker.executor.models, settings=settings)
             await memory.setup()
             worker.attach_memory(memory)
+            for extra in extra_workers:
+                extra.attach_memory(memory)
             memory_worker = MemoryWorker(uow, streams, memory.service, settings=settings)
         await worker.setup()
+        for extra in extra_workers:
+            await extra.setup()
 
         loop = asyncio.get_running_loop()
         stopping = asyncio.Event()
@@ -125,6 +137,8 @@ async def run() -> None:
             log.info("worker.shutdown_requested")
             stopping.set()
             worker.stop()
+            for extra in extra_workers:
+                extra.stop()
             relay.stop()
             reaper.stop()
             sweeper.stop()
@@ -143,9 +157,14 @@ async def run() -> None:
             "worker.started",
             worker_id=str(worker.worker_id),
             conductor=settings.conductor_enabled,
+            slots=settings.worker_slots,
         )
         tasks = [
             asyncio.create_task(worker.run_forever(), name="worker"),
+            *(
+                asyncio.create_task(extra.run_forever(), name=f"worker-{i + 2}")
+                for i, extra in enumerate(extra_workers)
+            ),
             asyncio.create_task(relay.run_forever(), name="relay"),
             asyncio.create_task(reaper.run_forever(), name="reaper"),
             asyncio.create_task(sweeper.run_forever(), name="sweeper"),

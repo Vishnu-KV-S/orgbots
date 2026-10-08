@@ -51,7 +51,7 @@ async function toError(response: Response): Promise<ApiError> {
   return new ApiError(detail || response.statusText, response.status);
 }
 
-async function request<T>(url: string, init: RequestInit): Promise<T> {
+export async function request<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
   if (!response.ok) throw await toError(response);
   if (response.status === 204) return undefined as T;

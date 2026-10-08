@@ -67,6 +67,98 @@ adjust them against.
 
 ---
 
+## Bots
+
+Persistent AI employees, GrokBot-style, built **on** the runtime rather than beside
+it: every bot is an actor (`bot_agent@1`), and every message you send it is a run
+through `RunService.start_run()` — so a bot is admitted, budgeted, kill-switched,
+journaled and audited exactly like the marketing department.
+
+Each bot has its own **screen** on one shared **cloud computer**: a separate process
+holding a persistent Chromium profile (sign-ins are shared by every bot) and one tab
+per bot. Bots see a page as a numbered list of its interactive elements plus its
+text, DeepSeek picks one action per step (`BotStep@2`), and the action reaches the
+browser only through `browser.observe@1` / `browser.act@1` in the tool gateway.
+
+```bash
+uv pip install -e ".[dev,computer]"
+export RUNTIME_DEEPSEEK_API_KEY=...          # or put it in .env (gitignored)
+
+uv run python -m runtime.computer.main      # the shared browser, :8020
+uv run uvicorn runtime.api.app:app --port 8000
+uv run python -m runtime.worker.main
+cd ui && npm run dev                        # http://localhost:3000
+```
+
+What a turn does, and what stops it:
+
+- **One action per step, re-reading the page each time**, capped at 24 actions per
+  turn; a longer task reports progress and you say "continue".
+- **Approvals.** Typing into a password-like field, and any step the model marks as
+  consequential (ordering, sending, posting, deleting), is *parked*: the run ends
+  with an approval card showing the real action — URL, element, text (dots for a
+  secret). *Allow once*, *Always allow* (becomes a rule for that action on that
+  site) or *Deny* starts a fresh run whose first step is exactly that action. Rules
+  live in the bot's Details; **ask first wins** over allow.
+- **Stop and redirect.** Stop ends the turn at the next step. Sending a new
+  message while a bot works supersedes the old turn (`bots.turn`).
+- **Take control.** In the Computer pane a person can take a screen to sign in or
+  solve a CAPTCHA; the computer refuses the bot's actions until it is handed back.
+
+**Helper bots.** A bot can build its own team. `create_bot` makes a helper under
+it (no approval; at most 5 helpers per bot, 2 levels deep), and `ask_bot` gives a
+helper a task and waits for the answer. Asking is the runtime's delegation: the
+helper's turn is a child run admitted against the asker's tree budget, cancelled if
+the asker stops, and handed the task only — never the asker's conversation. Both
+conversations show the handoff. Deleting a bot that has helpers asks whether to
+delete them too or keep them (they move up a level).
+
+Helpers need two settings the department leaves off:
+
+```bash
+RUNTIME_DELEGATION_ENABLED=true   # ask_bot is a delegation
+RUNTIME_WORKER_SLOTS=4            # a bot waiting on its helper holds a slot meanwhile
+```
+
+**A brief and a memory, like an employee.** Every bot has a *job brief* — its
+primary instruction: mission, responsibilities, boundaries, working style, when to
+ask, standing notes — read before every step and ranked above everything except
+safety and your direct requests. You write it when you create the bot; a bot writes
+one for each helper it creates (`create_bot` takes a brief and starting memories).
+After that **the bot itself and its parent bot can revise it** (`update_brief`, with a
+reason), and so can you. Every revision is kept with who made it and why, and can be
+restored; tick *Only I can change this brief* to lock bots out.
+
+Memory works the way a person's does (`runtime/domain/bot_memory.py`): typed memories
+— preferences, people, facts, skills, and a diary line written at the end of every
+turn — each with an importance and a source (learned itself, taught by you, taught by
+its parent). A prompt carries only what comes to mind: pinned memories and strong
+preferences always, the latest diary lines, then the rest ranked by relevance to the
+conversation, importance and how recently it was used. Recalled memories get stronger;
+saving something it already knows reinforces the old memory instead of duplicating
+it; past 600 the weakest unpinned ones are forgotten. A bot can `remember` (or revise
+one by its `[id]`), `forget`, and `recall` — a search of all its memories and its whole
+past conversation. A parent can teach or correct its helpers' memories, and the
+helper's conversation says who changed what. Everything is visible and editable in
+the bot's Details.
+
+**3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
+its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
+(or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
+helper a bot created, gets a stable look derived from its id. The body animates by
+what the bot is doing: idle floating and blinking, thinking, scanning while it
+browses, squash-and-stretch clicks, a typing jitter, a puzzled "?" when it needs you,
+X-eyes on an error, a happy hop when done, a spin when it creates a helper, signal
+rings when it asks one, and more — preview each in the designer. All of them are
+drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs one
+context, not one per bot.
+
+Not yet built (the next phases): skills and teach-by-demonstration, scheduled and
+event routines, plugins/connectors, group chats with several bots, file attachments
+and generated artifacts, voice chat, team bots.
+
+---
+
 ## Run it
 
 ### With Docker
