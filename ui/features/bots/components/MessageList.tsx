@@ -8,6 +8,7 @@ import {
   rawFileUrl,
   reactToBotMessage,
 } from "@/lib/api/bots";
+import { canSpeak, speak, stopSpeaking } from "../lib/speech";
 import { ACTION_ICON, OPENS_FILE, RichText, describeAction } from "../lib/text";
 import { ApprovalCard } from "./ApprovalCard";
 import { CredentialCard } from "./CredentialCard";
@@ -168,6 +169,30 @@ function Attachments({
   );
 }
 
+/** A reply read aloud — a voice memo, with the text beside it as its transcript. */
+function VoiceMemo({ text }: { text: string }) {
+  const [playing, setPlaying] = useState(false);
+  if (!canSpeak()) return null;
+  return (
+    <button
+      type="button"
+      aria-label={playing ? "Stop voice memo" : "Play voice memo"}
+      onClick={() => {
+        if (playing) {
+          stopSpeaking();
+          setPlaying(false);
+          return;
+        }
+        stopSpeaking();
+        setPlaying(true);
+        void speak(text).then(() => setPlaying(false));
+      }}
+    >
+      {playing ? "■ Stop" : "▶ Play"}
+    </button>
+  );
+}
+
 /** A demonstration's message: the goal, with the recorded steps folded away — they
  * are for the bot to write up, and a long recording would bury the conversation. */
 function Demonstration({ message }: { message: BotMessage }) {
@@ -272,7 +297,8 @@ export function MessageList({
           // Decision notes are shown on the card they decide.
           if (m.payload.pending_id || m.payload.credential_request_id) return null;
           return (
-            <div key={m.id} className="sysline">
+            <div key={m.id} className={m.payload.voice_call ? "sysline callcard" : "sysline"}>
+              {m.payload.voice_call ? "📞 " : ""}
               {m.content}
             </div>
           );
@@ -294,6 +320,7 @@ export function MessageList({
                 <div className="from-bot">From {m.payload.from_bot_name} (bot)</div>
               )}
               {m.payload.demonstration && <div className="from-bot">🎓 Demonstration</div>}
+              {isUser && m.payload.voice && <div className="from-bot">🎙 Said in a voice chat</div>}
               {!isUser && m.payload.group_id && (
                 <div className="gm-author">
                   Posted in a group
@@ -349,6 +376,7 @@ export function MessageList({
               </button>
               {!isUser && (
                 <>
+                  <VoiceMemo text={m.content} />
                   <button type="button" onClick={() => void react(m, "👍")} aria-label="Good">
                     👍
                   </button>

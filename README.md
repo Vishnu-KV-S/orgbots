@@ -244,6 +244,14 @@ step is parked for you, or, for a step that can't be parked, the bot is told to 
 reviewer can't run, the step waits for you rather than going through. Every verdict is
 written into the conversation with its reason.
 
+**Voice.** With the message box empty, 📞 starts a **voice chat**. What you say
+becomes a message, marked as spoken so the bot answers in a few spoken sentences. The
+reply is read aloud, talking over the bot stops it, and *Hang up* leaves a card in the
+conversation. Every bot reply has a ▶ **voice memo** button with the text as its
+transcript, and **Ctrl/⌘+D** starts and stops dictation. Speech recognition and
+synthesis are the browser's own (best in Chrome and Edge), so no speech provider or
+key is needed.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
@@ -255,7 +263,7 @@ rings when it asks one, and more — preview each in the designer. All of them a
 drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs one
 context, not one per bot.
 
-Not yet built (the next phases): plugins/connectors, voice chat, team bots.
+Not yet built (the next phases): plugins/connectors, team bots.
 
 ---
 

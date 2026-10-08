@@ -203,6 +203,9 @@ export interface BotMessage {
     chars?: number;
     /** Files sent with a person's message — already in the team's drive. */
     attachments?: Attachment[];
+    /** Said in a voice chat; and a voice chat's card (role "system"). */
+    voice?: boolean;
+    voice_call?: { seconds: number; turns: number };
     /** A demonstration's message (role "user"): the goal, and how many steps. */
     demonstration?: string;
     recording_id?: string;
@@ -342,10 +345,18 @@ export const sendMessage = (
   text: string,
   replyTo?: string | null,
   attachments: string[] = [],
+  { voice = false }: { voice?: boolean } = {},
 ) =>
   request<Sent>(
     `${BOTS_BASE}/${id}/messages`,
-    json("POST", { text, reply_to: replyTo ?? null, attachments }),
+    json("POST", { text, reply_to: replyTo ?? null, attachments, voice }),
+  );
+
+/** A voice chat ended: a card in the conversation with how long it was. */
+export const recordVoiceCall = (id: string, seconds: number, turns: number) =>
+  request<{ message_id: string }>(
+    `${BOTS_BASE}/${id}/voice-calls`,
+    json("POST", { seconds, turns }),
   );
 
 export const decide = (id: string, pendingId: string, decision: "once" | "always" | "deny") =>

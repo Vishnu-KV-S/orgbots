@@ -2662,3 +2662,76 @@ button.frow:hover {
   margin-top: 3px;
 }
 
+/* --- voice ----------------------------------------------------------------------------- */
+
+.voicecall {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 auto 10px;
+  width: min(780px, calc(100% - 40px));
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--bg-panel);
+}
+
+.vc-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.vc-title {
+  font-weight: 600;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vc-status {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc-voice {
+  margin-top: 6px;
+  max-width: 100%;
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--text-dim);
+}
+
+.vc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.vc-dot.listening {
+  background: var(--running);
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+
+.vc-dot.speaking {
+  background: var(--accent);
+}
+
+.callcard {
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .voicecall {
+    flex-wrap: wrap;
+  }
+}
+

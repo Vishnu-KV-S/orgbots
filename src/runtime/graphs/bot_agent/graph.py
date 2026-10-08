@@ -720,6 +720,20 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
                 )
                 if part
             )
+        if payload.get("voice"):
+            # A voice chat: the reply is read aloud by the person's browser.
+            note = "\n".join(
+                part
+                for part in (
+                    note,
+                    "Your person is talking to you by voice and will hear your reply read "
+                    "aloud. Answer in one to three short spoken sentences: no markdown, "
+                    "lists, tables, links or code unless they ask; say numbers and times the "
+                    "way a person would. If the work needs the browser, say briefly what "
+                    "you are doing first, then do it.",
+                )
+                if part
+            )
         if group_id is not None or (wake is not None and wake.kind == "message"):
             note = "\n".join(
                 part

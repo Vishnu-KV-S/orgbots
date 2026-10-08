@@ -11,6 +11,7 @@ import {
 } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
 import { useResource } from "@/lib/hooks/useResource";
+import { type SpeechRecognitionLike, speechRecognition } from "../lib/speech";
 import { QUICK_PROMPTS } from "../lib/templates";
 import { Avatar } from "./Avatar";
 
@@ -19,24 +20,6 @@ type Popup =
   | { kind: "mention"; query: string; at: number }
   | null;
 
-interface SpeechRecognitionLike {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start: () => void;
-  stop: () => void;
-  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onend: (() => void) | null;
-}
-
-function speechRecognition(): (new () => SpeechRecognitionLike) | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as Record<string, unknown>;
-  return (w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null) as
-    | (new () => SpeechRecognitionLike)
-    | null;
-}
-
 /**
  * Where a task is given. Enter sends, Shift+Enter is a new line.
  *
@@ -44,7 +27,8 @@ function speechRecognition(): (new () => SpeechRecognitionLike) | null {
  * named as `/name` in a message is loaded into the bot's prompt) — `@` mentions another
  * bot, the microphone dictates, and 📎 (or pasting an image, or dropping files on the box)
  * attaches files — uploaded into the team's drive at once, so a file that cannot be
- * stored says so before the message is sent; the bot
+ * stored says so before the message is sent. Ctrl/⌘+D starts and stops dictation, and
+ * with the box empty, 📞 starts a voice chat; the bot
  * (where the browser has speech recognition), and while the bot is working the
  * send button becomes Stop — a new message also redirects a working bot, which is
  * the runtime's "turn" mechanism on the other side.
@@ -56,6 +40,7 @@ export function Composer({
   replyTo,
   onCancelReply,
   onSend,
+  onVoice,
   onStop,
   sending,
   draft,
@@ -67,6 +52,8 @@ export function Composer({
   replyTo: BotMessage | null;
   onCancelReply: () => void;
   onSend: (text: string, attachments: Attachment[]) => Promise<boolean>;
+  /** Start a voice chat (offered when the box is empty). */
+  onVoice?: () => void;
   onStop: () => void;
   sending: boolean;
   draft: string;
@@ -342,6 +329,11 @@ export function Composer({
                 return;
               }
             }
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d" && canDictate) {
+              e.preventDefault();
+              dictate();
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
@@ -377,10 +369,21 @@ export function Composer({
               type="button"
               className={cx("ibtn", listening && "on")}
               onClick={dictate}
-              title={listening ? "Stop dictation" : "Dictate"}
+              title={listening ? "Stop dictation (Ctrl+D)" : "Dictate (Ctrl+D)"}
               aria-label="Dictate"
             >
               🎙
+            </button>
+          )}
+          {onVoice && canDictate && !draft.trim() && attached.length === 0 && (
+            <button
+              type="button"
+              className="ibtn"
+              onClick={onVoice}
+              title="Start a voice chat"
+              aria-label="Start a voice chat"
+            >
+              📞
             </button>
           )}
           {working && (
