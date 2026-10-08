@@ -29,6 +29,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
+from runtime.api.attachments import router as attachments_router
 from runtime.api.bots import computer_router as bots_computer_router
 from runtime.api.bots import router as bots_router
 from runtime.api.bots import vault_router as bots_vault_router
@@ -124,6 +125,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(bots_router)
     app.include_router(bots_computer_router)
     app.include_router(bots_vault_router)
+    # Bytes into a team's drive (attachments, uploads) and back out (`/raw`).
+    app.include_router(attachments_router)
     # Routines: a bot's own (`/v1/bots/{id}/routines`, behind the UI's proxy), and the
     # webhook that starts an event routine (`/v1/hooks`, which is not — it is called
     # from outside, and authenticated by its token and the sender's signature).

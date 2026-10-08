@@ -46,6 +46,10 @@ _TRUNCATE_ORDER = [
     "bot_routines",
     "bot_recordings",
     "bot_skills",
+    # Team file blobs (045) belong to no organization — they are keyed by their hash —
+    # so `organizations CASCADE` never reaches them; truncating them reaches the files
+    # that refer to them instead.
+    "team_file_blobs",
     "bot_brief_revisions",
     "bot_memories",
     "bot_pending_actions",

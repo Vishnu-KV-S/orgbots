@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type Bot, type BotMessage, listSkills } from "@/lib/api/bots";
+import {
+  type Attachment,
+  type Bot,
+  type BotMessage,
+  listSkills,
+  rawFileUrl,
+  uploadFiles,
+} from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
 import { useResource } from "@/lib/hooks/useResource";
 import { QUICK_PROMPTS } from "../lib/templates";
@@ -35,7 +42,9 @@ function speechRecognition(): (new () => SpeechRecognitionLike) | null {
  *
  * `/` opens the prompt menu — quick prompts, then the organization's skills (a skill
  * named as `/name` in a message is loaded into the bot's prompt) — `@` mentions another
- * bot, the microphone dictates
+ * bot, the microphone dictates, and 📎 (or pasting an image, or dropping files on the box)
+ * attaches files — uploaded into the team's drive at once, so a file that cannot be
+ * stored says so before the message is sent; the bot
  * (where the browser has speech recognition), and while the bot is working the
  * send button becomes Stop — a new message also redirects a working bot, which is
  * the runtime's "turn" mechanism on the other side.
@@ -57,7 +66,7 @@ export function Composer({
   working: boolean;
   replyTo: BotMessage | null;
   onCancelReply: () => void;
-  onSend: (text: string) => void;
+  onSend: (text: string, attachments: Attachment[]) => Promise<boolean>;
   onStop: () => void;
   sending: boolean;
   draft: string;
@@ -70,6 +79,42 @@ export function Composer({
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const canDictate = speechRecognition() !== null;
   const skills = useResource(listSkills, { intervalMs: 30_000 });
+  const [attached, setAttached] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+
+  useEffect(() => setAttached([]), [bot.id]);
+
+  const attach = async (files: File[]) => {
+    if (!files.length) return;
+    const tooBig = files.find((f) => f.size > 10 * 1024 * 1024);
+    if (tooBig) {
+      setUploadError(`${tooBig.name} is over 10 MB`);
+      return;
+    }
+    setUploadError(null);
+    setUploading((n) => n + files.length);
+    try {
+      const stored = await uploadFiles(bot.id, files);
+      setAttached((a) => [
+        ...a,
+        ...stored.files.map((f) => ({
+          id: f.id,
+          path: f.path,
+          name: f.name,
+          media_type: f.media_type,
+          bytes: f.bytes,
+          kind: f.kind,
+        })),
+      ]);
+    } catch (cause) {
+      setUploadError((cause as Error).message);
+    } finally {
+      setUploading((n) => n - files.length);
+    }
+  };
 
   useEffect(() => {
     ref.current?.focus();
@@ -156,8 +201,10 @@ export function Composer({
 
   const submit = () => {
     const text = draft.trim();
-    if (!text || sending) return;
-    onSend(text);
+    if ((!text && attached.length === 0) || sending || uploading > 0) return;
+    void onSend(text, attached).then((ok) => {
+      if (ok) setAttached([]);
+    });
   };
 
   const dictate = () => {
@@ -187,7 +234,22 @@ export function Composer({
 
   return (
     <div className="composer-wrap">
-      <div className="composer">
+      <div
+        className={cx("composer", dragging && "dropping")}
+        onDragOver={(e) => {
+          if (Array.from(e.dataTransfer.types).includes("Files")) {
+            e.preventDefault();
+            setDragging(true);
+          }
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          if (!e.dataTransfer.files.length) return;
+          e.preventDefault();
+          setDragging(false);
+          void attach(Array.from(e.dataTransfer.files));
+        }}
+      >
         {popup && options.length > 0 && (
           <div className="popmenu" role="listbox">
             <div className="popmenu-label">{popup.kind === "slash" ? "Prompts" : "Bots"}</div>
@@ -221,10 +283,41 @@ export function Composer({
             </button>
           </div>
         )}
+        {(attached.length > 0 || uploading > 0 || uploadError) && (
+          <div className="attach-row">
+            {attached.map((a) => (
+              <span key={a.id} className="attach-chip" title={a.path}>
+                {a.kind === "image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- a just-uploaded file
+                  <img src={rawFileUrl(bot.id, a.id)} alt="" />
+                ) : (
+                  <span className="attach-kind">{a.kind === "text" ? "TXT" : a.kind}</span>
+                )}
+                <span className="attach-name">{a.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${a.name}`}
+                  onClick={() => setAttached((list) => list.filter((x) => x.id !== a.id))}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+            {uploading > 0 && <span className="attach-chip pending">Uploading…</span>}
+            {uploadError && <span className="attach-error">{uploadError}</span>}
+          </div>
+        )}
         <textarea
           ref={ref}
           rows={1}
           value={draft}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData.files);
+            if (files.length) {
+              e.preventDefault();
+              void attach(files);
+            }
+          }}
           placeholder={`Message ${bot.name} — / for prompts, @ to mention`}
           onChange={(e) => update(e.target.value, e.target.selectionStart)}
           onKeyDown={(e) => {
@@ -259,6 +352,26 @@ export function Composer({
           <span className="composer-hint">
             {working ? "Working — send a message to redirect, or stop." : "Enter to send"}
           </span>
+          <input
+            ref={picker}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              const list = Array.from(e.target.files ?? []);
+              e.target.value = "";
+              void attach(list);
+            }}
+          />
+          <button
+            type="button"
+            className="ibtn"
+            onClick={() => picker.current?.click()}
+            title="Attach files (or paste an image, or drop files here)"
+            aria-label="Attach files"
+          >
+            📎
+          </button>
           {canDictate && (
             <button
               type="button"
@@ -285,7 +398,7 @@ export function Composer({
             type="button"
             className="ibtn send"
             onClick={submit}
-            disabled={!draft.trim() || sending}
+            disabled={(!draft.trim() && attached.length === 0) || sending || uploading > 0}
             title="Send"
             aria-label="Send"
           >

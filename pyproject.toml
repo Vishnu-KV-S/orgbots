@@ -32,6 +32,10 @@ dependencies = [
     # library has no AEAD, and rolling one is the kind of thing that looks fine
     # until it is a CVE with our name on it.
     "cryptography>=43",
+    # Attachments: the text of a PDF a person attaches or a bot downloads, extracted once
+    # when it is stored so `read_file` reads a PDF like any other file. Pure Python, no
+    # system libraries.
+    "pypdf>=5",
 ]
 
 [project.optional-dependencies]

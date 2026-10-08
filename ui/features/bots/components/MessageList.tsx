@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Bot, BotMessage } from "@/lib/api/bots";
+import { type Attachment, type Bot, type BotMessage, rawFileUrl } from "@/lib/api/bots";
 import { ACTION_ICON, OPENS_FILE, RichText, describeAction } from "../lib/text";
 import { ApprovalCard } from "./ApprovalCard";
 import { CredentialCard } from "./CredentialCard";
@@ -119,6 +119,42 @@ function WorkBlock({
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** A message's files: images as thumbnails (click for full size), the rest as chips
+ * that open the file in the Files pane, where the bots read it too. */
+function Attachments({
+  bot,
+  files,
+  onOpen,
+}: {
+  bot: Bot;
+  files: Attachment[];
+  onOpen: (path: string) => void;
+}) {
+  return (
+    <div className="msg-attachments">
+      {files.map((a) =>
+        a.kind === "image" ? (
+          <a key={a.id} href={rawFileUrl(bot.id, a.id)} target="_blank" rel="noreferrer">
+            {/* eslint-disable-next-line @next/next/no-img-element -- a file from the drive */}
+            <img src={rawFileUrl(bot.id, a.id)} alt={a.name} />
+          </a>
+        ) : (
+          <button
+            key={a.id}
+            type="button"
+            className="attach-chip"
+            title={`Open ${a.path} in Files`}
+            onClick={() => onOpen(a.path)}
+          >
+            <span className="attach-kind">{a.kind === "text" ? "TXT" : a.kind}</span>
+            <span className="attach-name">{a.name}</span>
+          </button>
+        ),
       )}
     </div>
   );
@@ -270,6 +306,9 @@ export function MessageList({
                   )
                 ) : (
                   <RichText text={m.content} />
+                )}
+                {m.payload.attachments && m.payload.attachments.length > 0 && (
+                  <Attachments bot={bot} files={m.payload.attachments} onOpen={onOpenFile} />
                 )}
               </div>
               {reactions[m.id] && (

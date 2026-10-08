@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
-import { type Bot, type BotMessage, markRead, sendMessage, stopBot } from "@/lib/api/bots";
+import {
+  type Attachment,
+  type Bot,
+  type BotMessage,
+  markRead,
+  sendMessage,
+  stopBot,
+} from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
 import { useConversation } from "../hooks/useConversation";
 import { moodOfConversation } from "../avatar";
@@ -66,19 +73,26 @@ export function Conversation({
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
   }, [convo.messages, convo.working]);
 
-  const send = async (text: string) => {
+  const send = async (text: string, attachments: Attachment[] = []): Promise<boolean> => {
     setSending(true);
     setError(null);
     try {
-      const sent = await sendMessage(bot.id, text, replyTo?.id);
+      const sent = await sendMessage(
+        bot.id,
+        text,
+        replyTo?.id,
+        attachments.map((a) => a.id),
+      );
       setDraft("");
       setReplyTo(null);
       pinnedToBottom.current = true;
       if (!sent.admitted && sent.refusal_reason) setError(sent.refusal_reason);
       convo.poke();
       onChanged();
+      return true;
     } catch (cause) {
       setError((cause as Error).message);
+      return false;
     } finally {
       setSending(false);
     }
@@ -200,7 +214,7 @@ export function Conversation({
         working={convo.working}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
-        onSend={(t) => void send(t)}
+        onSend={send}
         onStop={() => void stop()}
         sending={sending}
         draft={draft}

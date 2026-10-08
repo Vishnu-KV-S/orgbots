@@ -13,8 +13,10 @@ import {
   listFiles,
   lockFile,
   moveFile,
+  rawFileUrl,
   restoreFile,
   saveFile,
+  uploadFiles,
 } from "@/lib/api/bots";
 import { useAction } from "@/lib/hooks/useAction";
 import { useResource } from "@/lib/hooks/useResource";
@@ -30,6 +32,7 @@ import { timeAgo } from "../lib/text";
  */
 
 const MAX_CHARS = 100_000;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 const OP_LABEL: Record<FileRevision["op"], string> = {
   create: "created",
@@ -52,6 +55,17 @@ function ago(iso: string): string {
 
 function size(chars: number): string {
   return chars < 1000 ? `${chars} chars` : `${(chars / 1000).toFixed(1)}k chars`;
+}
+
+function bytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** A file's size as a person reads it: characters for text, kind and bytes otherwise. */
+function sizeOf(f: TeamFile): string {
+  return f.binary ? `${f.kind} · ${bytes(f.bytes)}` : size(f.chars);
 }
 
 type Folder = { name: string; path: string; folders: Folder[]; files: TeamFile[] };
@@ -92,14 +106,6 @@ function download(name: string, content: string) {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-async function readText(file: File): Promise<string> {
-  const text = await file.text();
-  if (text.includes("\u0000")) throw new Error(`${file.name} is not a text file`);
-  if (text.length > MAX_CHARS)
-    throw new Error(`${file.name} is over ${MAX_CHARS.toLocaleString()} characters`);
-  return text;
 }
 
 function folderOf(path: string): string {
@@ -305,10 +311,11 @@ function AddFile({ bot, onDone }: { bot: Bot; onDone: (file: TeamFile | null) =>
   });
   const upload = useAction(
     async (list: File[]) => {
-      const folder = folderOf(path);
+      const folder = folderOf(path) || "/";
       for (const file of list) {
-        await createFile(bot.id, `${folder}/${file.name}`, await readText(file));
+        if (file.size > MAX_UPLOAD_BYTES) throw new Error(`${file.name} is over 10 MB`);
       }
+      await uploadFiles(bot.id, list, folder);
       return list.length;
     },
     { onDone: () => onDone(null) },
@@ -344,7 +351,6 @@ function AddFile({ bot, onDone }: { bot: Bot; onDone: (file: TeamFile | null) =>
           type="file"
           multiple
           hidden
-          accept=".txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.log,text/*"
           onChange={(e) => {
             const list = Array.from(e.target.files ?? []);
             e.target.value = "";
@@ -451,7 +457,7 @@ function FileView({
         {f.locked && <span title="Locked: bots can read it but not change it"> 🔒</span>}
       </div>
       <p className="fmeta-line">
-        v{f.version} · {size(f.chars)} · changed by {who(f.updated_by_kind, f.updated_by_name)}{" "}
+        v{f.version} · {sizeOf(f)} · changed by {who(f.updated_by_kind, f.updated_by_name)}{" "}
         {ago(f.updated_at)}
         {f.created_by_name &&
           ` · created by ${who(f.created_by_kind, f.created_by_name)} ${ago(f.created_at)}`}
@@ -473,17 +479,19 @@ function FileView({
         !editing &&
         !renaming && (
           <div className="ftools">
-            <button
-              type="button"
-              className="linklike"
-              onClick={() => {
-                setDraft(f.content ?? "");
-                save.reset();
-                setEditing(true);
-              }}
-            >
-              Edit
-            </button>
+            {!f.binary && (
+              <button
+                type="button"
+                className="linklike"
+                onClick={() => {
+                  setDraft(f.content ?? "");
+                  save.reset();
+                  setEditing(true);
+                }}
+              >
+                Edit
+              </button>
+            )}
             <button
               type="button"
               className="linklike"
@@ -505,13 +513,19 @@ function FileView({
             >
               {f.locked ? "Unlock" : "Lock"}
             </button>
-            <button
-              type="button"
-              className="linklike"
-              onClick={() => download(f.name, f.content ?? "")}
-            >
-              Download
-            </button>
+            {f.binary ? (
+              <a className="linklike" href={rawFileUrl(bot.id, f.id)} download={f.name}>
+                Download
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="linklike"
+                onClick={() => download(f.name, f.content ?? "")}
+              >
+                Download
+              </button>
+            )}
             <button
               type="button"
               className="linklike"
@@ -601,6 +615,8 @@ function FileView({
             </button>
           </div>
         </div>
+      ) : f.binary ? (
+        <BinaryPreview bot={bot} file={f} />
       ) : f.content ? (
         <pre className="fbody">{f.content}</pre>
       ) : (
@@ -610,6 +626,35 @@ function FileView({
       {error && <ErrorNotice>{error}</ErrorNotice>}
       {history && <FileHistory bot={bot} fileId={fileId} current={f.version} onRestored={changed} />}
     </section>
+  );
+}
+
+/** An image is shown; a PDF opens in a tab; either way, the text read out of the file
+ * is what the bots read, so it is shown too. */
+function BinaryPreview({ bot, file }: { bot: Bot; file: TeamFile }) {
+  const url = rawFileUrl(bot.id, file.id);
+  return (
+    <div className="fbinary">
+      {file.kind === "image" ? (
+        // eslint-disable-next-line @next/next/no-img-element -- a file from the drive
+        <img src={url} alt={file.name} className="fimage" />
+      ) : (
+        <p className="screen-help">
+          {file.kind} ·{" "}
+          <a className="linklike" href={url} target="_blank" rel="noreferrer">
+            Open
+          </a>
+        </p>
+      )}
+      {file.content ? (
+        <>
+          <p className="screen-help">Text read out of it — what the bots read:</p>
+          <pre className="fbody">{file.content}</pre>
+        </>
+      ) : (
+        file.kind !== "image" && <p className="screen-help">No text could be read out of it.</p>
+      )}
+    </div>
   );
 }
 

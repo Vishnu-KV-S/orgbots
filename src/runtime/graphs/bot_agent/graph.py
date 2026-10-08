@@ -91,10 +91,11 @@ from runtime.domain.bots import (
 from runtime.domain.delegation import ChildContext, TaskSpec
 from runtime.domain.enums import WorkClass
 from runtime.domain.errors import DelegationDisabled, DelegationRefused, OutputSchemaViolation
-from runtime.domain.files import RECENT_IN_PROMPT, render_drive, team_of
+from runtime.domain.files import RECENT_IN_PROMPT, render_attachments, render_drive, team_of
 from runtime.domain.routines import RoutineError
 from runtime.domain.skills import SkillError, render_index, render_skill
 from runtime.gateway.tools import ToolCall
+from runtime.graphs.bot_agent.attachments import look_at_file
 from runtime.graphs.bot_agent.files import file_step
 from runtime.graphs.bot_agent.look import look
 from runtime.graphs.bot_agent.signin import resume as resume_credentials
@@ -216,7 +217,9 @@ How to work:
   version. read_file a file before you write_file over it (if a teammate changed it
   since, you will be told to read it again); edit_file changes one passage and
   append_file adds to the end — write a big file in parts. Never put passwords or
-  codes in a file.
+  codes in a file. Your person's attachments land in the drive too (the conversation
+  says where): read_file reads a PDF's or a document's text, look with path sees an
+  image. Images, PDFs and documents cannot be edited as text.
 - Routines: when your person asks for recurring work ("every weekday at 8…", "each
   Monday, check…"), set it up with save_routine rather than asking them to remind you:
   a short name, the instruction written as the complete task you will be given each
@@ -320,6 +323,9 @@ def _prompt(
             else "You"
         )
         lines.append(f"{who}: {message.content.strip()}")
+        attached = (message.payload or {}).get("attachments")
+        if attached:
+            lines.append(f"  {render_attachments(attached)}")
     lines += ["", "What you have done so far in this turn:"]
     lines += steps or ["(nothing yet)"]
     if plan:
@@ -842,6 +848,20 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
             await say("observe", "activity", step.thought, {"action": {"type": "observe"}})
             steps.append(_line(n, "looked at the page again"))
             return {"n": n + 1, "log": steps[-LOG_KEEP:], "done": False}
+
+        if step.action == "look" and (step.path or "").strip():
+            return await look_at_file(
+                node,
+                bot,
+                (step.path or "").strip(),
+                (step.text or "").strip(),
+                thought=step.thought,
+                n=n,
+                steps=steps,
+                answers=answers,
+                line=_line,
+                say=say,
+            )
 
         if step.action == "look":
             return await look(

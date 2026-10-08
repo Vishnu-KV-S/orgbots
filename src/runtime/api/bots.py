@@ -33,13 +33,14 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from runtime.api.errors import http_errors
 from runtime.domain.bot_memory import MEMORY_CHARS, BotBrief, MemoryKind, memory_handle
 from runtime.domain.bots import BotAppearance
 from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
 from runtime.domain.files import (
+    MAX_ATTACHMENTS,
     MAX_FILE_CHARS,
     PERSON,
     FileError,
@@ -49,6 +50,7 @@ from runtime.domain.files import (
     StaleFileError,
     Team,
     folder_of,
+    kind_of,
     name_of,
     team_of,
 )
@@ -262,6 +264,10 @@ def _file_view(f: TeamFileRow, *, content: bool = False) -> dict[str, Any]:
         "created_at": f.created_at.isoformat(),
         "updated_at": f.updated_at.isoformat(),
         "deleted_at": f.deleted_at.isoformat() if f.deleted_at else None,
+        "media_type": f.media_type,
+        "bytes": f.bytes,
+        "binary": f.is_binary,
+        "kind": kind_of(f.media_type) if f.is_binary else "text",
     }
     if content:
         out["content"] = f.content or ""
@@ -337,8 +343,16 @@ class MemoryPatch(BaseModel):
 
 
 class MessageBody(BaseModel):
-    text: str = Field(min_length=1, max_length=20_000)
+    text: str = Field(default="", max_length=20_000)
     reply_to: UUID | None = None
+    attachments: list[UUID] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
+    """Files already in the team drive (`/files/upload`), sent with the message."""
+
+    @model_validator(mode="after")
+    def _something(self) -> MessageBody:
+        if not self.text.strip() and not self.attachments:
+            raise ValueError("a message needs text or an attachment")
+        return self
 
 
 class DecisionBody(BaseModel):
@@ -612,9 +626,30 @@ async def messages(
 
 @router.post("/{bot_id}/messages", status_code=status.HTTP_202_ACCEPTED)
 async def send(bot_id: UUID, body: MessageBody, request: Request) -> dict[str, Any]:
-    await _bot_or_404(request, bot_id)
+    bot = await _bot_or_404(request, bot_id)
+    attached: list[dict[str, Any]] = []
+    for file_id in body.attachments:
+        found = await _drive(request).get(team_of(bot), file_id)
+        if found is None or found.deleted_at is not None:
+            raise HTTPException(status_code=422, detail=f"no file {file_id} in this team's drive")
+        attached.append(
+            {
+                "id": str(found.id),
+                "path": found.path,
+                "name": name_of(found.path),
+                "media_type": found.media_type,
+                "bytes": found.bytes,
+                "kind": kind_of(found.media_type) if found.is_binary else "text",
+                "chars": found.chars,
+            }
+        )
     with http_errors():
-        sent = await _manager(request).send(bot_id, body.text.strip(), reply_to=body.reply_to)
+        sent = await _manager(request).send(
+            bot_id,
+            body.text.strip(),
+            reply_to=body.reply_to,
+            payload={"attachments": attached} if attached else None,
+        )
     return {
         "message_id": str(sent.message_id),
         "run_id": str(sent.run_id) if sent.run_id else None,
