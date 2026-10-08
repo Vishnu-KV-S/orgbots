@@ -25,12 +25,23 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
 from runtime.api.errors import http_errors
+from runtime.domain.bot_memory import MEMORY_CHARS, BotBrief, MemoryKind, memory_handle
 from runtime.domain.bots import BotAppearance
 from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
 from runtime.domain.ids import OrganizationId, RunId
-from runtime.persistence.repositories.bots import BotMessageRow, BotRow
+from runtime.persistence.repositories.bots import (
+    BotMemoryRow,
+    BotMessageRow,
+    BotRow,
+    BriefRevisionRow,
+)
 from runtime.persistence.uow import UnitOfWorkFactory
-from runtime.runtime.bots import BotManager, BotNotFoundError, PendingNotFoundError
+from runtime.runtime.bots import (
+    BotManager,
+    BotNotFoundError,
+    MemoryNotFoundError,
+    PendingNotFoundError,
+)
 from runtime.settings import Settings
 
 router = APIRouter(prefix="/v1/bots", tags=["bots"])
@@ -104,7 +115,11 @@ def _working(run_status: str | None) -> bool:
 
 
 def _bot_view(
-    bot: BotRow, *, run_status: str | None = None, last: BotMessageRow | None = None
+    bot: BotRow,
+    *,
+    run_status: str | None = None,
+    last: BotMessageRow | None = None,
+    memory_count: int | None = None,
 ) -> dict[str, Any]:
     return {
         "id": str(bot.id),
@@ -112,9 +127,11 @@ def _bot_view(
         "name": bot.name,
         "label": bot.label,
         "description": bot.description,
-        "instructions": bot.instructions,
         "avatar": bot.avatar,
-        "memory": bot.memory,
+        "brief": bot.brief,
+        "brief_locked": bot.brief_locked,
+        "brief_rev": bot.brief_rev,
+        "memory_count": memory_count,
         "pinned": bot.pinned,
         "hidden": bot.hidden,
         "unread": bot.unread,
@@ -129,6 +146,36 @@ def _bot_view(
         "created_at": bot.created_at.isoformat(),
         "updated_at": bot.updated_at.isoformat(),
         "last_message": _message_view(last) if last else None,
+    }
+
+
+def _memory_view(m: BotMemoryRow) -> dict[str, Any]:
+    return {
+        "id": str(m.id),
+        "handle": memory_handle(m.id),
+        "kind": m.kind,
+        "content": m.content,
+        "importance": m.importance,
+        "pinned": m.pinned,
+        "source_kind": m.source_kind,
+        "source_name": m.source_name,
+        "recall_count": m.recall_count,
+        "last_recalled_at": m.last_recalled_at.isoformat() if m.last_recalled_at else None,
+        "created_at": m.created_at.isoformat(),
+        "updated_at": m.updated_at.isoformat(),
+    }
+
+
+def _revision_view(r: BriefRevisionRow) -> dict[str, Any]:
+    return {
+        "rev": r.rev,
+        "brief": r.brief,
+        "editor_kind": r.editor_kind,
+        "editor_bot_id": str(r.editor_bot_id) if r.editor_bot_id else None,
+        "editor_name": r.editor_name,
+        "reason": r.reason,
+        "changed": r.changed,
+        "created_at": r.created_at.isoformat(),
     }
 
 
@@ -153,8 +200,8 @@ class CreateBody(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     label: str = Field(default="", max_length=80)
     description: str = Field(default="", max_length=2_000)
-    instructions: str = Field(default="", max_length=8_000)
     avatar: str = Field(default="", max_length=16)
+    brief: BotBrief | None = None
     appearance: BotAppearance | None = None
 
 
@@ -162,12 +209,27 @@ class UpdateBody(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     label: str | None = Field(default=None, max_length=80)
     description: str | None = Field(default=None, max_length=2_000)
-    instructions: str | None = Field(default=None, max_length=8_000)
     avatar: str | None = Field(default=None, max_length=16)
-    memory: str | None = Field(default=None, max_length=4_000)
+    brief: BotBrief | None = None
+    brief_locked: bool | None = None
+    brief_reason: str = Field(default="", max_length=400)
     pinned: bool | None = None
     hidden: bool | None = None
     appearance: BotAppearance | None = None
+
+
+class MemoryBody(BaseModel):
+    content: str = Field(min_length=1, max_length=MEMORY_CHARS)
+    kind: MemoryKind = "fact"
+    importance: int = Field(default=3, ge=1, le=5)
+    pinned: bool = False
+
+
+class MemoryPatch(BaseModel):
+    content: str | None = Field(default=None, min_length=1, max_length=MEMORY_CHARS)
+    kind: MemoryKind | None = None
+    importance: int | None = Field(default=None, ge=1, le=5)
+    pinned: bool | None = None
 
 
 class MessageBody(BaseModel):
@@ -213,6 +275,7 @@ async def list_bots(request: Request) -> dict[str, Any]:
     async with uow_factory() as uow:
         bots = await uow.bots.list_for(org)
         last = await uow.bots.last_message_per_bot(org)
+        counts = await uow.bots.memory_counts(org)
         statuses: dict[uuid.UUID, str] = {}
         for bot in bots:
             if bot.last_run_id is not None:
@@ -221,7 +284,15 @@ async def list_bots(request: Request) -> dict[str, Any]:
                     statuses[bot.id] = str(run.status)
     return {
         "organization_id": str(org),
-        "bots": [_bot_view(b, run_status=statuses.get(b.id), last=last.get(b.id)) for b in bots],
+        "bots": [
+            _bot_view(
+                b,
+                run_status=statuses.get(b.id),
+                last=last.get(b.id),
+                memory_count=counts.get(b.id, 0),
+            )
+            for b in bots
+        ],
     }
 
 
@@ -229,9 +300,9 @@ async def list_bots(request: Request) -> dict[str, Any]:
 async def create_bot(body: CreateBody, request: Request) -> dict[str, Any]:
     org = await _organization(request)
     with http_errors():
-        fields = body.model_dump(exclude={"appearance"})
+        fields = body.model_dump(exclude={"appearance", "brief"})
         appearance = body.appearance.model_dump() if body.appearance else None
-        bot = await _manager(request).create(org, **fields, appearance=appearance)
+        bot = await _manager(request).create(org, **fields, brief=body.brief, appearance=appearance)
     return _bot_view(bot)
 
 
@@ -263,10 +334,88 @@ async def get_bot(bot_id: UUID, request: Request) -> dict[str, Any]:
 
 @router.patch("/{bot_id}")
 async def update_bot(bot_id: UUID, body: UpdateBody, request: Request) -> dict[str, Any]:
+    """Profile fields are a plain update. The brief and its lock go through
+    `set_brief`, so a person's edit is a revision like any bot's."""
     await _bot_or_404(request, bot_id)
-    fields = body.model_dump(exclude_none=True)
-    bot = await _manager(request).update(bot_id, fields)
+    manager = _manager(request)
+    fields = body.model_dump(exclude_none=True, exclude={"brief", "brief_locked", "brief_reason"})
+    bot = await manager.update(bot_id, fields)
+    if body.brief is not None or body.brief_locked is not None:
+        bot = await manager.set_brief(
+            bot_id,
+            body.brief if body.brief is not None else BotBrief.model_validate(bot.brief or {}),
+            reason=body.brief_reason,
+            locked=body.brief_locked,
+        )
     return _bot_view(bot, run_status=await _run_status(_uow(request), bot.last_run_id))
+
+
+# --- brief ----------------------------------------------------------------------------
+
+
+@router.get("/{bot_id}/brief/revisions")
+async def brief_revisions(bot_id: UUID, request: Request) -> dict[str, Any]:
+    await _bot_or_404(request, bot_id)
+    async with _uow(request)() as uow:
+        rows = await uow.bots.brief_revisions(bot_id)
+    return {"revisions": [_revision_view(r) for r in rows]}
+
+
+@router.post("/{bot_id}/brief/revisions/{rev}/restore")
+async def restore_brief(bot_id: UUID, rev: int, request: Request) -> dict[str, Any]:
+    await _bot_or_404(request, bot_id)
+    try:
+        bot = await _manager(request).restore_brief(bot_id, rev)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _bot_view(bot)
+
+
+# --- memory ---------------------------------------------------------------------------
+
+
+@router.get("/{bot_id}/memories")
+async def memories(bot_id: UUID, request: Request) -> dict[str, Any]:
+    await _bot_or_404(request, bot_id)
+    async with _uow(request)() as uow:
+        rows = await uow.bots.memories(bot_id)
+    rows.sort(key=lambda m: (not m.pinned, -m.created_at.timestamp()))
+    return {"memories": [_memory_view(m) for m in rows]}
+
+
+@router.post("/{bot_id}/memories", status_code=status.HTTP_201_CREATED)
+async def add_memory(bot_id: UUID, body: MemoryBody, request: Request) -> dict[str, Any]:
+    await _bot_or_404(request, bot_id)
+    memory_id = await _manager(request).add_memory(bot_id, **body.model_dump())
+    return {"id": str(memory_id)}
+
+
+@router.patch("/{bot_id}/memories/{memory_id}")
+async def edit_memory(
+    bot_id: UUID, memory_id: UUID, body: MemoryPatch, request: Request
+) -> dict[str, Any]:
+    await _bot_or_404(request, bot_id)
+    try:
+        await _manager(request).edit_memory(bot_id, memory_id, body.model_dump(exclude_none=True))
+    except MemoryNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"no memory {memory_id}") from exc
+    return {"id": str(memory_id)}
+
+
+@router.delete("/{bot_id}/memories/{memory_id}")
+async def delete_memory(bot_id: UUID, memory_id: UUID, request: Request) -> dict[str, Any]:
+    await _bot_or_404(request, bot_id)
+    try:
+        await _manager(request).delete_memory(bot_id, memory_id)
+    except MemoryNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"no memory {memory_id}") from exc
+    return {"deleted": str(memory_id)}
+
+
+@router.delete("/{bot_id}/memories")
+async def clear_memories(bot_id: UUID, request: Request) -> dict[str, Any]:
+    await _bot_or_404(request, bot_id)
+    return {"deleted": await _manager(request).clear_memories(bot_id)}
 
 
 @router.post("/{bot_id}/duplicate", status_code=status.HTTP_201_CREATED)

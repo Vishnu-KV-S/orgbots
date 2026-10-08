@@ -1,4 +1,6 @@
-"""Bots, their conversations, their rules and their pending actions. See migration 037."""
+"""Bots, their conversations, rules, pending actions, memories and briefs.
+
+See migrations 037 (bots) and 040 (memory and brief)."""
 
 from __future__ import annotations
 
@@ -14,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from runtime.domain.ids import OrganizationId
 
 _BOT_COLUMNS = """
-    id, organization_id, actor_name, name, label, description, instructions, avatar,
-    memory, pinned, hidden, unread, needs_attention, stop_requested, turn, last_run_id,
+    id, organization_id, actor_name, name, label, description, avatar, brief, brief_locked,
+    brief_rev, pinned, hidden, unread, needs_attention, stop_requested, turn, last_run_id,
     duplicated_from, parent_bot_id, created_by, appearance, created_at, updated_at
 """
 
@@ -24,9 +26,8 @@ EDITABLE = frozenset(
         "name",
         "label",
         "description",
-        "instructions",
         "avatar",
-        "memory",
+        "brief_locked",
         "pinned",
         "hidden",
         "appearance",
@@ -43,9 +44,12 @@ class BotRow:
     name: str
     label: str
     description: str
-    instructions: str
     avatar: str
-    memory: str
+    brief: dict[str, Any]
+    """The job brief (`BotBrief`). Changed only through `set_brief`, which keeps the
+    revision history; never through `update`."""
+    brief_locked: bool
+    brief_rev: int
     pinned: bool
     hidden: bool
     unread: bool
@@ -59,6 +63,74 @@ class BotRow:
     appearance: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class BotMemoryRow:
+    id: uuid.UUID
+    bot_id: uuid.UUID
+    kind: str
+    content: str
+    importance: int
+    pinned: bool
+    source_kind: str
+    source_name: str
+    recall_count: int
+    last_recalled_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class BriefRevisionRow:
+    id: uuid.UUID
+    bot_id: uuid.UUID
+    rev: int
+    brief: dict[str, Any]
+    editor_kind: str
+    editor_bot_id: uuid.UUID | None
+    editor_name: str
+    reason: str
+    changed: list[str]
+    created_at: datetime
+
+
+_MEMORY_COLUMNS = """
+    id, bot_id, kind, content, importance, pinned, source_kind, source_name, recall_count,
+    last_recalled_at, created_at, updated_at
+"""
+
+
+def _memory(row: Any) -> BotMemoryRow:
+    return BotMemoryRow(
+        id=row.id,
+        bot_id=row.bot_id,
+        kind=row.kind,
+        content=row.content,
+        importance=int(row.importance),
+        pinned=bool(row.pinned),
+        source_kind=row.source_kind,
+        source_name=row.source_name,
+        recall_count=int(row.recall_count),
+        last_recalled_at=row.last_recalled_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _revision(row: Any) -> BriefRevisionRow:
+    return BriefRevisionRow(
+        id=row.id,
+        bot_id=row.bot_id,
+        rev=int(row.rev),
+        brief=dict(row.brief or {}),
+        editor_kind=row.editor_kind,
+        editor_bot_id=row.editor_bot_id,
+        editor_name=row.editor_name,
+        reason=row.reason,
+        changed=list(row.changed or []),
+        created_at=row.created_at,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,9 +177,10 @@ def _bot(row: Any) -> BotRow:
         name=row.name,
         label=row.label,
         description=row.description,
-        instructions=row.instructions,
         avatar=row.avatar,
-        memory=row.memory,
+        brief=dict(row.brief or {}),
+        brief_locked=bool(row.brief_locked),
+        brief_rev=int(row.brief_rev),
         pinned=bool(row.pinned),
         hidden=bool(row.hidden),
         unread=bool(row.unread),
@@ -167,9 +240,7 @@ class BotRepository:
         name: str,
         label: str = "",
         description: str = "",
-        instructions: str = "",
         avatar: str = "",
-        memory: str = "",
         duplicated_from: uuid.UUID | None = None,
         parent_bot_id: uuid.UUID | None = None,
         created_by: str = "person",
@@ -179,11 +250,10 @@ class BotRepository:
             text(
                 """
                 INSERT INTO bots (id, organization_id, actor_name, name, label, description,
-                                  instructions, avatar, memory, duplicated_from,
-                                  parent_bot_id, created_by, appearance)
+                                  avatar, duplicated_from, parent_bot_id, created_by,
+                                  appearance)
                 VALUES (:id, :org, :actor, :name, :label, :description,
-                        :instructions, :avatar, :memory, :dup, :parent, :created_by,
-                        CAST(:appearance AS jsonb))
+                        :avatar, :dup, :parent, :created_by, CAST(:appearance AS jsonb))
                 ON CONFLICT (id) DO NOTHING
                 """
             ),
@@ -194,9 +264,7 @@ class BotRepository:
                 "name": name,
                 "label": label,
                 "description": description,
-                "instructions": instructions,
                 "avatar": avatar,
-                "memory": memory,
                 "dup": duplicated_from,
                 "parent": parent_bot_id,
                 "created_by": created_by,
@@ -370,11 +438,262 @@ class BotRepository:
             {"id": bot_id},
         )
 
-    async def append_memory(self, bot_id: uuid.UUID, memory: str) -> None:
+    # --- the brief -----------------------------------------------------------------
+
+    async def set_brief(
+        self,
+        bot_id: uuid.UUID,
+        brief: dict[str, Any],
+        *,
+        revision_id: uuid.UUID,
+        editor_kind: str,
+        editor_bot_id: uuid.UUID | None = None,
+        editor_name: str = "",
+        reason: str = "",
+        changed: list[str] | None = None,
+    ) -> int | None:
+        """Write a new brief and its revision row, in one statement.
+
+        Idempotent per `revision_id`: a replayed step that already wrote its revision
+        returns None and changes nothing. Returns the new revision number otherwise.
+        """
+        exists = (
+            await self._s.execute(
+                text("SELECT 1 FROM bot_brief_revisions WHERE id = :id"), {"id": revision_id}
+            )
+        ).one_or_none()
+        if exists is not None:
+            return None
+        row = (
+            await self._s.execute(
+                text(
+                    """
+                    UPDATE bots SET brief = CAST(:brief AS jsonb), brief_rev = brief_rev + 1,
+                                    updated_at = now()
+                     WHERE id = :id
+                    RETURNING brief_rev
+                    """
+                ),
+                {"id": bot_id, "brief": json.dumps(brief)},
+            )
+        ).one()
+        rev = int(row.brief_rev)
         await self._s.execute(
-            text("UPDATE bots SET memory = :memory, updated_at = now() WHERE id = :id"),
-            {"id": bot_id, "memory": memory},
+            text(
+                """
+                INSERT INTO bot_brief_revisions (id, bot_id, rev, brief, editor_kind,
+                                                 editor_bot_id, editor_name, reason, changed)
+                VALUES (:id, :bot, :rev, CAST(:brief AS jsonb), :kind, :editor_bot,
+                        :editor_name, :reason, CAST(:changed AS jsonb))
+                """
+            ),
+            {
+                "id": revision_id,
+                "bot": bot_id,
+                "rev": rev,
+                "brief": json.dumps(brief),
+                "kind": editor_kind,
+                "editor_bot": editor_bot_id,
+                "editor_name": editor_name,
+                "reason": reason,
+                "changed": json.dumps(changed or []),
+            },
         )
+        return rev
+
+    async def brief_revisions(self, bot_id: uuid.UUID, limit: int = 50) -> list[BriefRevisionRow]:
+        rows = (
+            await self._s.execute(
+                text(
+                    """
+                    SELECT id, bot_id, rev, brief, editor_kind, editor_bot_id, editor_name,
+                           reason, changed, created_at
+                      FROM bot_brief_revisions WHERE bot_id = :bot
+                     ORDER BY rev DESC LIMIT :limit
+                    """
+                ),
+                {"bot": bot_id, "limit": limit},
+            )
+        ).all()
+        return [_revision(r) for r in rows]
+
+    async def brief_revision(self, bot_id: uuid.UUID, rev: int) -> BriefRevisionRow | None:
+        row = (
+            await self._s.execute(
+                text(
+                    """
+                    SELECT id, bot_id, rev, brief, editor_kind, editor_bot_id, editor_name,
+                           reason, changed, created_at
+                      FROM bot_brief_revisions WHERE bot_id = :bot AND rev = :rev
+                    """
+                ),
+                {"bot": bot_id, "rev": rev},
+            )
+        ).one_or_none()
+        return None if row is None else _revision(row)
+
+    # --- memory --------------------------------------------------------------------
+
+    async def memories(self, bot_id: uuid.UUID) -> list[BotMemoryRow]:
+        rows = (
+            await self._s.execute(
+                text(
+                    f"SELECT {_MEMORY_COLUMNS} FROM bot_memories WHERE bot_id = :bot "
+                    "ORDER BY created_at"
+                ),
+                {"bot": bot_id},
+            )
+        ).all()
+        return [_memory(r) for r in rows]
+
+    async def get_memory(self, bot_id: uuid.UUID, memory_id: uuid.UUID) -> BotMemoryRow | None:
+        row = (
+            await self._s.execute(
+                text(
+                    f"SELECT {_MEMORY_COLUMNS} FROM bot_memories WHERE id = :id AND bot_id = :bot"
+                ),
+                {"id": memory_id, "bot": bot_id},
+            )
+        ).one_or_none()
+        return None if row is None else _memory(row)
+
+    async def add_memory(
+        self,
+        memory_id: uuid.UUID,
+        bot_id: uuid.UUID,
+        *,
+        kind: str,
+        content: str,
+        importance: int = 3,
+        pinned: bool = False,
+        source_kind: str = "self",
+        source_name: str = "",
+    ) -> bool:
+        """Insert one memory. False when it already existed (a replayed step)."""
+        result = await self._s.execute(
+            text(
+                """
+                INSERT INTO bot_memories (id, bot_id, kind, content, importance, pinned,
+                                          source_kind, source_name)
+                VALUES (:id, :bot, :kind, :content, :importance, :pinned, :source_kind,
+                        :source_name)
+                ON CONFLICT (id) DO NOTHING
+                """
+            ),
+            {
+                "id": memory_id,
+                "bot": bot_id,
+                "kind": kind,
+                "content": content,
+                "importance": importance,
+                "pinned": pinned,
+                "source_kind": source_kind,
+                "source_name": source_name,
+            },
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+    async def update_memory(
+        self, bot_id: uuid.UUID, memory_id: uuid.UUID, fields: dict[str, Any]
+    ) -> bool:
+        allowed = {"kind", "content", "importance", "pinned", "source_kind", "source_name"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"not editable: {sorted(unknown)}")
+        if not fields:
+            return True
+        assignments = ", ".join(f"{name} = :{name}" for name in sorted(fields))
+        result = await self._s.execute(
+            text(
+                f"UPDATE bot_memories SET {assignments}, updated_at = now() "
+                "WHERE id = :id AND bot_id = :bot"
+            ),
+            {**fields, "id": memory_id, "bot": bot_id},
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+    async def reinforce_memory(
+        self, bot_id: uuid.UUID, memory_id: uuid.UUID, importance: int
+    ) -> None:
+        """Saving what is already known: the memory gets more important, and fresh."""
+        await self._s.execute(
+            text(
+                """
+                UPDATE bot_memories
+                   SET importance = GREATEST(importance, :importance),
+                       recall_count = recall_count + 1, last_recalled_at = now(),
+                       updated_at = now()
+                 WHERE id = :id AND bot_id = :bot
+                """
+            ),
+            {"id": memory_id, "bot": bot_id, "importance": importance},
+        )
+
+    async def mark_recalled(self, bot_id: uuid.UUID, memory_ids: list[uuid.UUID]) -> None:
+        if not memory_ids:
+            return
+        await self._s.execute(
+            text(
+                """
+                UPDATE bot_memories
+                   SET recall_count = recall_count + 1, last_recalled_at = now()
+                 WHERE bot_id = :bot AND id = ANY(:ids)
+                """
+            ),
+            {"bot": bot_id, "ids": memory_ids},
+        )
+
+    async def delete_memories(self, bot_id: uuid.UUID, memory_ids: list[uuid.UUID]) -> int:
+        if not memory_ids:
+            return 0
+        result = await self._s.execute(
+            text("DELETE FROM bot_memories WHERE bot_id = :bot AND id = ANY(:ids)"),
+            {"bot": bot_id, "ids": memory_ids},
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def clear_memories(self, bot_id: uuid.UUID) -> int:
+        result = await self._s.execute(
+            text("DELETE FROM bot_memories WHERE bot_id = :bot"), {"bot": bot_id}
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def memory_counts(self, organization_id: OrganizationId) -> dict[uuid.UUID, int]:
+        rows = (
+            await self._s.execute(
+                text(
+                    """
+                    SELECT m.bot_id, count(*) AS n FROM bot_memories m
+                      JOIN bots b ON b.id = m.bot_id
+                     WHERE b.organization_id = :org AND b.deleted_at IS NULL
+                     GROUP BY m.bot_id
+                    """
+                ),
+                {"org": organization_id},
+            )
+        ).all()
+        return {r.bot_id: int(r.n) for r in rows}
+
+    async def search_bot_messages(
+        self, bot_id: uuid.UUID, query: str, limit: int = 6
+    ) -> list[BotMessageRow]:
+        """One bot's own past conversation — `recall` reaching past its context window."""
+        rows = (
+            await self._s.execute(
+                text(
+                    """
+                    SELECT id, seq, bot_id, role, content, payload, run_id, reply_to,
+                           created_at
+                      FROM bot_messages
+                     WHERE bot_id = :bot AND role IN ('user', 'bot') AND content ILIKE :q
+                     ORDER BY seq DESC
+                     LIMIT :limit
+                    """
+                ),
+                {"bot": bot_id, "q": f"%{_escape_like(query)}%", "limit": limit},
+            )
+        ).all()
+        return [_message(r) for r in rows]
 
     # --- messages ------------------------------------------------------------------
 

@@ -41,6 +41,8 @@ _TRUNCATE_ORDER = [
     "delegations",
     # Bots (037): conversations, rules and pending actions are test state, and all
     # three reference `bots`, so they come first.
+    "bot_brief_revisions",
+    "bot_memories",
     "bot_pending_actions",
     "bot_rules",
     "bot_messages",

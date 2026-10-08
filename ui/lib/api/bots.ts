@@ -14,9 +14,14 @@ export interface Bot {
   name: string;
   label: string;
   description: string;
-  instructions: string;
   avatar: string;
-  memory: string;
+  /** The job brief — the bot's primary instruction. */
+  brief: Partial<BotBrief>;
+  /** Only the person may change a locked brief; bots are refused. */
+  brief_locked: boolean;
+  brief_rev: number;
+  /** Set on the list endpoint. */
+  memory_count: number | null;
   pinned: boolean;
   hidden: boolean;
   unread: boolean;
@@ -32,6 +37,55 @@ export interface Bot {
   created_at: string;
   updated_at: string;
   last_message: BotMessage | null;
+}
+
+export interface BotBrief {
+  mission: string;
+  duties: string[];
+  boundaries: string[];
+  style: string;
+  escalation: string;
+  notes: string;
+}
+
+export const EMPTY_BRIEF: BotBrief = {
+  mission: "",
+  duties: [],
+  boundaries: [],
+  style: "",
+  escalation: "",
+  notes: "",
+};
+
+export const briefOf = (bot: Pick<Bot, "brief">): BotBrief => ({ ...EMPTY_BRIEF, ...bot.brief });
+
+export interface BriefRevision {
+  rev: number;
+  brief: Partial<BotBrief>;
+  editor_kind: "person" | "self" | "parent";
+  editor_bot_id: string | null;
+  editor_name: string;
+  reason: string;
+  changed: string[];
+  created_at: string;
+}
+
+export type MemoryKind = "preference" | "person" | "fact" | "skill" | "episode";
+
+export interface BotMemory {
+  id: string;
+  /** The short id the bot sees, e.g. `a1b2c3`. */
+  handle: string;
+  kind: MemoryKind;
+  content: string;
+  importance: number;
+  pinned: boolean;
+  source_kind: "self" | "person" | "parent" | "system";
+  source_name: string;
+  recall_count: number;
+  last_recalled_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export type MessageRole = "user" | "bot" | "activity" | "approval" | "system" | "error";
@@ -50,7 +104,8 @@ export interface BotAction {
   page_url?: string;
   host?: string;
   element_label?: string;
-  /** create_bot / ask_bot / bot_answer: the helper's name. */
+  /** create_bot / ask_bot / bot_answer: the helper's name. Memory and brief steps:
+   * the helper whose memory or brief changed, or empty for the bot's own. */
   bot?: string;
   label?: string;
 }
@@ -77,6 +132,9 @@ export interface BotMessage {
     status?: string;
     from_bot_id?: string;
     from_bot_name?: string;
+    outcome?: string;
+    changed?: string[];
+    found?: number;
   };
   run_id: string | null;
   reply_to: string | null;
@@ -121,7 +179,16 @@ export interface ComputerStatus {
   }[];
 }
 
-export type BotDraft = Pick<Bot, "name" | "label" | "description" | "instructions" | "avatar"> & {
+export type BotDraft = Pick<Bot, "name" | "label" | "description" | "avatar"> & {
+  brief: BotBrief;
+  appearance?: import("@/features/bots/avatar/appearance").Appearance;
+};
+
+export type BotPatch = Partial<
+  Pick<Bot, "name" | "label" | "description" | "avatar" | "pinned" | "hidden" | "brief_locked">
+> & {
+  brief?: BotBrief;
+  brief_reason?: string;
   appearance?: import("@/features/bots/avatar/appearance").Appearance;
 };
 
@@ -137,7 +204,7 @@ export const listBots = (signal?: AbortSignal) =>
 
 export const createBot = (draft: BotDraft) => request<Bot>(BOTS_BASE, json("POST", draft));
 
-export const updateBot = (id: string, fields: Partial<Bot>) =>
+export const updateBot = (id: string, fields: BotPatch) =>
   request<Bot>(`${BOTS_BASE}/${id}`, json("PATCH", fields));
 
 export const duplicateBot = (id: string) =>
@@ -174,6 +241,32 @@ export const putRule = (id: string, rule: Pick<BotRule, "action_type" | "host" |
 
 export const deleteRule = (id: string, ruleId: string) =>
   request<unknown>(`${BOTS_BASE}/${id}/rules/${ruleId}`, { method: "DELETE" });
+
+export const listRevisions = (id: string, signal?: AbortSignal) =>
+  request<{ revisions: BriefRevision[] }>(`${BOTS_BASE}/${id}/brief/revisions`, { signal });
+
+export const restoreRevision = (id: string, rev: number) =>
+  request<Bot>(`${BOTS_BASE}/${id}/brief/revisions/${rev}/restore`, json("POST", {}));
+
+export const listMemories = (id: string, signal?: AbortSignal) =>
+  request<{ memories: BotMemory[] }>(`${BOTS_BASE}/${id}/memories`, { signal });
+
+export const addMemory = (
+  id: string,
+  memory: Pick<BotMemory, "content" | "kind" | "importance" | "pinned">,
+) => request<{ id: string }>(`${BOTS_BASE}/${id}/memories`, json("POST", memory));
+
+export const editMemory = (
+  id: string,
+  memoryId: string,
+  fields: Partial<Pick<BotMemory, "content" | "kind" | "importance" | "pinned">>,
+) => request<unknown>(`${BOTS_BASE}/${id}/memories/${memoryId}`, json("PATCH", fields));
+
+export const deleteMemory = (id: string, memoryId: string) =>
+  request<unknown>(`${BOTS_BASE}/${id}/memories/${memoryId}`, { method: "DELETE" });
+
+export const clearMemories = (id: string) =>
+  request<{ deleted: number }>(`${BOTS_BASE}/${id}/memories`, { method: "DELETE" });
 
 export const searchBots = (q: string, signal?: AbortSignal) =>
   request<SearchResult>(`${BOTS_BASE}/search?q=${encodeURIComponent(q)}`, {

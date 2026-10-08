@@ -107,7 +107,13 @@ export function describeAction(action: BotAction | undefined): string {
     case "wait":
       return `Wait ${action.seconds ?? 1}s`;
     case "remember":
-      return "Save to memory";
+      return action.bot ? `Teach ${action.bot}` : "Save to memory";
+    case "forget":
+      return action.bot ? `Remove a memory from ${action.bot}` : "Forget a memory";
+    case "recall":
+      return `Recall “${action.text ?? ""}”`;
+    case "update_brief":
+      return action.bot ? `Update ${action.bot}'s brief` : "Update own brief";
     case "create_bot":
       return `Create helper “${action.bot ?? ""}”${action.label ? ` — ${action.label}` : ""}`;
     case "ask_bot":
@@ -134,6 +140,9 @@ export const ACTION_ICON: Record<string, string> = {
   reload: "↻",
   wait: "…",
   remember: "✎",
+  forget: "⌫",
+  recall: "◷",
+  update_brief: "≡",
   create_bot: "+",
   ask_bot: "→",
   bot_answer: "←",

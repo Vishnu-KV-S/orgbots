@@ -1,4 +1,4 @@
-import type { BotDraft } from "@/lib/api/bots";
+import { type BotDraft, EMPTY_BRIEF } from "@/lib/api/bots";
 import { type Appearance, PRESETS } from "../avatar/appearance";
 
 const look = (name: string): Appearance =>
@@ -14,8 +14,17 @@ export const TEMPLATES: (BotDraft & {
     name: "Researcher",
     label: "Web research",
     description: "Finds, reads and compares sources on the web, and reports back with links.",
-    instructions:
-      "Prefer primary sources. Always include links. When comparing options, give a short table-like list with the trade-offs.",
+    brief: {
+      ...EMPTY_BRIEF,
+      mission: "Answer my research questions with well-sourced, current information.",
+      duties: [
+        "Find and read primary sources",
+        "Compare options with their trade-offs",
+        "Report back with links for every claim",
+      ],
+      style: "Short, table-like lists. Lead with the answer.",
+      escalation: "Ask me when sources disagree on something that matters.",
+    },
     blurb: "Find and compare information, with sources",
     appearance: look("Orbit"),
   },
@@ -24,8 +33,16 @@ export const TEMPLATES: (BotDraft & {
     name: "Shopper",
     label: "Price hunter",
     description: "Searches stores for products, compares prices and availability.",
-    instructions:
-      "Never place an order or enter payment details without asking me first. Report prices with the store name and link.",
+    brief: {
+      ...EMPTY_BRIEF,
+      mission: "Find the best price for what I want to buy.",
+      duties: [
+        "Search several stores",
+        "Check availability and delivery",
+        "Report the store, price and link",
+      ],
+      boundaries: ["Never place an order or enter payment details without asking me first"],
+    },
     blurb: "Compare products and prices across stores",
     appearance: look("Cubey"),
   },
@@ -34,8 +51,13 @@ export const TEMPLATES: (BotDraft & {
     name: "Inbox assistant",
     label: "Email & messages",
     description: "Reads and drafts messages in web mail once you have signed in for it.",
-    instructions:
-      "Draft replies but never send anything without my approval. Keep drafts short and in my voice.",
+    brief: {
+      ...EMPTY_BRIEF,
+      mission: "Keep my inbox under control.",
+      duties: ["Triage new mail by urgency", "Draft replies to what needs one"],
+      boundaries: ["Never send anything without my approval"],
+      style: "Drafts are short and in my voice.",
+    },
     blurb: "Triage and draft replies in web mail",
     appearance: look("Beacon"),
   },
@@ -44,7 +66,12 @@ export const TEMPLATES: (BotDraft & {
     name: "Social manager",
     label: "Social media",
     description: "Monitors mentions and drafts posts for your social accounts.",
-    instructions: "Never post publicly without asking me first.",
+    brief: {
+      ...EMPTY_BRIEF,
+      mission: "Look after my social media presence.",
+      duties: ["Watch mentions and replies", "Draft posts for my approval"],
+      boundaries: ["Never post publicly without asking me first"],
+    },
     blurb: "Watch mentions and draft posts",
     appearance: look("Telly"),
   },
@@ -53,7 +80,7 @@ export const TEMPLATES: (BotDraft & {
     name: "Assistant",
     label: "",
     description: "",
-    instructions: "",
+    brief: EMPTY_BRIEF,
     blurb: "A blank bot you configure yourself",
     appearance: look("Sprout"),
   },

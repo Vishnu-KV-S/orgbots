@@ -77,7 +77,7 @@ journaled and audited exactly like the marketing department.
 Each bot has its own **screen** on one shared **cloud computer**: a separate process
 holding a persistent Chromium profile (sign-ins are shared by every bot) and one tab
 per bot. Bots see a page as a numbered list of its interactive elements plus its
-text, DeepSeek picks one action per step (`BotStep@1`), and the action reaches the
+text, DeepSeek picks one action per step (`BotStep@2`), and the action reaches the
 browser only through `browser.observe@1` / `browser.act@1` in the tool gateway.
 
 ```bash
@@ -119,6 +119,28 @@ Helpers need two settings the department leaves off:
 RUNTIME_DELEGATION_ENABLED=true   # ask_bot is a delegation
 RUNTIME_WORKER_SLOTS=4            # a bot waiting on its helper holds a slot meanwhile
 ```
+
+**A brief and a memory, like an employee.** Every bot has a *job brief* — its
+primary instruction: mission, responsibilities, boundaries, working style, when to
+ask, standing notes — read before every step and ranked above everything except
+safety and your direct requests. You write it when you create the bot; a bot writes
+one for each helper it creates (`create_bot` takes a brief and starting memories).
+After that **the bot itself and its parent bot can revise it** (`update_brief`, with a
+reason), and so can you. Every revision is kept with who made it and why, and can be
+restored; tick *Only I can change this brief* to lock bots out.
+
+Memory works the way a person's does (`runtime/domain/bot_memory.py`): typed memories
+— preferences, people, facts, skills, and a diary line written at the end of every
+turn — each with an importance and a source (learned itself, taught by you, taught by
+its parent). A prompt carries only what comes to mind: pinned memories and strong
+preferences always, the latest diary lines, then the rest ranked by relevance to the
+conversation, importance and how recently it was used. Recalled memories get stronger;
+saving something it already knows reinforces the old memory instead of duplicating
+it; past 600 the weakest unpinned ones are forgotten. A bot can `remember` (or revise
+one by its `[id]`), `forget`, and `recall` — a search of all its memories and its whole
+past conversation. A parent can teach or correct its helpers' memories, and the
+helper's conversation says who changed what. Everything is visible and editable in
+the bot's Details.
 
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details

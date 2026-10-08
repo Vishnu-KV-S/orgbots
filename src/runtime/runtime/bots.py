@@ -8,10 +8,11 @@ gets a refused run and a line in the conversation saying so, not a silent no-op.
 
 Creating a bot publishes an actor (`bot_actor_spec`) and writes a `bots` row in the
 same breath; the actor is the authority and the row is the face. Editing a bot's
-instructions changes the row, never the actor, so it is not a republish — what a bot
-*may do* does not change when a person rewords what it *should do*.
+brief changes the row, never the actor, so it is not a republish — what a bot *may
+do* does not change when a person rewords what it *should do*. Every brief change a
+person makes is a revision, like one a bot makes, so the history has no gaps.
 
-Duplicating copies configuration and rules but not memory or conversation, the way
+Duplicating copies the brief and rules but not memory or conversation, the way
 GrokBot documents it: a copy is a new employee with the same job description.
 """
 
@@ -22,11 +23,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from runtime.domain.bot_memory import BotBrief, brief_changes, clean_memory
 from runtime.domain.bots import actor_name_for, host_of
 from runtime.domain.ids import OrganizationId
 from runtime.domain.specs import StartRunRequest
 from runtime.observability.logging import get_logger
-from runtime.org.bots import publish_bot_actor
+from runtime.org.bots import brief_of, publish_bot_actor, store_memory, write_brief
 from runtime.persistence.repositories.bots import BotRow
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.runtime.bootstrap import Registrar
@@ -40,6 +42,10 @@ class BotNotFoundError(LookupError):
 
 
 class PendingNotFoundError(LookupError):
+    pass
+
+
+class MemoryNotFoundError(LookupError):
     pass
 
 
@@ -69,9 +75,8 @@ class BotManager:
         name: str,
         label: str = "",
         description: str = "",
-        instructions: str = "",
         avatar: str = "",
-        memory: str = "",
+        brief: BotBrief | None = None,
         duplicated_from: uuid.UUID | None = None,
         appearance: dict[str, Any] | None = None,
     ) -> BotRow:
@@ -90,12 +95,19 @@ class BotManager:
                 name=name,
                 label=label,
                 description=description,
-                instructions=instructions,
                 avatar=avatar,
-                memory=memory,
                 duplicated_from=duplicated_from,
                 appearance=appearance,
             )
+            if brief is not None and not brief.is_empty():
+                await write_brief(
+                    uow,
+                    bot_id,
+                    brief,
+                    revision=uuid.uuid4(),
+                    editor_kind="person",
+                    reason="Copied with the bot" if duplicated_from else "Written at creation",
+                )
             row = await uow.bots.get(bot_id)
         assert row is not None
         log.info("bot.created", bot_id=str(bot_id), actor=actor_name)
@@ -115,8 +127,8 @@ class BotManager:
             name=f"{source.name} (copy)",
             label=source.label,
             description=source.description,
-            instructions=source.instructions,
             avatar=source.avatar,
+            brief=brief_of(source),
             duplicated_from=source.id,
             appearance=source.appearance,
         )
@@ -129,6 +141,87 @@ class BotManager:
         async with self._uow.transaction() as uow:
             await uow.bots.update(bot_id, fields)
         return await self.get(bot_id)
+
+    # --- the brief -------------------------------------------------------------------
+
+    async def set_brief(
+        self, bot_id: uuid.UUID, brief: BotBrief, *, reason: str = "", locked: bool | None = None
+    ) -> BotRow:
+        """The person edits a brief. A person may edit a locked brief — the lock is
+        theirs — and may lock or unlock it."""
+        bot = await self.get(bot_id)
+        before = brief_of(bot)
+        changed = brief_changes(before, brief)
+        async with self._uow.transaction() as uow:
+            if changed:
+                await write_brief(
+                    uow,
+                    bot_id,
+                    brief,
+                    revision=uuid.uuid4(),
+                    editor_kind="person",
+                    reason=reason,
+                    changed=changed,
+                )
+                await uow.bots.add_message(
+                    uuid.uuid4(),
+                    bot_id,
+                    role="system",
+                    content=f"You updated {bot.name}'s brief ({', '.join(changed)}).",
+                    payload={"brief_changed": changed},
+                )
+            if locked is not None:
+                await uow.bots.update(bot_id, {"brief_locked": locked})
+        return await self.get(bot_id)
+
+    async def restore_brief(self, bot_id: uuid.UUID, rev: int) -> BotRow:
+        async with self._uow() as uow:
+            revision = await uow.bots.brief_revision(bot_id, rev)
+        if revision is None:
+            raise LookupError(f"no revision {rev}")
+        return await self.set_brief(
+            bot_id, BotBrief.model_validate(revision.brief), reason=f"Restored revision {rev}"
+        )
+
+    # --- memory ----------------------------------------------------------------------
+
+    async def add_memory(
+        self, bot_id: uuid.UUID, *, content: str, kind: str, importance: int, pinned: bool
+    ) -> uuid.UUID:
+        await self.get(bot_id)
+        async with self._uow.transaction() as uow:
+            saved = await store_memory(
+                uow,
+                bot_id,
+                new_id=uuid.uuid4(),
+                content=content,
+                kind=kind,
+                importance=importance,
+                pinned=pinned,
+                source_kind="person",
+                source_name="you",
+            )
+            if pinned:
+                await uow.bots.update_memory(bot_id, saved.memory_id, {"pinned": True})
+        return saved.memory_id
+
+    async def edit_memory(
+        self, bot_id: uuid.UUID, memory_id: uuid.UUID, fields: dict[str, Any]
+    ) -> None:
+        if "content" in fields:
+            fields["content"] = clean_memory(str(fields["content"]))
+        async with self._uow.transaction() as uow:
+            if not await uow.bots.update_memory(bot_id, memory_id, fields):
+                raise MemoryNotFoundError(str(memory_id))
+
+    async def delete_memory(self, bot_id: uuid.UUID, memory_id: uuid.UUID) -> None:
+        async with self._uow.transaction() as uow:
+            if not await uow.bots.delete_memories(bot_id, [memory_id]):
+                raise MemoryNotFoundError(str(memory_id))
+
+    async def clear_memories(self, bot_id: uuid.UUID) -> int:
+        async with self._uow.transaction() as uow:
+            return await uow.bots.clear_memories(bot_id)
 
     async def delete(self, bot_id: uuid.UUID, *, with_helpers: bool) -> list[uuid.UUID]:
         """Delete a bot. Returns every bot id that was deleted.

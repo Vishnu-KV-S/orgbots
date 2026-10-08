@@ -6,6 +6,8 @@ import { type Bot, type BotRule, deleteRule, listRules, putRule, updateBot } fro
 import { useAction } from "@/lib/hooks/useAction";
 import { useResource } from "@/lib/hooks/useResource";
 import { type Appearance, Designer, appearanceFor } from "../avatar";
+import { BriefSection } from "./BriefEditor";
+import { MemorySection } from "./MemoryPane";
 
 const RULE_ACTIONS = [
   ["*", "any action"],
@@ -19,10 +21,11 @@ const RULE_ACTIONS = [
 /**
  * Who this bot is and what it may do without asking.
  *
- * Profile and instructions are conversation state — editing them never touches
- * the bot's actor or what it is allowed to call. Memory is what the bot has saved
- * for itself, editable because a wrong memory is worse than none. Rules are the
- * Auto Review settings: "ask first" beats "allow automatically" when both match.
+ * Profile and brief are conversation state — editing them never touches the bot's
+ * actor or what it is allowed to call. The brief is its primary instruction; memory is
+ * what it has learned, editable because a wrong memory is worse than none. Rules are
+ * the Auto Review settings: "ask first" beats "allow automatically" when both match,
+ * and no bot can change them — only the person can.
  */
 export function DetailsPane({
   bot,
@@ -42,9 +45,10 @@ export function DetailsPane({
   return (
     <div>
       <Team bot={bot} bots={bots} onSelect={onSelect} />
-      <Looks bot={bot} onChanged={onChanged} />
+      <BriefSection bot={bot} bots={bots} onChanged={onChanged} />
+      <MemorySection bot={bot} />
       <Profile bot={bot} onChanged={onChanged} />
-      <Memory bot={bot} onChanged={onChanged} />
+      <Looks bot={bot} onChanged={onChanged} />
       <Rules bot={bot} />
       <section className="dsec">
         <h3>About</h3>
@@ -171,18 +175,11 @@ function Profile({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
           </label>
         </div>
         <label>
-          Description <small>— its role and responsibilities</small>
+          Description <small>— one line, shown in the sidebar and search</small>
           <textarea
+            rows={2}
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
-          />
-        </label>
-        <label>
-          Instructions <small>— standing preferences it follows on every task</small>
-          <textarea
-            value={form.instructions}
-            rows={5}
-            onChange={(e) => setForm({ ...form, instructions: e.target.value })}
           />
         </label>
         {save.error && <ErrorNotice>{save.error}</ErrorNotice>}
@@ -215,57 +212,8 @@ function pick(bot: Bot) {
     name: bot.name,
     label: bot.label,
     description: bot.description,
-    instructions: bot.instructions,
     avatar: bot.avatar,
   };
-}
-
-function Memory({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
-  const [memory, setMemory] = useState(bot.memory);
-  useEffect(() => setMemory(bot.memory), [bot.id, bot.memory]);
-  const save = useAction((value: string) => updateBot(bot.id, { memory: value }), {
-    onDone: onChanged,
-  });
-  return (
-    <section className="dsec">
-      <h3>Memory</h3>
-      <div className="form">
-        <label>
-          <small>
-            What {bot.name} has learned about you and your work. It reads this on every task.
-            Duplicating a bot does not copy it.
-          </small>
-          <textarea
-            rows={5}
-            value={memory}
-            placeholder="Nothing remembered yet."
-            onChange={(e) => setMemory(e.target.value)}
-          />
-        </label>
-        {save.error && <ErrorNotice>{save.error}</ErrorNotice>}
-        <div className="form-actions">
-          <button
-            type="button"
-            className="pbtn"
-            disabled={!bot.memory || save.pending}
-            onClick={() => {
-              if (window.confirm(`Clear everything ${bot.name} remembers?`)) void save.run("");
-            }}
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            className="pbtn primary"
-            disabled={memory === bot.memory || save.pending}
-            onClick={() => void save.run(memory)}
-          >
-            Save memory
-          </button>
-        </div>
-      </div>
-    </section>
-  );
 }
 
 function Rules({ bot }: { bot: Bot }) {

@@ -16,6 +16,7 @@ import { cx } from "@/lib/cx";
 import { Designer, randomAppearance } from "../avatar";
 import { TEMPLATES } from "../lib/templates";
 import { Avatar } from "./Avatar";
+import { BriefFields } from "./BriefEditor";
 
 function Modal({
   title,
@@ -78,7 +79,7 @@ export function NewBotDialog({
                   name: t.name,
                   label: t.label,
                   description: t.description,
-                  instructions: t.instructions,
+                  brief: t.brief,
                   avatar: t.avatar,
                   appearance: t.name === "Assistant" ? randomAppearance() : t.appearance,
                 })
@@ -122,20 +123,19 @@ export function NewBotDialog({
           </label>
         </div>
         <label>
-          Description <small>— its role and responsibilities</small>
-          <textarea
+          <span>
+            Description <small>— one line, shown in the sidebar</small>
+          </span>
+          <input
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
           />
         </label>
-        <label>
-          Instructions <small>— preferences it should always follow</small>
-          <textarea
-            rows={4}
-            value={form.instructions}
-            onChange={(e) => setForm({ ...form, instructions: e.target.value })}
-          />
-        </label>
+        <BriefFields value={form.brief} onChange={(brief) => setForm({ ...form, brief })} compact />
+        <p className="screen-help" style={{ margin: 0 }}>
+          This is its primary instruction. Add responsibilities, working style and when to ask in
+          its details later — and it can keep the brief up to date itself as the job changes.
+        </p>
         {create.error && <ErrorNotice>{create.error}</ErrorNotice>}
         <div className="form-actions">
           <button type="button" className="pbtn" onClick={() => setForm(null)}>
@@ -145,7 +145,17 @@ export function NewBotDialog({
             type="button"
             className="pbtn primary"
             disabled={!form.name.trim() || create.pending}
-            onClick={() => void create.run({ ...form, name: form.name.trim() })}
+            onClick={() =>
+              void create.run({
+                ...form,
+                name: form.name.trim(),
+                brief: {
+                  ...form.brief,
+                  duties: form.brief.duties.map((l) => l.trim()).filter(Boolean),
+                  boundaries: form.brief.boundaries.map((l) => l.trim()).filter(Boolean),
+                },
+              })
+            }
           >
             {create.pending ? "Creating…" : "Create bot"}
           </button>

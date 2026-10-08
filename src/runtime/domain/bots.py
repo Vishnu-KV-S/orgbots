@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from runtime.domain.bot_memory import BriefPatch, MemoryKind
 from runtime.domain.schemas import SCHEMAS
 
 MAX_STEPS = 24
@@ -36,9 +37,6 @@ MAX_STEPS = 24
 
 MAX_HISTORY_MESSAGES = 24
 """Conversation messages (person and bot, not activity) carried into a run's input."""
-
-MAX_MEMORY_CHARS = 4_000
-"""What a bot may keep in its learned notes. Old notes fall off the front."""
 
 MAX_HELPERS = 5
 """Live helpers one bot may have created. A bot that wants a sixth reuses one."""
@@ -85,6 +83,9 @@ BROWSER_ACTIONS = frozenset(
 """Steps that become a `browser.act@1` call. Must match `runtime.computer.browser`."""
 
 TURN_ENDING = frozenset({"reply", "ask_user"})
+
+MAX_SEED_MEMORIES = 10
+"""What a bot may hand a helper it creates, as the helper's first memories."""
 """Steps that hand the conversation back to the person."""
 
 ACTIONS_NEEDING_ELEMENT = frozenset({"click", "type", "select", "hover"})
@@ -107,6 +108,9 @@ StepAction = Literal[
     "ask_user",
     "create_bot",
     "ask_bot",
+    "recall",
+    "forget",
+    "update_brief",
 ]
 
 
@@ -122,12 +126,19 @@ class BotStep(BaseModel):
     )
     action: StepAction = Field(
         description="navigate/click/type/press/select/scroll/hover/back/forward/reload/"
-        "wait drive the browser. observe re-reads the page. remember saves a note to "
-        "your long-term memory and continues. reply ends your turn with a message to "
-        "the person. ask_user ends your turn with a question you need answered. "
-        "create_bot creates a helper bot under you (bot = its name, text = its role and "
-        "instructions). ask_bot gives one of your helpers a task and waits for its answer "
-        "(bot = the helper's name, text = the task, with every fact it needs)."
+        "wait drive the browser. observe re-reads the page. reply ends your turn with a "
+        "message to the person. ask_user ends your turn with a question you need answered. "
+        "MEMORY: remember saves something to long-term memory and continues (text = the "
+        "memory, memory_kind, importance; memory = an [id] to revise an existing one; bot = "
+        "one of your helpers to teach it instead of yourself). forget deletes a memory "
+        "(memory = its [id]; bot = a helper's name to edit its memory). recall searches your "
+        "whole memory and past conversations (text = what to look for). BRIEF: update_brief "
+        "changes a primary instruction — yours, or a helper's with bot = its name (brief = "
+        "only the fields that change, text = why). TEAM: create_bot creates a helper bot "
+        "under you (bot = its name, label = job title, text = its mission, brief = its full "
+        "job brief, seed_memories = facts it should start out knowing). ask_bot gives one of "
+        "your helpers a task and waits for its answer (bot = the helper's name, text = the "
+        "task, with every fact it needs)."
     )
     element: int | None = Field(
         default=None,
@@ -147,6 +158,40 @@ class BotStep(BaseModel):
         default=None,
         description="The text to type (type), the message (reply / ask_user), or the "
         "note to save (remember).",
+    )
+    memory: str | None = Field(
+        default=None,
+        max_length=12,
+        description="For remember (to revise) and forget: a memory's [id] from your memory.",
+    )
+    memory_kind: MemoryKind = Field(
+        default="fact",
+        description="For remember: preference (how your person likes things), person (someone "
+        "and how to reach them), fact, skill (how to do something — steps that worked), or "
+        "episode (something that happened).",
+    )
+    importance: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="For remember and diary: 1 trivial … 5 essential. Preferences at 4+ are in "
+        "every prompt.",
+    )
+    brief: BriefPatch | None = Field(
+        default=None,
+        description="For update_brief: the fields that change (lists are replaced whole). "
+        "For create_bot: the helper's job brief.",
+    )
+    seed_memories: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_SEED_MEMORIES,
+        description="For create_bot: facts the helper should start out knowing.",
+    )
+    diary: str | None = Field(
+        default=None,
+        max_length=600,
+        description="For reply and ask_user: one line for your diary — what this turn was "
+        "about and how it ended, with names, numbers and links worth remembering.",
     )
     key: str | None = Field(default=None, description="For press, e.g. Enter, Tab, Escape.")
     option: str | None = Field(default=None, description="For select: the option's label.")
@@ -171,8 +216,18 @@ class BotStep(BaseModel):
             raise ValueError("type needs `text`")
         if self.action == "press" and not (self.key or "").strip():
             raise ValueError("press needs `key`")
-        if self.action in ("reply", "ask_user", "remember") and not (self.text or "").strip():
+        if (
+            self.action in ("reply", "ask_user", "remember", "recall")
+            and not (self.text or "").strip()
+        ):
             raise ValueError(f"{self.action} needs `text`")
+        if self.action == "forget" and not (self.memory or "").strip():
+            raise ValueError("forget needs `memory` — the [id] of the memory to forget")
+        if self.action == "update_brief":
+            if self.brief is None or self.brief.is_empty():
+                raise ValueError("update_brief needs `brief` with at least one field to change")
+            if not (self.text or "").strip():
+                raise ValueError("update_brief needs `text` — why the brief is changing")
         if self.action in ("create_bot", "ask_bot"):
             if not (self.bot or "").strip():
                 raise ValueError(f"{self.action} needs `bot` — the helper's name")
@@ -206,7 +261,10 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP_V1 = SCHEMAS.register(BotStep, version=1)
+BOT_STEP = SCHEMAS.register(BotStep, version=2)
+"""Version 2 added memory (remember kinds, forget, recall, diary) and the brief
+(update_brief, create_bot's brief and seed memories). Version 1 was never run against
+stored data, so it is not kept."""
 
 
 # --- appearance -------------------------------------------------------------------------
@@ -346,14 +404,3 @@ def actor_name_for(name: str, suffix: str) -> str:
     renamed bot keeps its actor rather than acquiring a new one."""
     slug = _SLUG.sub("-", name.lower()).strip("-")[:40] or "bot"
     return f"bot-{slug}-{suffix}"
-
-
-def trim_memory(memory: str, note: str) -> str:
-    """Append a note, dropping the oldest lines once over `MAX_MEMORY_CHARS`."""
-    note = " ".join(note.split()).removeprefix("- ")
-    lines = [line for line in memory.splitlines() if line.strip()]
-    if note and f"- {note}" not in lines:
-        lines.append(f"- {note}")
-    while lines and sum(len(line) + 1 for line in lines) > MAX_MEMORY_CHARS:
-        lines.pop(0)
-    return "\n".join(lines)

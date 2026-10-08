@@ -1620,3 +1620,141 @@ kbd {
   gap: 2px;
   margin-bottom: 4px;
 }
+
+/* brief and memory ------------------------------------------------------------------ */
+
+.dsec h3 .count {
+  margin-left: 6px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.dsec .muted {
+  color: var(--text-faint);
+}
+
+.form label.checkline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.history {
+  margin-top: 12px;
+}
+
+.revisions {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.revisions li {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rev-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.rev-head .linklike {
+  margin-left: auto;
+}
+
+.revisions .why,
+.mem .why {
+  color: var(--text-dim);
+}
+
+.mem-search {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.mems {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mem {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+
+.mem.pinned {
+  border-color: var(--line-strong);
+}
+
+.mem-text {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.mem-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.mem-tools {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.kind-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+  color: var(--text-dim);
+}
+
+.importance {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.importance .pip {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+}
+
+.importance .pip.on {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.importance .pip:disabled {
+  cursor: default;
+}
+
+.form label .importance {
+  height: 34px;
+}

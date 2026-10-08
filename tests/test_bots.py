@@ -11,6 +11,7 @@ runtime.computer.main`); otherwise those tests skip and a scripted page stands i
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import json
 import os
 import socket
@@ -22,6 +23,15 @@ from urllib.parse import urlparse
 import pytest
 
 import runtime.graphs.bot_agent  # noqa: F401  registers bot_agent@1
+from runtime.domain.bot_memory import (
+    BotBrief,
+    Memory,
+    brief_changes,
+    clean_memory,
+    find_duplicate,
+    search,
+    select_for_prompt,
+)
 from runtime.domain.bots import (
     BotRule,
     BotStep,
@@ -30,11 +40,17 @@ from runtime.domain.bots import (
     masked,
     message_id,
     needs_approval,
-    trim_memory,
 )
 from runtime.gateway.models import ModelResponse
 from runtime.graphs.registry import GRAPH_KEY, get_graph
-from runtime.org.bots import BROWSER_TOOLS, bot_actor_spec
+from runtime.org.bots import (
+    BROWSER_TOOLS,
+    BriefChange,
+    BriefLockedError,
+    Remembered,
+    bot_actor_spec,
+    brief_of,
+)
 
 # --- domain ---------------------------------------------------------------------------
 
@@ -86,15 +102,6 @@ def test_message_ids_are_stable_per_run_step_kind() -> None:
     assert message_id(run, 3, "act") != message_id(run, 4, "act")
 
 
-def test_memory_is_bounded_and_deduplicated() -> None:
-    memory = ""
-    for i in range(400):
-        memory = trim_memory(memory, f"note number {i} " + "x" * 20)
-    assert len(memory) <= 4_000
-    assert memory.endswith("x" * 20)
-    assert trim_memory("- a", "a").count("a") == 1
-
-
 def test_actor_spec_is_narrow() -> None:
     name = actor_name_for("Sales Scout!", "3f9a")
     assert name == "bot-sales-scout-3f9a"
@@ -113,8 +120,8 @@ class _Bot:
     name: str = "Scout"
     label: str = "Research"
     description: str = "Finds things on the web."
-    instructions: str = ""
-    memory: str = ""
+    brief: dict[str, Any] = field(default_factory=dict)
+    brief_locked: bool = False
     stop_requested: bool = False
     turn: int = 0
     actor_name: str = "bot-scout-000000"
@@ -147,9 +154,12 @@ class FakeBots:
         self.helpers_: list[_Bot] = []
         self.depth_ = 0
         self.refuse: str | None = None
+        self.memory: dict[uuid.UUID, list[Memory]] = {}
+        self.episodes: list[str] = []
+        self.brief_edits: list[tuple[str, str, str, str]] = []
 
     async def get(self, bot_id: uuid.UUID) -> _Bot:
-        return self.bot
+        return self._who(bot_id)
 
     async def record(self, bot_id, *, run_id, step, kind, role, content, payload=None):  # type: ignore[no-untyped-def]
         mid = message_id(run_id, step, kind)
@@ -162,9 +172,63 @@ class FakeBots:
     async def rules(self, bot_id: uuid.UUID) -> tuple[BotRule, ...]:
         return self._rules
 
-    async def remember(self, bot_id: uuid.UUID, note: str) -> str:
-        self.bot.memory = trim_memory(self.bot.memory, note)
-        return self.bot.memory
+    # Memory and brief: the service's semantics, over dicts, using the same domain
+    # functions the real service uses.
+
+    def _who(self, bot_id: uuid.UUID) -> _Bot:
+        return next(b for b in [self.bot, *self.helpers_] if b.id == bot_id)
+
+    def mems(self, bot_id: uuid.UUID | None = None) -> list[Memory]:
+        return self.memory.setdefault(bot_id or self.bot.id, [])
+
+    async def recollect(self, bot_id, context, *, rehearse):  # type: ignore[no-untyped-def]
+        return select_for_prompt(self.mems(bot_id), context, dt.datetime.now(dt.UTC))
+
+    async def resolve(self, bot_id: uuid.UUID, handle: str) -> Memory | None:
+        found = [m for m in self.mems(bot_id) if m.id.hex.startswith(handle.strip("[] "))]
+        return found[0] if len(found) == 1 else None
+
+    async def remember(self, bot_id, content, *, new_id, kind="fact", importance=3,  # type: ignore[no-untyped-def]
+                       source_kind="self", source_name="", revise=None):
+        mems = self.mems(bot_id)
+        if revise:
+            target = await self.resolve(bot_id, revise)
+            if target is None:
+                return Remembered(new_id, "unknown")
+            mems[mems.index(target)] = Memory(
+                target.id, kind, clean_memory(content), importance, target.pinned,
+                target.created_at, None,
+            )
+            return Remembered(target.id, "revised")
+        same = find_duplicate(mems, kind, content)
+        if same is not None:
+            return Remembered(same.id, "merged")
+        mems.append(
+            Memory(new_id, kind, clean_memory(content), importance, False,
+                   dt.datetime.now(dt.UTC), None, 0, source_kind, source_name)
+        )
+        return Remembered(new_id, "saved")
+
+    async def forget(self, bot_id: uuid.UUID, handle: str) -> Memory | None:
+        target = await self.resolve(bot_id, handle)
+        if target is not None:
+            self.mems(bot_id).remove(target)
+        return target
+
+    async def recall(self, bot_id: uuid.UUID, query: str):  # type: ignore[no-untyped-def]
+        return search(self.mems(bot_id), query, dt.datetime.now(dt.UTC)), []
+
+    async def write_episode(self, bot_id, run_id, content, *, importance=2):  # type: ignore[no-untyped-def]
+        self.episodes.append(content)
+
+    async def update_brief(self, target, patch, *, revision, editor_kind, editor, reason):  # type: ignore[no-untyped-def]
+        if target.brief_locked:
+            raise BriefLockedError("locked by the person")
+        before = brief_of(target)
+        after = patch.apply(before)
+        target.brief = after.model_dump()
+        self.brief_edits.append((target.name, editor_kind, editor.name, reason))
+        return BriefChange(after, 1, brief_changes(before, after))
 
     async def park(self, bot_id, *, run_id, step, action, display, reason, thought):  # type: ignore[no-untyped-def]
         pid = uuid.uuid5(uuid.NAMESPACE_URL, f"{run_id}:{step}")
@@ -186,7 +250,8 @@ class FakeBots:
     async def depth(self, bot_id: uuid.UUID) -> int:
         return self.depth_
 
-    async def create_helper(self, parent, *, run_id, step, name, label, role):  # type: ignore[no-untyped-def]
+    async def create_helper(self, parent, *, run_id, step, name, label, role,  # type: ignore[no-untyped-def]
+                            brief=None, seed_memories=None):
         from runtime.org.bots import HelperRefusedError
 
         if self.refuse:
@@ -198,8 +263,12 @@ class FakeBots:
             description=role,
             actor_name=f"bot-{name.lower()}-abc123",
             parent_bot_id=parent.id,
+            brief=(brief or BotBrief(mission=role)).model_dump(),
         )
         self.helpers_.append(helper)
+        for i, fact in enumerate(seed_memories or []):
+            await self.remember(helper.id, fact, new_id=uuid.uuid5(helper.id, str(i)),
+                                source_kind="parent", source_name=parent.name)
         return helper, True
 
     async def pending(self, pid: uuid.UUID) -> _Pending | None:
@@ -216,9 +285,11 @@ class ScriptedModel:
     def __init__(self, steps: list[dict[str, Any]]) -> None:
         self._steps = list(steps)
         self.prompts: list[str] = []
+        self.system: list[str] = []
 
     async def complete(self, ctx, req, *, work_class, call_site):  # type: ignore[no-untyped-def]
         self.prompts.append(req.prompt)
+        self.system.append(req.system)
         step = self._steps.pop(0)
         return ModelResponse(
             text=json.dumps(step),
@@ -386,7 +457,12 @@ async def test_remember_writes_memory_and_continues() -> None:
     )
     out = await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), bot.id)
     assert out["status"] == "replied"
-    assert "Prefers window seats" in bot.memory
+    assert [m.content for m in bots.mems()] == ["Prefers window seats"]
+    # The memory is in front of the model for the next step, with its [id].
+    assert "Prefers window seats" in model.system[1]
+    assert f"[{bots.mems()[0].handle}]" in model.system[1]
+    # And the turn left a diary line.
+    assert len(bots.episodes) == 1
 
 
 # --- the graph, against the real computer ----------------------------------------------
@@ -550,3 +626,178 @@ def test_create_and_ask_need_a_name_and_text() -> None:
         BotStep(thought="t", action="ask_bot", text="x")
     with pytest.raises(ValueError, match="role"):
         BotStep(thought="t", action="create_bot", bot="Scout")
+
+
+# --- memory and the brief --------------------------------------------------------------
+
+
+def _mem(content: str, kind: str = "fact", importance: int = 3, *, pinned: bool = False,
+         days_old: float = 0.0) -> Memory:
+    at = dt.datetime.now(dt.UTC) - dt.timedelta(days=days_old)
+    return Memory(uuid.uuid4(), kind, content, importance, pinned, at, None)
+
+
+def test_a_brief_renders_as_a_job_and_a_patch_changes_only_what_it_names() -> None:
+    brief = BotBrief(
+        mission="Book travel for Ada.",
+        duties="- Find flights\nFind hotels\nFind flights",
+        boundaries=["Never pay without asking"],
+    )
+    assert brief.duties == ["Find flights", "Find hotels"]
+    text = brief.render()
+    assert "Mission: Book travel for Ada." in text
+    assert "Boundaries — never cross these:\n- Never pay without asking" in text
+
+    from runtime.domain.bot_memory import BriefPatch
+
+    after = BriefPatch(style="Short answers.").apply(brief)
+    assert after.mission == brief.mission and after.style == "Short answers."
+    assert brief_changes(brief, after) == ["style"]
+
+
+def test_recall_keeps_pins_and_strong_preferences_and_ranks_the_rest() -> None:
+    pinned = _mem("Ada's company is Lovelace Ltd", pinned=True, days_old=200)
+    strong = _mem("Ada prefers aisle seats", "preference", 5, days_old=90)
+    flights = _mem("The cheapest flights to Lisbon are on Tuesdays", days_old=30)
+    cooking = _mem("Ada's favourite pasta recipe uses sage", days_old=1)
+    picked = select_for_prompt(
+        [cooking, flights, strong, pinned], "find me flights to Lisbon", dt.datetime.now(dt.UTC),
+        budget=170,
+    )
+    assert picked.shown[:2] == [strong, pinned] or picked.shown[:2] == [pinned, strong]
+    assert flights in picked.shown and cooking not in picked.shown
+    assert picked.hidden == 1
+
+
+def test_saving_the_same_thing_twice_strengthens_one_memory() -> None:
+    first = _mem("Ada prefers window seats on long flights", "preference")
+    assert find_duplicate([first], "preference", "ada prefers window seats on long flights.")
+    assert find_duplicate([first], "fact", "Ada prefers window seats on long flights") is None
+    assert find_duplicate([first], "preference", "Ada's dog is called Byron") is None
+
+
+def test_forgetting_takes_the_weakest_and_never_a_pin() -> None:
+    from runtime.domain.bot_memory import to_forget
+
+    keep = _mem("pinned but ancient", importance=1, pinned=True, days_old=900)
+    weak = _mem("trivial and old", importance=1, days_old=400)
+    strong = _mem("essential and recent", importance=5)
+    assert to_forget([keep, weak, strong], dt.datetime.now(dt.UTC), cap=2) == [weak]
+
+
+def test_memory_and_brief_steps_need_their_fields() -> None:
+    with pytest.raises(ValueError, match="memory"):
+        BotStep(thought="t", action="forget")
+    with pytest.raises(ValueError, match="brief"):
+        BotStep(thought="t", action="update_brief", text="why")
+    with pytest.raises(ValueError, match="why"):
+        BotStep(thought="t", action="update_brief", brief={"style": "terse"})
+    with pytest.raises(ValueError, match="text"):
+        BotStep(thought="t", action="recall")
+
+
+async def test_the_brief_is_the_primary_instruction_and_the_bot_can_revise_its_own() -> None:
+    bot = _Bot(id=uuid.uuid4(), brief={"mission": "Track competitor prices.",
+                                       "boundaries": ["Never buy anything"]})
+    bots = FakeBots(bot)
+    model = ScriptedModel(
+        [
+            {"thought": "They changed my job", "action": "update_brief",
+             "brief": {"duties": ["Check prices every Monday"]},
+             "text": "Ada asked me to do this weekly"},
+            {"thought": "Done", "action": "reply", "text": "Updated.",
+             "diary": "Ada made the price check weekly.", "importance": 4},
+        ]
+    )
+    await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), bot.id)
+    assert "YOUR PRIMARY INSTRUCTION" in model.system[0]
+    assert "Mission: Track competitor prices." in model.system[0]
+    assert bot.brief["duties"] == ["Check prices every Monday"]
+    assert bot.brief["boundaries"] == ["Never buy anything"]
+    assert "- Check prices every Monday" in model.system[1]
+    assert bots.brief_edits == [("Scout", "self", "Scout", "Ada asked me to do this weekly")]
+    assert bots.episodes == ["Ada made the price check weekly."]
+
+
+async def test_a_parent_rewrites_its_helpers_brief_and_teaches_it_but_no_one_elses() -> None:
+    lead = _Bot(id=uuid.uuid4(), name="Lead")
+    bots = FakeBots(lead)
+    helper = _Bot(id=uuid.uuid4(), name="Scout", parent_bot_id=lead.id)
+    bots.helpers_.append(helper)
+    model = ScriptedModel(
+        [
+            {"thought": "Refocus Scout", "action": "update_brief", "bot": "scout",
+             "brief": {"mission": "Find EU vendors only."}, "text": "Ada only buys in the EU"},
+            {"thought": "Teach it", "action": "remember", "bot": "Scout",
+             "text": "Ada's budget is 50 EUR per seat", "memory_kind": "preference"},
+            {"thought": "Not mine", "action": "update_brief", "bot": "Stranger",
+             "brief": {"mission": "x"}, "text": "y"},
+            {"thought": "Done", "action": "reply", "text": "ok"},
+        ]
+    )
+    await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), lead.id)
+    assert helper.brief["mission"] == "Find EU vendors only."
+    assert bots.brief_edits[0][:3] == ("Scout", "parent", "Lead")
+    (taught,) = bots.mems(helper.id)
+    assert (taught.kind, taught.source_kind, taught.source_name) == ("preference", "parent", "Lead")
+    assert bots.mems(lead.id) == []
+    # The helper's own conversation says who changed it and why.
+    told = [m.content for m in bots.said("system")]
+    assert any("Lead updated my brief (mission): Ada only buys in the EU" in t for t in told)
+    assert any("Lead taught me" in t for t in told)
+    assert "Stranger is not you or one of your helpers" in model.prompts[3]
+
+
+async def test_a_locked_brief_cannot_be_changed_by_a_bot() -> None:
+    bot = _Bot(id=uuid.uuid4(), brief={"mission": "m"}, brief_locked=True)
+    bots = FakeBots(bot)
+    model = ScriptedModel(
+        [
+            {"thought": "t", "action": "update_brief", "brief": {"mission": "new"}, "text": "r"},
+            {"thought": "t", "action": "reply", "text": "I can't."},
+        ]
+    )
+    await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), bot.id)
+    assert bot.brief == {"mission": "m"}
+    assert "Locked by your person" in model.system[0]
+    assert "update_brief failed: locked" in model.prompts[1]
+
+
+async def test_forget_and_revise_by_id_and_recall_searches_everything() -> None:
+    bot = _Bot(id=uuid.uuid4())
+    bots = FakeBots(bot)
+    wrong = _mem("Ada lives in Paris")
+    old = _mem("Ada's dentist is Dr Crown, call 555-0101", "person", days_old=300)
+    bots.mems().extend([wrong, old])
+    model = ScriptedModel(
+        [
+            {"thought": "Moved", "action": "remember", "memory": wrong.handle,
+             "text": "Ada lives in Lisbon"},
+            {"thought": "Who's the dentist?", "action": "recall", "text": "dentist"},
+            {"thought": "Stale", "action": "forget", "memory": old.handle},
+            {"thought": "t", "action": "reply", "text": "Dr Crown."},
+        ]
+    )
+    await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), bot.id)
+    assert [m.content for m in bots.mems()] == ["Ada lives in Lisbon"]
+    assert "Dr Crown, call 555-0101" in model.prompts[2]
+    assert "forgot" in model.prompts[3]
+
+
+async def test_a_helper_is_created_with_a_brief_and_starting_memories() -> None:
+    lead = _Bot(id=uuid.uuid4(), name="Lead")
+    bots = FakeBots(lead)
+    model = ScriptedModel(
+        [
+            {"thought": "Need a scout", "action": "create_bot", "bot": "Scout",
+             "text": "Find vendors.",
+             "brief": {"mission": "Find CRM vendors.", "boundaries": ["Never sign up"]},
+             "seed_memories": ["Ada's company has 40 seats"]},
+            {"thought": "t", "action": "reply", "text": "ok"},
+        ]
+    )
+    await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), lead.id)
+    (helper,) = bots.helpers_
+    assert helper.brief["mission"] == "Find CRM vendors."
+    assert helper.brief["boundaries"] == ["Never sign up"]
+    assert [m.content for m in bots.mems(helper.id)] == ["Ada's company has 40 seats"]
