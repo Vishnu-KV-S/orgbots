@@ -3,11 +3,10 @@ import * as THREE from "three";
 /**
  * Surface textures, generated on a canvas the first time they are asked for.
  *
- * Real objects are not perfectly smooth: injection-moulded plastic has micro-grain,
- * machined aluminium has brush lines, glass has faint smudges. Those variations in
- * roughness and height are most of what separates a product render from a CG toy,
- * and none of them needs an image download — they are noise, drawn once, shared by
- * every bot, and tiled.
+ * Even a polished object is not perfectly uniform: lacquer has a faint orange-peel
+ * variation, steel keeps a trace of its brush grain. Those small variations in
+ * roughness are what keep a reflection from looking computer-perfect, and none of
+ * them needs an image download — they are noise, drawn once, shared, and tiled.
  */
 
 let cache: Record<string, THREE.Texture> | null = null;
@@ -113,15 +112,10 @@ export function textures() {
   const shadow = new THREE.CanvasTexture(contactShadow(128));
   shadow.colorSpace = THREE.SRGBColorSpace;
   cache = {
-    /** Moulded plastic: gentle roughness variation, very fine grain for bump. */
+    /** Lacquer: a gentle roughness variation, so a reflection is not machine-perfect. */
     plasticRough: dataTexture(noise(256, 24, 200, 255, 10), 3),
-    plasticBump: dataTexture(noise(256, 96, 110, 145, 26), 6),
-    /** Soft-touch matte: a coarser, more visible grain. */
-    matteBump: dataTexture(noise(256, 128, 90, 165, 40), 8),
     /** Brushed aluminium, along one axis. */
     brushedRough: dataTexture(brushed(512), 2),
-    /** Glass: faint low-frequency smudges in the roughness. */
-    smudge: dataTexture(noise(256, 10, 0, 70, 0), 1),
     led: dataTexture(ledFalloff(64), 1),
     shadow,
   };

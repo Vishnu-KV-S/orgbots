@@ -4,7 +4,6 @@ import { PerspectiveCamera, View } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import { createContext, type CSSProperties, useContext, useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { cx } from "@/lib/cx";
 import type { Appearance } from "./appearance";
 import { BotModel } from "./BotModel";
@@ -20,8 +19,8 @@ import type { Mood } from "./mood";
  * like an ordinary element.
  *
  * Reflections come from a studio environment generated on the GPU from
- * `RoomEnvironment` — no HDR file to download — once per renderer, shared by every
- * bot's scene.
+ * a product-photography studio built in code — softboxes on a dark cyclorama, no
+ * HDR file to download — once per renderer, shared by every bot's scene.
  */
 
 const StageContext = createContext<{ ready: boolean }>({ ready: false });
@@ -40,10 +39,52 @@ let sharedEnvironment: {
   texture: THREE.Texture;
 } | null = null;
 
+/**
+ * What polished surfaces reflect: a dark studio lit by a few large softboxes.
+ *
+ * A generic room environment puts furniture-shaped highlights into every glossy
+ * surface, and behind a dark visor they read as things glowing *inside* it. A real
+ * product shot reflects only clean light shapes — a big overhead box, two tall side
+ * strips, a low fill card — and this is exactly that, rendered once into a cube map.
+ */
+function softboxStudio(): THREE.Scene {
+  const scene = new THREE.Scene();
+  // Mid-grey walls: polished steel reflects its surroundings, and in a black room
+  // it reads as black chrome. Glass, which reflects only a few percent face-on,
+  // stays dark either way.
+  scene.background = new THREE.Color("#55575d");
+  const box = (w: number, h: number, intensity: number, pos: THREE.Vector3Tuple) => {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(1, 1, 1).multiplyScalar(intensity),
+        side: THREE.DoubleSide,
+      }),
+    );
+    mesh.position.set(...pos);
+    mesh.lookAt(0, 0, 0);
+    scene.add(mesh);
+  };
+  box(8, 4, 3.4, [0, 6, 1.5]); // overhead key
+  box(2.4, 7, 2.6, [-5.5, 1, 2.5]); // left strip
+  box(2.4, 7, 2.0, [5.5, 1, 1.5]); // right strip
+  box(7, 2, 1.0, [0, -2.2, 5]); // low fill card
+  box(4, 6, 1.6, [0, 1.5, -6]); // rim behind
+  // A faint floor bounce, so undersides are not pure black.
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(30, 30),
+    new THREE.MeshBasicMaterial({ color: "#3a3b40" }),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -3;
+  scene.add(floor);
+  return scene;
+}
+
 function studioEnvironment(gl: THREE.WebGLRenderer): THREE.Texture {
   if (sharedEnvironment?.gl === gl) return sharedEnvironment.texture;
   const pmrem = new THREE.PMREMGenerator(gl);
-  const texture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  const texture = pmrem.fromScene(softboxStudio(), 0.02).texture;
   pmrem.dispose();
   sharedEnvironment = { gl, texture };
   return texture;
@@ -55,7 +96,7 @@ function Studio() {
   const scene = useThree((s) => s.scene);
   useEffect(() => {
     scene.environment = studioEnvironment(gl);
-    scene.environmentIntensity = 0.85;
+    scene.environmentIntensity = 1.0;
   }, [gl, scene]);
   return null;
 }

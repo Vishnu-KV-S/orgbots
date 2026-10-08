@@ -12,14 +12,16 @@ import { textures } from "./textures";
 /**
  * One bot, built like a product rather than a cartoon.
  *
- * **The face is three layers**, the way a real device's display is: an opaque black
- * screen recessed into the shell, LED eyes on that screen, and a smoked-glass cover
- * in front of both. The glass takes the reflections; the eyes glow from underneath
- * it, with a hot core falling off to the rim. Nothing floats around the bot — no
- * particles, rings or symbols. Mood is carried by the body and the eyes alone.
+ * **The face is three layers**, the way a real device's display is: a plain black
+ * screen, LED eyes on it, and mirror-polished black glass in front of both. The eyes
+ * are the only light inside the visor; the glass shows the studio's reflections and
+ * nothing else. Nothing floats around the bot. Mood is carried by the body and the
+ * eyes alone.
  *
- * **Surfaces have texture**: grain on plastic, brush lines on aluminium, faint smudges
- * on the glass, recessed seams and real screw heads. See `textures.ts`.
+ * **Every surface is high-gloss**: lacquer, glazed ceramic or polished stainless
+ * steel for the body, polished steel for all hardware, gloss black for trim — and
+ * they reflect a softbox studio (`Stage.tsx`), so the highlights are clean light
+ * shapes like a product photograph.
  *
  * The animation is a pose function — mood and time in, target transform out — damped
  * every frame, so moods blend instead of snapping.
@@ -222,79 +224,73 @@ function useMaterials(a: Appearance, mood: Mood) {
   const materials = useMemo(() => {
     const base = new THREE.Color(a.body);
     let body: THREE.MeshPhysicalMaterial;
+    // Every finish is high-gloss and reflective; they differ in what is under the
+    // gloss. Reflections come from the studio environment (`Stage.tsx`).
     switch (a.finish) {
       case "metal":
-        // Anodised, brushed aluminium.
+        // Polished stainless steel, tinted by the body colour, with the faintest
+        // brush grain left in the roughness.
         body = new THREE.MeshPhysicalMaterial({
-          color: base,
+          color: base.clone().lerp(new THREE.Color("#c8ccd4"), 0.55),
           metalness: 1,
-          roughness: 0.42,
+          roughness: 0.12,
           roughnessMap: tex.brushedRough,
-          clearcoat: 0.15,
-          clearcoatRoughness: 0.4,
+          clearcoat: 1,
+          clearcoatRoughness: 0.03,
         });
         break;
       case "matte":
-        // Soft-touch plastic.
+        // Satin lacquer: still reflective, just softer.
         body = new THREE.MeshPhysicalMaterial({
           color: base,
-          roughness: 0.78,
+          roughness: 0.38,
           roughnessMap: tex.plasticRough,
-          bumpMap: tex.matteBump,
-          bumpScale: 0.6,
-          sheen: 0.25,
-          sheenRoughness: 0.8,
-          sheenColor: new THREE.Color("#ffffff"),
+          clearcoat: 0.6,
+          clearcoatRoughness: 0.22,
         });
         break;
       case "pearl":
-        // Glazed ceramic: a deep clear glaze over a soft base.
+        // Glazed ceramic under a mirror-clear glaze.
         body = new THREE.MeshPhysicalMaterial({
           color: base,
-          roughness: 0.35,
-          roughnessMap: tex.plasticRough,
+          roughness: 0.2,
           clearcoat: 1,
-          clearcoatRoughness: 0.06,
-          sheen: 0.3,
-          sheenRoughness: 0.5,
+          clearcoatRoughness: 0.02,
+          sheen: 0.25,
+          sheenRoughness: 0.4,
           sheenColor: new THREE.Color("#ffffff"),
         });
         break;
       default:
-        // Gloss injection-moulded plastic.
+        // Piano-gloss lacquer.
         body = new THREE.MeshPhysicalMaterial({
           color: base,
-          roughness: 0.32,
-          roughnessMap: tex.plasticRough,
-          bumpMap: tex.plasticBump,
-          bumpScale: 0.25,
-          clearcoat: 0.7,
-          clearcoatRoughness: 0.18,
+          roughness: 0.15,
+          clearcoat: 1,
+          clearcoatRoughness: 0.02,
         });
     }
-    // Smoked glass over the display: dark, very glossy, faintly smudged.
+    // Black glass over the display: mirror-polished, so it shows the studio's light
+    // shapes and nothing else. The fresnel term makes it darker face-on and brighter
+    // at grazing angles, the way real glass is.
     const glass = new THREE.MeshPhysicalMaterial({
-      color: "#050506",
+      color: "#000000",
       metalness: 0,
-      roughness: 0.14,
-      roughnessMap: tex.smudge,
-      clearcoat: 0.6,
-      clearcoatRoughness: 0.12,
-      envMapIntensity: 0.3,
+      roughness: 0,
+      clearcoat: 1,
+      clearcoatRoughness: 0,
+      reflectivity: 1,
+      envMapIntensity: 1.4,
       transparent: true,
-      opacity: 0.38,
+      opacity: 0.55,
       depthWrite: false,
     });
-    // The display behind it: matte black, so the LEDs are the only light there.
-    const screen = new THREE.MeshStandardMaterial({
-      color: new THREE.Color("#020203").lerp(new THREE.Color(a.glow), 0.012),
-      roughness: 0.9,
-    });
-    // LEDs: emissive with a centre-bright falloff; tone mapping turns the hot core
-    // toward white the way a camera does with a bright light.
-    // Drawn after the glass (transparent + renderOrder), so the light reads through
-    // it at full strength — a lit LED dominates the cover in front of it — while the
-    // depth test still hides it behind the shell when the bot turns away.
+    // The display behind it: plain black. The eyes are the only light in the visor.
+    const screen = new THREE.MeshStandardMaterial({ color: "#000000", roughness: 1 });
+    // LEDs: emissive with a centre-bright falloff. Drawn after the glass
+    // (transparent + renderOrder), so they read through it at full strength — a lit
+    // LED dominates the cover in front of it — while the depth test still hides them
+    // when the bot turns away.
     const led = new THREE.MeshStandardMaterial({
       color: "#000000",
       emissive: new THREE.Color(a.glow),
@@ -304,15 +300,23 @@ function useMaterials(a: Appearance, mood: Mood) {
       transparent: true,
       opacity: 1,
     });
+    // Polished stainless steel for every piece of hardware.
     const steel = new THREE.MeshPhysicalMaterial({
-      color: "#b9bcc4",
+      color: "#d4d7dd",
       metalness: 1,
-      roughness: 0.3,
-      roughnessMap: tex.brushedRough,
+      roughness: 0.08,
+      clearcoat: 1,
+      clearcoatRoughness: 0.02,
     });
     // Recessed seams: a near-black gap, not a decorative stripe.
     const seam = new THREE.MeshStandardMaterial({ color: "#0b0b0d", roughness: 0.8 });
-    const rubber = new THREE.MeshStandardMaterial({ color: "#1a1a1d", roughness: 0.92 });
+    // Gloss black for the parts that were rubber: reflective, like the rest.
+    const rubber = new THREE.MeshPhysicalMaterial({
+      color: "#111114",
+      roughness: 0.18,
+      clearcoat: 1,
+      clearcoatRoughness: 0.04,
+    });
     return { body, glass, screen, led, steel, seam, rubber };
   }, [a.body, a.glow, a.finish, tex]);
 
