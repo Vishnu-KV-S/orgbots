@@ -108,6 +108,12 @@ function WorkBlock({
                   )}
                   {s.payload.note && <div className="why">“{s.payload.note}”</div>}
                   {s.payload.url && <div className="where">{s.payload.url}</div>}
+                  {s.payload.schedule && (
+                    <div className="where">
+                      {s.payload.schedule}
+                      {s.payload.active === false ? " · paused" : ""}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -225,6 +231,16 @@ export function MessageList({
             <div style={{ minWidth: 0, maxWidth: isUser ? "82%" : "100%" }}>
               {m.payload.from_bot_name && (
                 <div className="from-bot">From {m.payload.from_bot_name} (bot)</div>
+              )}
+              {m.payload.routine && (
+                <div className="from-bot">
+                  {m.payload.trigger === "test"
+                    ? "⏰ Test run"
+                    : m.payload.trigger === "event"
+                      ? "⚡ Event"
+                      : "⏰ Routine"}{" "}
+                  · {m.payload.routine}
+                </div>
               )}
               <div className="bubble" style={{ maxWidth: "100%" }}>
                 {quoted && <div className="quote">↪ {quoted.content}</div>}

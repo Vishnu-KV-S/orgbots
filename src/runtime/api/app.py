@@ -35,6 +35,8 @@ from runtime.api.bots import vault_router as bots_vault_router
 from runtime.api.control import router as control_router
 from runtime.api.errors import http_errors
 from runtime.api.observe import router as observe_router
+from runtime.api.routines import hooks_router
+from runtime.api.routines import router as routines_router
 from runtime.api.schemas import (
     ArtifactView,
     EffectView,
@@ -120,6 +122,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(bots_router)
     app.include_router(bots_computer_router)
     app.include_router(bots_vault_router)
+    # Routines: a bot's own (`/v1/bots/{id}/routines`, behind the UI's proxy), and the
+    # webhook that starts an event routine (`/v1/hooks`, which is not — it is called
+    # from outside, and authenticated by its token and the sender's signature).
+    app.include_router(routines_router)
+    app.include_router(hooks_router)
 
     def uow_factory(request: Request) -> UnitOfWorkFactory:
         factory: UnitOfWorkFactory = request.app.state.uow

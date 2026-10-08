@@ -40,7 +40,10 @@ _TRUNCATE_ORDER = [
     # lifetime of its own.
     "delegations",
     # Bots (037): conversations, rules and pending actions are test state, and all
-    # three reference `bots`, so they come first.
+    # three reference `bots`, so they come first. Routines (043) too: firings, then
+    # the routines they belong to.
+    "bot_routine_runs",
+    "bot_routines",
     "bot_brief_revisions",
     "bot_memories",
     "bot_pending_actions",

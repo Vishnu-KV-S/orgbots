@@ -43,6 +43,7 @@ from runtime.persistence.repositories.memory import (
 from runtime.persistence.repositories.org import GoalRepository, MetricsRepository
 from runtime.persistence.repositories.outbox import OutboxRepository
 from runtime.persistence.repositories.ratelimits import RateLimitRepository
+from runtime.persistence.repositories.routines import RoutineRepository
 from runtime.persistence.repositories.runs import RunRepository
 from runtime.persistence.repositories.sessions import SessionRepository
 from runtime.persistence.repositories.spec import SpecRepository
@@ -121,6 +122,10 @@ class UnitOfWork:
         # Team drives (migration 042). Bound here so a file, its revision and the team
         # lock that makes the write's checks true are one transaction.
         self.files = TeamFileRepository(session)
+        # Routines (migration 043). A firing's queued row and its routine's cursor move
+        # in one transaction, so a runner that dies between them leaves nothing claimed
+        # twice and nothing lost.
+        self.routines = RoutineRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

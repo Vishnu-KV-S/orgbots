@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from runtime.domain.bot_memory import BriefPatch, MemoryKind
+from runtime.domain.routines import RoutineDraft
 from runtime.domain.schemas import SCHEMAS
 
 MAX_STEPS = 24
@@ -100,6 +101,9 @@ BROWSER_ACTIONS = frozenset(
 
 TURN_ENDING = frozenset({"reply", "ask_user"})
 
+ROUTINE_ACTIONS = frozenset({"save_routine", "delete_routine"})
+"""Steps on the bot's own routines (`domain.routines`) — runtime state, like memory."""
+
 FILE_ACTIONS = frozenset(
     {
         "list_files",
@@ -150,6 +154,8 @@ StepAction = Literal[
     "move_file",
     "delete_file",
     "look",
+    "save_routine",
+    "delete_routine",
 ]
 
 
@@ -206,7 +212,10 @@ class BotStep(BaseModel):
         "deletes one (path). VISION: look asks a vision model about what is on your screen "
         "right now (text = your question) — for images, charts, maps, colours and layout, "
         "or whenever the page listing does not explain what you see; the answer comes back "
-        "to you."
+        "to you. ROUTINES (recurring work, only when your person asks for it): "
+        "save_routine creates or changes one of your routines by name (routine = name, "
+        "instruction, cron, timezone, output; active=false pauses it). delete_routine "
+        "removes one (routine = its name)."
     )
     element: int | None = Field(
         default=None,
@@ -275,6 +284,11 @@ class BotStep(BaseModel):
         max_length=MAX_SEED_MEMORIES,
         description="For create_bot: facts the helper should start out knowing.",
     )
+    routine: RoutineDraft | None = Field(
+        default=None,
+        description="For save_routine: the routine (name, and for a new one instruction "
+        "and cron). For delete_routine: its name.",
+    )
     diary: str | None = Field(
         default=None,
         max_length=600,
@@ -329,6 +343,8 @@ class BotStep(BaseModel):
                 raise ValueError("edit_file needs `text` — the replacement (empty to delete it)")
         if self.action == "move_file" and not (self.to or "").strip():
             raise ValueError("move_file needs `to` — the new path, or a folder ending in /")
+        if self.action in ROUTINE_ACTIONS and self.routine is None:
+            raise ValueError(f"{self.action} needs `routine` — at least its name")
         if self.action in ("create_bot", "ask_bot"):
             if not (self.bot or "").strip():
                 raise ValueError(f"{self.action} needs `bot` — the helper's name")
@@ -362,8 +378,9 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=4)
-"""Version 4 added the team drive (`list_files` … `delete_file`, with `path`, `to`,
+BOT_STEP = SCHEMAS.register(BotStep, version=5)
+"""Version 5 added routines (`save_routine`, `delete_routine`, with `routine`). Version 4
+added the team drive (`list_files` … `delete_file`, with `path`, `to`,
 `find` and `from_line`) and `look` (vision: a question about the screen). Version 3
 added working memory (`plan` and `notes`, carried from step to step within a turn)
 and `sign_in` (the login vault). Version 2 added memory (remember kinds, forget,

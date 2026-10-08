@@ -1,7 +1,8 @@
 """Worker process entrypoint.
 
-Runs up to seven loops side by side: the outbox relay, the reaper, the governance
-sweeper, the scheduler, the dispatcher, the memory worker, and the worker itself. In
+Runs up to eight loops side by side: the outbox relay, the reaper, the governance
+sweeper, the scheduler, the dispatcher, the routine runner, the memory worker, and the
+worker itself. In
 production these would usually be separate deployments — the relay, reaper and sweeper
 are singletons-ish, the workers scale out — but there is one process type and splitting
 it would be scaffolding for a shape nobody has needed yet.
@@ -19,6 +20,11 @@ The scheduler is the exception: it also needs `RUNTIME_SCHEDULER_ENABLED=true`. 
 nothing starts because a clock came round — runs start when a person or a delegating
 run asks for them, which is how a bot is meant to work. A department meant to run
 itself, like §4's clean run, turns it on.
+
+Bots' routines are the conductor's third half (`RUNTIME_BOT_ROUTINES_ENABLED`, on): a
+routine is an instruction a person left for their bot, with a time on it, so it fires
+without anyone typing — but only routines somebody made, and never over a bot's
+current work.
 
 Neither half executes a run. Both only call `RunService.start_run`, which writes and
 returns; the run is picked up from the stream by the worker loop below, exactly as it
@@ -73,7 +79,9 @@ from runtime.observability.logging import configure_logging, get_logger
 from runtime.observability.tracing import configure_tracing
 from runtime.persistence.engine import dispose_engines
 from runtime.persistence.uow import UnitOfWorkFactory
+from runtime.runtime.bots import BotManager
 from runtime.runtime.dispatcher import Dispatcher
+from runtime.runtime.routines import RoutineRunner
 from runtime.runtime.run_service import RunService
 from runtime.runtime.scheduler import Scheduler
 from runtime.runtime.sweeper import GovernanceSweeper
@@ -107,11 +115,14 @@ async def run() -> None:
     # otherwise have every inbox message settled as "not-an-actor".
     scheduler: Scheduler | None = None
     dispatcher: Dispatcher | None = None
+    routines: RoutineRunner | None = None
     if settings.conductor_enabled:
         service = RunService(uow, settings=settings)
         if settings.scheduler_enabled:
             scheduler = Scheduler(uow, service, settings=settings)
         dispatcher = Dispatcher(uow, service, settings=settings, actors=None)
+        if settings.bot_routines_enabled:
+            routines = RoutineRunner(uow, BotManager(uow, service))
 
     async with checkpointer(settings) as saver:
         worker = Worker(uow, streams, settings=settings, checkpointer=saver)
@@ -152,6 +163,8 @@ async def run() -> None:
                 scheduler.stop()
             if dispatcher is not None:
                 dispatcher.stop()
+            if routines is not None:
+                routines.stop()
             if memory_worker is not None:
                 memory_worker.stop()
 
@@ -164,6 +177,7 @@ async def run() -> None:
             worker_id=str(worker.worker_id),
             conductor=settings.conductor_enabled,
             scheduler=scheduler is not None,
+            routines=routines is not None,
             slots=settings.worker_slots,
         )
         tasks = [
@@ -180,6 +194,8 @@ async def run() -> None:
             tasks.append(asyncio.create_task(scheduler.run_forever(), name="scheduler"))
         if dispatcher is not None:
             tasks.append(asyncio.create_task(dispatcher.run_forever(), name="dispatcher"))
+        if routines is not None:
+            tasks.append(asyncio.create_task(routines.run_forever(), name="routines"))
         if memory_worker is not None:
             tasks.append(asyncio.create_task(memory_worker.run_forever(), name="memory"))
         await stopping.wait()
