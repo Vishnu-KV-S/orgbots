@@ -37,6 +37,7 @@ bot's actor to grant it.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -44,8 +45,10 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
+from runtime.domain.bots import MAX_UPLOAD_FILES
 from runtime.domain.enums import BlastRadius, RecoveryPolicy
 from runtime.domain.errors import TransientFault
+from runtime.domain.files import FileError, name_of, team_of
 from runtime.domain.policies import Policy
 from runtime.domain.vault import PASSWORD_KINDS, lookup
 from runtime.gateway.builtin.profiles import (
@@ -58,10 +61,13 @@ from runtime.gateway.builtin.profiles import (
 )
 from runtime.gateway.tools import EffectCapabilities, ToolContext, ToolDef, ToolRegistry
 from runtime.gateway.vault import Vault, VaultRefusedError, VaultUnavailableError
+from runtime.org.files import TeamDrive
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.settings import Settings
 
 TIMEOUT_S = 60.0
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+"""All the files of one upload together. A team drive file is at most 10 MB."""
 
 
 class ObserveArgs(BaseModel):
@@ -168,10 +174,62 @@ def build(
             return BrowserResult(ok=False, error=_detail(response))
         return _result(response.json())
 
+    async def upload(ctx: ToolContext, typed: ActArgs) -> BrowserResult:
+        """Files for the page: a team drive file's bytes (read here, from the run's own
+        bot's drive), or a /workspace path the computer opens in the bot's profile.
+        Only paths are in the tool's arguments — the bytes never reach the journal."""
+        try:
+            where = await profile(ctx, typed.screen_id)
+        except ScreenRefusedError as exc:
+            return BrowserResult(ok=False, error=str(exc))
+        paths = [str(p).strip() for p in typed.action.get("paths") or [] if str(p).strip()]
+        if not paths:
+            return BrowserResult(ok=False, error="upload needs the file's path")
+        bot = await run_bot(uow_factory, ctx)
+        files: list[dict[str, str]] = []
+        workspace: list[str] = []
+        total = 0
+        for path in paths[:MAX_UPLOAD_FILES]:
+            if path == "/workspace" or path.startswith("/workspace/"):
+                workspace.append(path)
+                continue
+            if bot is None or uow_factory is None:
+                return BrowserResult(ok=False, error="this run has no team drive to upload from")
+            try:
+                row, data = await TeamDrive(uow_factory).blob_at(team_of(bot), path)
+            except FileError as exc:
+                return BrowserResult(ok=False, error=str(exc).splitlines()[0])
+            total += len(data)
+            if total > MAX_UPLOAD_BYTES:
+                return BrowserResult(
+                    ok=False,
+                    error=f"those files are over {MAX_UPLOAD_BYTES // 1_048_576} MB together",
+                )
+            files.append({"name": name_of(row.path), "data": base64.b64encode(data).decode()})
+        response = await _post(
+            f"/screens/{typed.screen_id}/upload",
+            {
+                "element": typed.action.get("element"),
+                "files": files,
+                "workspace": workspace,
+                "label": typed.label,
+            },
+            where,
+            await org_policy(uow_factory, ctx),
+        )
+        files.clear()
+        if response.status_code == 409:
+            return BrowserResult(ok=False, error=_detail(response), controller="human")
+        if response.status_code >= 400:
+            return BrowserResult(ok=False, error=_detail(response))
+        return _result(response.json())
+
     async def act(ctx: ToolContext, args: Any) -> BrowserResult:
         typed: ActArgs = args
         if typed.action.get("type") == "fill_credentials":
             return await fill(ctx, typed)
+        if typed.action.get("type") == "upload":
+            return await upload(ctx, typed)
         try:
             where = await profile(ctx, typed.screen_id)
         except ScreenRefusedError as exc:

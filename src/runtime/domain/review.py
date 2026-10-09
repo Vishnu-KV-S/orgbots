@@ -82,6 +82,8 @@ def review_kind(step: Any, element: dict[str, Any] | None = None) -> str | None:
         return "work that will run on its own"
     if action == "use_connector":
         return f"a call to the connected app {step.connector}"
+    if action == "upload":
+        return "sending one of your person's files to a website"
     return None
 
 

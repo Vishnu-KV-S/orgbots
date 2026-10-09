@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import re
+import shutil
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -125,6 +126,37 @@ def _view(
 
 
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+
+
+class UploadFile(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    data: str = Field(repr=False)
+    """Base64."""
+
+
+class UploadBody(BaseModel):
+    """Files for a page: bytes from the runtime (a team drive file), or paths in this
+    profile's /workspace. Only the gateway's `browser.act@1` sends this."""
+
+    element: int
+    files: list[UploadFile] = Field(default_factory=list, max_length=10)
+    workspace: list[str] = Field(default_factory=list, max_length=10)
+    label: str = ""
+
+
+def _upload_name(raw: str, taken: set[str]) -> str:
+    name = "".join(c for c in raw.rsplit("/", 1)[-1] if c not in '\\:*?"<>|\x00').strip(" .")
+    name = name or "file"
+    stem, dot, ext = name.rpartition(".")
+    if not dot or not stem:
+        stem, ext = name, ""
+    candidate, n = name, 1
+    while candidate in taken:
+        n += 1
+        candidate = f"{stem}-{n}" + (f".{ext}" if ext else "")
+    taken.add(candidate)
+    return candidate
 
 
 class TerminalBody(BaseModel):
@@ -292,6 +324,48 @@ def create_app(
         finally:
             fields.clear()
         return {**_view(screen, snap), "ok": True, "error": None}
+
+    @app.post("/screens/{screen_id}/upload")
+    async def upload(
+        screen_id: str, body: UploadBody, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, label=body.label, profile=profile)
+        folder = computer.upload_dir(screen_id)
+        shutil.rmtree(folder, ignore_errors=True)
+        folder.mkdir(parents=True, exist_ok=True)
+        paths: list[Path] = []
+        taken: set[str] = set()
+        try:
+            for item in body.files:
+                data = base64.b64decode(item.data, validate=True)
+                if len(data) > MAX_UPLOAD_BYTES:
+                    raise ComputerError(f"{item.name} is over {MAX_UPLOAD_BYTES // 1_048_576} MB")
+                target = folder / _upload_name(item.name, taken)
+                target.write_bytes(data)
+                paths.append(target)
+            for raw in body.workspace:
+                found = terminal_for(profile).resolve(raw)
+                if not found.is_file():
+                    raise ComputerError(f"there is no file {raw} in /workspace")
+                paths.append(found)
+        except (ComputerError, TerminalError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc).splitlines()[0]) from exc
+        try:
+            snap = await computer.upload(screen, body.element, paths)
+        except HumanInControlError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ComputerError as exc:
+            try:
+                snap = await computer.observe(screen)
+            except ComputerError:
+                snap = {}
+            return {**_view(screen, snap), "ok": False, "error": str(exc)}
+        return {
+            **_view(screen, snap),
+            "ok": True,
+            "error": None,
+            "uploaded": [p.name for p in paths],
+        }
 
     @app.get("/screens/{screen_id}/screenshot")
     async def screenshot(

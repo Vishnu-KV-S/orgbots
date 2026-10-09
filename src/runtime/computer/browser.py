@@ -40,6 +40,7 @@ import contextlib
 import os
 import random
 import re
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -393,6 +394,52 @@ class Computer:
         screen = self._screens.pop(screen_id, None)
         if screen is not None and not screen.page.is_closed():
             await screen.page.close()
+        shutil.rmtree(self.upload_dir(screen_id), ignore_errors=True)
+
+    # --- uploads -----------------------------------------------------------------------
+
+    def upload_dir(self, screen_id: str) -> Path:
+        """Where a screen's files to upload wait — beside the profile, not in any
+        workspace. Kept until the screen's next upload: a site may read the file again
+        when the form is sent (Instagram's Share), not only when it is chosen."""
+        safe = re.sub(r"[^A-Za-z0-9_-]", "_", screen_id)[:64] or "screen"
+        return self._profile_dir.with_name(f"{self._profile_dir.name}-uploads") / safe
+
+    async def upload(self, screen: Screen, element: int, files: list[Path]) -> dict[str, Any]:
+        """Give the page files: set them on a file field, or — for an upload button —
+        click it and answer the file chooser it opens. Refused while a person holds the
+        screen, like every bot action."""
+        if screen.controller != "bot":
+            raise HumanInControlError(
+                "a person has taken control of this screen; wait for them to hand it back"
+            )
+        if not files:
+            raise ComputerError("there are no files to upload")
+        names = [str(f) for f in files]
+        async with screen.lock:
+            handle = await self._element(screen, {"type": "upload", "element": element})
+            field = await handle.evaluate("e => e.tagName === 'INPUT' && e.type === 'file'")
+            if field:
+                if len(files) > 1 and not await handle.evaluate("e => e.multiple"):
+                    raise ComputerError("that file field takes one file; upload them one by one")
+                await handle.set_input_files(names)
+            else:
+                try:
+                    async with screen.page.expect_file_chooser(timeout=8_000) as chosen:
+                        await _click(self, screen, {"element": element})
+                    chooser = await chosen.value
+                except PlaywrightTimeout as exc:
+                    raise ComputerError(
+                        f"clicking [{element}] did not open a file chooser; use the site's "
+                        "upload button or file field"
+                    ) from exc
+                if len(files) > 1 and not chooser.is_multiple():
+                    raise ComputerError("that upload takes one file; upload them one by one")
+                await chooser.set_files(names)
+            screen.last_action = "upload"
+            screen.last_active = time.time()
+            await _settle(screen.page)
+        return await self.observe(screen)
 
     def set_controller(self, screen: Screen, controller: str) -> None:
         if controller not in ("bot", "human"):

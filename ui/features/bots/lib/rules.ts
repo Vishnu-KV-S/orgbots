@@ -6,6 +6,7 @@ export const RULE_ACTIONS = [
   ["type", "typing"],
   ["select", "choosing an option"],
   ["press", "pressing a key"],
+  ["upload", "uploading files to a site"],
   ["sign_in", "signing in with a saved login"],
   ["run_command", "running commands in the sandbox"],
   ["run_local", "running commands on this computer"],
