@@ -64,6 +64,12 @@ class TerminalError(Exception):
     """A command or a path that cannot be run or used. The message is shown to the bot."""
 
 
+def workspace_for(base: Path, profile: str) -> Path:
+    """A browser profile's workspace: the base for `""`, a sibling directory for any
+    other — never inside the base, where the default profile's bots could read it."""
+    return base if not profile else base.with_name(f"{base.name}-{profile}")
+
+
 @dataclass
 class Ran:
     exit_code: int | None

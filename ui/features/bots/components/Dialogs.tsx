@@ -465,6 +465,14 @@ export function SettingsDialog({
         <dl className="kv">
           <dt>Status</dt>
           <dd>{computer?.reachable ? "Running" : "Not reachable"}</dd>
+          <dt>Browser</dt>
+          <dd>
+            {computer?.engine === "desktop"
+              ? "Google Chrome on a Linux desktop"
+              : computer?.engine === "playwright"
+                ? "Built-in Chromium (no desktop)"
+                : "—"}
+          </dd>
           <dt>Address</dt>
           <dd>{computer?.url ?? "—"}</dd>
           <dt>Screens</dt>
@@ -485,6 +493,11 @@ export function SettingsDialog({
           >
             {reset.pending ? "Restarting…" : "Recover computer"}
           </button>
+          {computer?.reachable && computer.desktop_url && (
+            <a className="pbtn" href={computer.desktop_url} target="_blank" rel="noreferrer">
+              Open the desktop ↗
+            </a>
+          )}
           {reset.result !== null && !reset.pending && (
             <span className="screen-help">Restarted.</span>
           )}

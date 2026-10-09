@@ -1,0 +1,18 @@
+#!/bin/sh
+# Start the computer service once the screen is up: the service opens Chrome as it
+# starts, and Chrome needs a display to open its window on.
+set -eu
+
+socket="/tmp/.X11-unix/X${DISPLAY#:}"
+waited=0
+while [ ! -S "$socket" ]; do
+  waited=$((waited + 1))
+  if [ "$waited" -gt 300 ]; then
+    echo "start-computer: no X display at $DISPLAY after 30s" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+mkdir -p "$(dirname "$RUNTIME_COMPUTER_PROFILE")" "$RUNTIME_COMPUTER_WORKSPACE"
+exec python -m runtime.computer.main

@@ -280,6 +280,10 @@ export interface ComputerStatus {
   reachable: boolean;
   url: string;
   ok?: boolean;
+  /** `desktop`: a real Chrome on the computer's Linux desktop; `playwright`: the built-in one. */
+  engine?: "desktop" | "playwright";
+  /** Where a person sees the computer's whole desktop (noVNC), when it has one. */
+  desktop_url?: string | null;
   screens?: {
     screen_id: string;
     label: string;

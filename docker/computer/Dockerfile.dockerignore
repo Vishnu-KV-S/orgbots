@@ -1,0 +1,11 @@
+# This image's own ignore file (BuildKit reads <Dockerfile>.dockerignore in place of the
+# root .dockerignore, which belongs to the single-container image). An allowlist: the
+# build context is the repository root, and the root holds .env, the browser profiles
+# (.computer/) and node_modules — none of which may reach an image.
+*
+!pyproject.toml
+!uv.lock
+!src/runtime/__init__.py
+!src/runtime/computer/
+!docker/computer/
+**/__pycache__

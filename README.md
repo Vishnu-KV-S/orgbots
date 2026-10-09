@@ -213,9 +213,9 @@ it: every bot is an actor (`bot_agent@1`), and every message you send it is a ru
 through `RunService.start_run()` — so a bot is admitted, budgeted, kill-switched,
 journaled and audited exactly like the marketing department.
 
-Each bot has its own **screen** on one shared **cloud computer**: a separate process
-holding a persistent Chromium profile (sign-ins are shared by every bot) and one tab
-per bot. Bots see a page as a numbered list of its interactive elements plus its
+Each bot has its own **screen** on one shared **cloud computer**: a Linux desktop with
+Google Chrome on it, a persistent profile (sign-ins are shared by every bot) and one
+window per bot. Bots see a page as a numbered list of its interactive elements plus its
 text, DeepSeek picks one action per step (`BotStep@2`), and the action reaches the
 browser only through `browser.observe@1` / `browser.act@1` in the tool gateway.
 
@@ -223,11 +223,27 @@ browser only through `browser.observe@1` / `browser.act@1` in the tool gateway.
 uv pip install -e ".[dev,computer]"
 export RUNTIME_DEEPSEEK_API_KEY=...          # or put it in .env (gitignored)
 
-uv run python -m runtime.computer.main      # the shared browser, :8020
+docker compose up -d --build computer       # the bots' computer, :8020 (desktop: :6080)
 uv run uvicorn runtime.api.app:app --port 8000
 uv run python -m runtime.worker.main
 cd ui && npm run dev                        # http://localhost:3000
 ```
+
+**The computer** (`docker/computer`) is two containers from one image. `computer` is the
+desktop: TigerVNC's X server, openbox, Google Chrome from Google's apt repository, and
+the service the runtime drives it through (`runtime.computer`), which starts Chrome as a
+person would — in windows, on the display, with none of a test harness's switches — and
+attaches to it. A person sees the whole desktop at http://127.0.0.1:6080 (*Whole
+desktop ↗* in the Computer pane). `shell` is where the bots' commands run: it shares the
+workspace volume and nothing else — no browser profiles, and its own network with no
+route to the computer. Profiles and workspaces are Docker volumes, so logins survive
+rebuilds; `docker compose build --pull computer` updates Chrome. Both ports are bound to
+this machine only.
+
+Without Docker, `uv run python -m runtime.computer.main` runs the computer as a process
+here instead, on Playwright's Chromium (headless; set `COMPUTER_CHROMIUM_PATH` to use an
+installed Chrome) — what the tests use. `COMPUTER_BROWSER=desktop` with a `DISPLAY` runs
+the desktop engine on any X server (`runtime/computer/engine.py`).
 
 What a turn does, and what stops it:
 

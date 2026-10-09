@@ -5,8 +5,13 @@ RUNTIME_COMPUTER_PROFILE=.computer    # cookies and logins live here
 RUNTIME_COMPUTER_WORKSPACE=.computer/workspace   # the bots' shared /workspace
 COMPUTER_SANDBOX_NETWORK=on           # off: sandboxed commands have no network
 COMPUTER_LOCAL_COMMANDS=on            # off: no bot may run a command on this machine
-RUNTIME_COMPUTER_HEADLESS=true
-COMPUTER_CHROMIUM_PATH=...            # optional: a specific Chromium build
+COMPUTER_BROWSER=playwright           # desktop: a real Chrome on $DISPLAY (docker/computer)
+RUNTIME_COMPUTER_HEADLESS=true        # playwright only
+COMPUTER_CHROMIUM_PATH=...            # playwright only: a specific Chromium build
+COMPUTER_CHROME_PATH=google-chrome    # desktop only
+COMPUTER_CHROME_FLAGS=...             # desktop only: extra Chrome switches
+COMPUTER_DESKTOP_URL=...              # where a person sees the whole desktop (noVNC)
+COMPUTER_SHELL_SOCKET=...             # bots' commands run in the shell container there
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from pathlib import Path
 import uvicorn
 
 from runtime.computer.app import create_app
+from runtime.computer.engine import engine_from_env
 
 
 def main() -> None:
@@ -28,7 +34,14 @@ def main() -> None:
         os.environ.get("RUNTIME_COMPUTER_WORKSPACE", str(profile.parent / "workspace"))
     )
     uvicorn.run(
-        create_app(profile, headless=headless, workspace=workspace),
+        create_app(
+            profile,
+            headless=headless,
+            workspace=workspace,
+            engine=engine_from_env(),
+            desktop_url=os.environ.get("COMPUTER_DESKTOP_URL") or None,
+            shell_socket=os.environ.get("COMPUTER_SHELL_SOCKET") or None,
+        ),
         host=host,
         port=port,
         log_level="info",

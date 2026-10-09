@@ -26,7 +26,8 @@ import { cx } from "@/lib/cx";
 import { inputQueue, readFrames } from "./remoteScreen";
 import { WorkspacePane } from "./WorkspacePane";
 
-const VIEWPORT = { width: 1280, height: 800 };
+/** Until the first frame says otherwise: the bot's screen is as big as its window. */
+const DEFAULT_SIZE = { width: 1280, height: 800 };
 const BUTTONS: Record<number, MouseButton> = { 0: "left", 1: "middle", 2: "right" };
 const DOUBLE_CLICK_MS = 500;
 const PASTE_MAX = 20_000;
@@ -112,8 +113,10 @@ function Screen({ bot }: { bot: Bot }) {
   const [typing, setTyping] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [reachable, setReachable] = useState<boolean | null>(null);
+  const [desktopUrl, setDesktopUrl] = useState<string | null>(null);
   const screen = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const [size, setSize] = useState(DEFAULT_SIZE);
   /** Keys held down on the bot's computer, by the physical key that holds them. */
   const keys = useRef(new Map<string, string>());
   const buttons = useRef(new Map<number, { button: MouseButton; clicks: number }>());
@@ -175,6 +178,7 @@ function Screen({ bot }: { bot: Bot }) {
     try {
       const status = await computerStatus();
       setReachable(status.reachable);
+      setDesktopUrl(status.desktop_url ?? null);
       const mine = status.screens?.find((s) => s.screen_id === bot.id);
       if (mine) {
         setCtl(mine.controller === "human" ? "human" : "bot");
@@ -195,8 +199,9 @@ function Screen({ bot }: { bot: Bot }) {
   // computer restarts. A frame still being drawn is replaced, never queued behind.
   useEffect(() => {
     const abort = new AbortController();
-    const ctx = canvas.current?.getContext("2d");
-    ctx?.clearRect(0, 0, VIEWPORT.width, VIEWPORT.height);
+    const surface = canvas.current;
+    const ctx = surface?.getContext("2d");
+    if (surface) ctx?.clearRect(0, 0, surface.width, surface.height);
     setLoaded(false);
     setLive(null);
     let streaming = false;
@@ -212,7 +217,14 @@ function Screen({ bot }: { bot: Bot }) {
           const frame = next;
           next = null;
           const bitmap = await createImageBitmap(frame);
-          ctx?.drawImage(bitmap, 0, 0, VIEWPORT.width, VIEWPORT.height);
+          // A frame is the bot's viewport at one pixel per CSS pixel, so its size is
+          // the coordinate space every click is sent in.
+          if (surface && (surface.width !== bitmap.width || surface.height !== bitmap.height)) {
+            surface.width = bitmap.width;
+            surface.height = bitmap.height;
+            setSize({ width: bitmap.width, height: bitmap.height });
+          }
+          ctx?.drawImage(bitmap, 0, 0);
           bitmap.close();
         }
       } catch {
@@ -305,11 +317,12 @@ function Screen({ bot }: { bot: Bot }) {
   const at = (e: { clientX: number; clientY: number }) => {
     const rect = canvas.current?.getBoundingClientRect();
     if (!rect || !rect.width) return pointer.current;
-    const x = ((e.clientX - rect.left) / rect.width) * VIEWPORT.width;
-    const y = ((e.clientY - rect.top) / rect.height) * VIEWPORT.height;
+    const { width, height } = canvas.current ?? DEFAULT_SIZE;
+    const x = ((e.clientX - rect.left) / rect.width) * width;
+    const y = ((e.clientY - rect.top) / rect.height) * height;
     pointer.current = {
-      x: Math.round(Math.min(Math.max(x, 0), VIEWPORT.width - 1)),
-      y: Math.round(Math.min(Math.max(y, 0), VIEWPORT.height - 1)),
+      x: Math.round(Math.min(Math.max(x, 0), width - 1)),
+      y: Math.round(Math.min(Math.max(y, 0), height - 1)),
     };
     return pointer.current;
   };
@@ -372,7 +385,8 @@ function Screen({ bot }: { bot: Bot }) {
     if (!el || !human) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const scale = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? VIEWPORT.height : 1;
+      const page = canvas.current?.height ?? DEFAULT_SIZE.height;
+      const scale = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? page : 1;
       queue.push({ kind: "wheel", ...at(e), dx: e.deltaX * scale, dy: e.deltaY * scale });
     };
     const onPaste = (e: ClipboardEvent) => {
@@ -434,6 +448,7 @@ function Screen({ bot }: { bot: Bot }) {
       <div
         ref={screen}
         className={cx("screen", human && "human")}
+        style={{ aspectRatio: `${size.width} / ${size.height}` }}
         tabIndex={human ? 0 : -1}
         onPointerDown={onPointerDown}
         onPointerMove={(e) => {
@@ -457,8 +472,8 @@ function Screen({ bot }: { bot: Bot }) {
       >
         <canvas
           ref={canvas}
-          width={VIEWPORT.width}
-          height={VIEWPORT.height}
+          width={DEFAULT_SIZE.width}
+          height={DEFAULT_SIZE.height}
           role="img"
           aria-label={`${bot.name}'s screen`}
         />
@@ -610,6 +625,17 @@ function Screen({ bot }: { bot: Bot }) {
         >
           Recover computer
         </button>
+        {desktopUrl && (
+          <a
+            className="pbtn"
+            href={desktopUrl}
+            target="_blank"
+            rel="noreferrer"
+            title="Every bot's window on the computer's own screen, in a new tab"
+          >
+            Whole desktop ↗
+          </a>
+        )}
       </div>
     </div>
   );

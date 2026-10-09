@@ -743,6 +743,13 @@ kbd {
   background: var(--bg-hover);
 }
 
+/* A link that opens something else (the computer's desktop) looks like the buttons
+   beside it. */
+a.pbtn {
+  display: inline-block;
+  text-decoration: none;
+}
+
 .pbtn.primary {
   background: var(--text);
   color: var(--bg);

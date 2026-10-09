@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The computer's window manager: every window fills the screen with no title bar, so
+     a bot's Chrome window is exactly the screen, and a click on a window brings it to
+     the front, for a person using the whole desktop. -->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <focus>
+    <focusNew>yes</focusNew>
+    <followMouse>no</followMouse>
+  </focus>
+  <desktops>
+    <number>1</number>
+  </desktops>
+  <mouse>
+    <context name="Client">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
+    </context>
+  </mouse>
+  <applications>
+    <application class="*">
+      <decor>no</decor>
+      <maximized>true</maximized>
+    </application>
+  </applications>
+</openbox_config>
