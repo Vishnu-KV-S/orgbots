@@ -54,7 +54,7 @@ export const MOODS: { id: Mood; label: string; hint: string }[] = [
   {
     id: "sleeping",
     label: "Sleeping",
-    hint: "Eyes shut, slow breathing, LEDs dim",
+    hint: "Screen drifts into a flowing screensaver, slow breathing",
   },
   { id: "stopped", label: "Stopped", hint: "Slumps and powers down" },
 ];

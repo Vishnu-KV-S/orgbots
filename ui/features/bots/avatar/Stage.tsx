@@ -40,19 +40,24 @@ let sharedEnvironment: {
 } | null = null;
 
 /**
- * What polished surfaces reflect: a dark studio lit by a few large softboxes.
+ * What polished surfaces reflect: a dim studio lit by a few large softboxes.
  *
  * A generic room environment puts furniture-shaped highlights into every glossy
  * surface, and behind a dark visor they read as things glowing *inside* it. A real
  * product shot reflects only clean light shapes — a big overhead box, two tall side
- * strips, a low fill card — and this is exactly that, rendered once into a cube map.
+ * strips, a rim behind — and this is exactly that, rendered once into a cube map.
+ *
+ * The room is darker than the boxes by a wide margin on purpose: a glossy white shell
+ * only looks glossy where its reflections differ from its own colour, so the clear
+ * coat needs bright windows to mirror and a dim room between them to give the curves
+ * their edge. Nothing bright sits low in front, because the lower half of a visor
+ * mirrors it, and a bright bar under the eyes reads as a mouth.
  */
 function softboxStudio(): THREE.Scene {
   const scene = new THREE.Scene();
   // Mid-grey walls: polished steel reflects its surroundings, and in a black room
-  // it reads as black chrome. Glass, which reflects only a few percent face-on,
-  // stays dark either way.
-  scene.background = new THREE.Color("#55575d");
+  // it reads as black chrome.
+  scene.background = new THREE.Color("#3b3d43");
   const box = (w: number, h: number, intensity: number, pos: THREE.Vector3Tuple) => {
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
@@ -65,15 +70,16 @@ function softboxStudio(): THREE.Scene {
     mesh.lookAt(0, 0, 0);
     scene.add(mesh);
   };
-  box(8, 4, 3.4, [0, 6, 1.5]); // overhead key
-  box(2.4, 7, 2.6, [-5.5, 1, 2.5]); // left strip
-  box(2.4, 7, 2.0, [5.5, 1, 1.5]); // right strip
-  box(7, 2, 1.0, [0, -2.2, 5]); // low fill card
-  box(4, 6, 1.6, [0, 1.5, -6]); // rim behind
+  box(7, 3.5, 6, [0, 6, 1.5]); // overhead key
+  box(6, 2.5, 5, [0, 4.5, -3.5]); // a strip high behind: a crisp line along every top edge
+  box(2, 6, 4.2, [-5.5, 1.5, 2.5]); // left strip
+  box(2, 6, 3.2, [5.5, 1.5, 1.5]); // right strip
+  box(4, 5, 2.4, [0, 1.5, -6]); // rim behind
+  box(3, 1.4, 1.6, [-3, 3, 5]); // a small window front-left: the visor's catchlight
   // A faint floor bounce, so undersides are not pure black.
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(30, 30),
-    new THREE.MeshBasicMaterial({ color: "#3a3b40" }),
+    new THREE.MeshBasicMaterial({ color: "#2c2d31" }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -3;
@@ -222,8 +228,8 @@ export function BotFace({
       />
       <Studio />
       {/* A neutral three-point studio rig: warm key, cool fill, white rim. */}
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[2.2, 3.2, 2.8]} intensity={2.6} color="#ffffff" />
+      <ambientLight intensity={0.32} />
+      <directionalLight position={[2.2, 3.2, 2.8]} intensity={2.4} color="#ffffff" />
       <directionalLight position={[-2.8, 0.8, 1.5]} intensity={1.3} color="#ffffff" />
       <directionalLight position={[0, 2, -3]} intensity={1.4} color="#ffffff" />
       <BotModel appearance={appearance} mood={mood} detail={level} phase={phase} />
