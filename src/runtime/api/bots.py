@@ -349,6 +349,9 @@ class MessageBody(BaseModel):
     reply_to: UUID | None = None
     attachments: list[UUID] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
     """Files already in the team drive (`/files/upload`), sent with the message."""
+    voice: bool = False
+    """Spoken in a voice chat: the bot answers in a few spoken sentences, which the
+    person's browser reads aloud."""
 
     @model_validator(mode="after")
     def _something(self) -> MessageBody:
@@ -646,12 +649,18 @@ async def send(bot_id: UUID, body: MessageBody, request: Request) -> dict[str, A
                 "chars": found.chars,
             }
         )
+    payload: dict[str, Any] = {}
+    if attached:
+        payload["attachments"] = attached
+    if body.voice:
+        payload["voice"] = True
     with http_errors():
         sent = await _manager(request).send(
             bot_id,
             body.text.strip(),
             reply_to=body.reply_to,
-            payload={"attachments": attached} if attached else None,
+            payload=payload or None,
+            run_input={"voice": True} if body.voice else None,
         )
     return {
         "message_id": str(sent.message_id),
@@ -659,6 +668,30 @@ async def send(bot_id: UUID, body: MessageBody, request: Request) -> dict[str, A
         "admitted": sent.admitted,
         "refusal_reason": sent.refusal_reason,
     }
+
+
+class VoiceCallBody(BaseModel):
+    seconds: int = Field(ge=0, le=6 * 3600)
+    turns: int = Field(ge=0, le=1_000)
+
+
+@router.post("/{bot_id}/voice-calls", status_code=status.HTTP_201_CREATED)
+async def voice_call(bot_id: UUID, body: VoiceCallBody, request: Request) -> dict[str, Any]:
+    """A voice chat ended: leave a card in the conversation saying it happened. The
+    call's words are already there — every turn was a message — so this is the frame."""
+    bot = await _bot_or_404(request, bot_id)
+    minutes, seconds = divmod(body.seconds, 60)
+    length = f"{minutes} min {seconds:02d} s" if minutes else f"{seconds} s"
+    message_id = uuid.uuid4()
+    async with _uow(request).transaction() as uow:
+        await uow.bots.add_message(
+            message_id,
+            bot.id,
+            role="system",
+            content=f"Voice chat · {length} · {body.turns} turn{'s' if body.turns != 1 else ''}",
+            payload={"voice_call": {"seconds": body.seconds, "turns": body.turns}},
+        )
+    return {"message_id": str(message_id)}
 
 
 @router.post("/{bot_id}/pending/{pending_id}", status_code=status.HTTP_202_ACCEPTED)

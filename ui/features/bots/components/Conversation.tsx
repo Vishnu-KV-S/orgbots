@@ -16,6 +16,7 @@ import { moodOfConversation } from "../avatar";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
+import { VoiceCall } from "./VoiceCall";
 
 const STARTERS = [
   "Find the three best-reviewed robot vacuums under $300 and compare them.",
@@ -47,6 +48,7 @@ export function Conversation({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [replyTo, setReplyTo] = useState<BotMessage | null>(null);
   const [sending, setSending] = useState(false);
+  const [calling, setCalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
@@ -73,7 +75,11 @@ export function Conversation({
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
   }, [convo.messages, convo.working]);
 
-  const send = async (text: string, attachments: Attachment[] = []): Promise<boolean> => {
+  const send = async (
+    text: string,
+    attachments: Attachment[] = [],
+    voice = false,
+  ): Promise<boolean> => {
     setSending(true);
     setError(null);
     try {
@@ -82,6 +88,7 @@ export function Conversation({
         text,
         replyTo?.id,
         attachments.map((a) => a.id),
+        { voice },
       );
       setDraft("");
       setReplyTo(null);
@@ -208,6 +215,18 @@ export function Conversation({
         </div>
       </div>
 
+      {calling && (
+        <VoiceCall
+          bot={bot}
+          messages={convo.messages}
+          working={convo.working}
+          onSend={(text) => send(text, [], true)}
+          onEnd={() => {
+            setCalling(false);
+            convo.poke();
+          }}
+        />
+      )}
       <Composer
         bot={bot}
         bots={bots}
@@ -215,6 +234,7 @@ export function Conversation({
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
         onSend={send}
+        onVoice={() => setCalling(true)}
         onStop={() => void stop()}
         sending={sending}
         draft={draft}
