@@ -133,17 +133,59 @@ export function BotStage({ children }: { children: React.ReactNode }) {
             alpha: true,
             powerPreference: "high-performance",
           }}
-          onCreated={({ gl }) => {
-            // AgX: a filmic curve that rolls bright LEDs off toward white without
-            // shifting their hue, the way a camera sensor does.
-            gl.toneMapping = THREE.AgXToneMapping;
-            gl.toneMappingExposure = 1.25;
-          }}
+          onCreated={({ gl }) => toneMap(gl)}
         >
           <View.Port />
         </Canvas>
       )}
     </StageContext.Provider>
+  );
+}
+
+/** AgX: a filmic curve that rolls bright LEDs off toward white without shifting their
+ * hue, the way a camera sensor does. Every canvas that draws a bot sets this. */
+export function toneMap(gl: THREE.WebGLRenderer) {
+  gl.toneMapping = THREE.AgXToneMapping;
+  gl.toneMappingExposure = 1.25;
+}
+
+/**
+ * One bot in its studio: camera, environment, lights and the model. Everything that
+ * makes a bot look like itself, so every canvas that draws one — the web app's shared
+ * stage, a standalone face, and the mobile app's embedded renderer (`mobile/bot3d`) —
+ * draws exactly the same thing.
+ */
+export function BotScene({
+  appearance,
+  mood,
+  detail,
+  phase,
+  framing,
+}: {
+  appearance: Appearance;
+  mood: Mood;
+  detail: "high" | "low";
+  phase: number;
+  framing: "full" | "head";
+}) {
+  const camera: [number, number, number] =
+    framing === "head" ? [0, 0.1, 2.75] : detail === "high" ? [0, 0.22, 3.1] : [0, 0.1, 2.9];
+  return (
+    <>
+      <PerspectiveCamera
+        makeDefault
+        position={camera}
+        fov={30}
+        onUpdate={(c) => c.lookAt(0, 0.04, 0)}
+      />
+      <Studio />
+      {/* A neutral three-point studio rig: warm key, cool fill, white rim. */}
+      <ambientLight intensity={0.32} />
+      <directionalLight position={[2.2, 3.2, 2.8]} intensity={2.4} color="#ffffff" />
+      <directionalLight position={[-2.8, 0.8, 1.5]} intensity={1.3} color="#ffffff" />
+      <directionalLight position={[0, 2, -3]} intensity={1.4} color="#ffffff" />
+      <BotModel appearance={appearance} mood={mood} detail={detail} phase={phase} />
+    </>
   );
 }
 
@@ -216,38 +258,13 @@ export function BotFace({
   if (!ready) {
     return <FlatFace appearance={appearance} size={size} className={className} />;
   }
-  const camera: [number, number, number] =
-    framing === "head" ? [0, 0.1, 2.75] : level === "high" ? [0, 0.22, 3.1] : [0, 0.1, 2.9];
   const scene = (
-    <>
-      <PerspectiveCamera
-        makeDefault
-        position={camera}
-        fov={30}
-        onUpdate={(c) => c.lookAt(0, 0.04, 0)}
-      />
-      <Studio />
-      {/* A neutral three-point studio rig: warm key, cool fill, white rim. */}
-      <ambientLight intensity={0.32} />
-      <directionalLight position={[2.2, 3.2, 2.8]} intensity={2.4} color="#ffffff" />
-      <directionalLight position={[-2.8, 0.8, 1.5]} intensity={1.3} color="#ffffff" />
-      <directionalLight position={[0, 2, -3]} intensity={1.4} color="#ffffff" />
-      <BotModel appearance={appearance} mood={mood} detail={level} phase={phase} />
-    </>
+    <BotScene appearance={appearance} mood={mood} detail={level} phase={phase} framing={framing} />
   );
   if (standalone) {
     return (
       <span className={cx("botface", className)} style={{ width: size, height: size }}>
-        <Canvas
-          dpr={[1, 2]}
-          gl={{ antialias: true, alpha: true }}
-          onCreated={({ gl }) => {
-            // AgX: a filmic curve that rolls bright LEDs off toward white without
-            // shifting their hue, the way a camera sensor does.
-            gl.toneMapping = THREE.AgXToneMapping;
-            gl.toneMappingExposure = 1.25;
-          }}
-        >
+        <Canvas dpr={[1, 2]} gl={{ antialias: true, alpha: true }} onCreated={({ gl }) => toneMap(gl)}>
           {scene}
         </Canvas>
       </span>

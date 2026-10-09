@@ -1,0 +1,12 @@
+{
+  "name": "orgbots-bot3d",
+  "private": true,
+  "type": "module",
+  "description": "Bundles the web app's 3D bots into an asset for the Flutter app.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
