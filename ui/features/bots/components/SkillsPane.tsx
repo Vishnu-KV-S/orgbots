@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowLeftIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -101,7 +102,7 @@ export function SkillsPane({
           className="pbtn"
           onClick={() => setView({ kind: "edit", skill: null })}
         >
-          + New skill
+          <PlusIcon /> New skill
         </button>
       </div>
 
@@ -256,7 +257,7 @@ function SkillEditor({
     <div className="form skill-editor">
       <div className="skill-editor-head">
         <button type="button" className="ibtn" onClick={onClose} aria-label="Back to skills">
-          ←
+          <ArrowLeftIcon />
         </button>
         <strong>{skill ? `/${skill.name}` : "New skill"}</strong>
         {skill && (

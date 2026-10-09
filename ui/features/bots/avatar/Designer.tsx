@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowPathIcon, PlayCircleIcon, StopCircleIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState } from "react";
 import { cx } from "@/lib/cx";
 import {
@@ -81,7 +82,15 @@ export function Designer({
             className={cx("mchip", demo && "on")}
             onClick={() => setDemo((d) => !d)}
           >
-            {demo ? "■ Stop" : "▶ Play all"}
+            {demo ? (
+              <>
+                <StopCircleIcon /> Stop
+              </>
+            ) : (
+              <>
+                <PlayCircleIcon /> Play all
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -96,7 +105,7 @@ export function Designer({
               </button>
             ))}
             <button type="button" onClick={() => onChange(randomAppearance())} title="Surprise me">
-              🎲 Random
+              <ArrowPathIcon /> Random
             </button>
           </div>
         </div>

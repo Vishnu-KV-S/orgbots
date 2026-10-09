@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  CheckIcon,
+  PencilSquareIcon,
+  PlayIcon,
+  PlusIcon,
+  TrashIcon,
+} from "@heroicons/react/24/outline";
 import { useCallback, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -207,13 +214,20 @@ export function RoutinesSection({ bot }: { bot: Bot }) {
               type="button"
               className="ibtn"
               title="Run it now, drafts only"
+              aria-label={`Run routine ${r.name} now`}
               disabled={test.pending}
               onClick={() => void test.run(r)}
             >
-              ▶
+              <PlayIcon />
             </button>
-            <button type="button" className="ibtn" title="Edit" onClick={() => setEditing(r)}>
-              ✎
+            <button
+              type="button"
+              className="ibtn"
+              title="Edit"
+              aria-label={`Edit routine ${r.name}`}
+              onClick={() => setEditing(r)}
+            >
+              <PencilSquareIcon />
             </button>
             <button
               type="button"
@@ -224,7 +238,7 @@ export function RoutinesSection({ bot }: { bot: Bot }) {
                 if (window.confirm(`Delete the routine “${r.name}”?`)) void remove.run(r);
               }}
             >
-              ✕
+              <TrashIcon />
             </button>
           </div>
           <div className="routine-meta">
@@ -282,7 +296,7 @@ export function RoutinesSection({ bot }: { bot: Bot }) {
       ) : (
         <div className="form-actions" style={{ marginTop: 10 }}>
           <button type="button" className="pbtn" onClick={() => setEditing("new")}>
-            + New routine
+            <PlusIcon /> New routine
           </button>
         </div>
       )}
@@ -298,13 +312,14 @@ function HookUrl({ url, signed, source }: { url: string; signed: boolean; source
       <button
         type="button"
         className="ibtn"
+        aria-label={copied ? "Copied" : "Copy"}
         onClick={() => {
           void navigator.clipboard?.writeText(url);
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         }}
       >
-        {copied ? "✓" : "Copy"}
+        {copied ? <CheckIcon /> : "Copy"}
       </button>
       <div className="routine-meta">
         Paste this into{" "}

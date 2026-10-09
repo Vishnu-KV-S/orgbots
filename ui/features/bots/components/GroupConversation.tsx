@@ -1,5 +1,7 @@
 "use client";
 
+import { ArrowLeftIcon, ArrowUturnLeftIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
+import { ArrowUpIcon } from "@heroicons/react/20/solid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -213,7 +215,7 @@ export function GroupConversation({
           </p>
         </div>
         <button type="button" className="tab" onClick={() => setEditing(true)}>
-          ✎ <span className="tab-label">Edit group</span>
+          <PencilSquareIcon /> <span className="tab-label">Edit group</span>
         </button>
       </header>
 
@@ -231,7 +233,7 @@ export function GroupConversation({
           {thread ? (
             <div className="thread">
               <button type="button" className="linklike" onClick={() => setThread(null)}>
-                ← Back to the group
+                <ArrowLeftIcon /> Back to the group
               </button>
               {row(thread, true)}
               <div className="thread-replies">{replies(thread.id).map((m) => row(m, true))}</div>
@@ -335,7 +337,11 @@ function GroupComposer({
             ))}
           </div>
         )}
-        {threadRoot && <div className="replying">↪ Replying in a thread</div>}
+        {threadRoot && (
+          <div className="replying">
+            <ArrowUturnLeftIcon /> Replying in a thread
+          </div>
+        )}
         <textarea
           ref={ref}
           rows={1}
@@ -371,7 +377,7 @@ function GroupComposer({
             onClick={() => void send.run()}
             aria-label="Send"
           >
-            ↑
+            <ArrowUpIcon />
           </button>
         </div>
       </div>

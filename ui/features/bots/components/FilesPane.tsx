@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  ArrowLeftIcon,
+  DocumentTextIcon,
+  LockClosedIcon,
+  PlusIcon,
+} from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/16/solid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -185,7 +192,9 @@ export function FilesPane({
       {d.folders.map((sub) => (
         <li key={sub.path}>
           <button type="button" className="frow folder" onClick={() => toggle(sub.path)}>
-            <span className="fico">{closed.has(sub.path) ? "▸" : "▾"}</span>
+            <span className="fico">
+              {closed.has(sub.path) ? <ChevronRightIcon /> : <ChevronDownIcon />}
+            </span>
             <span className="fname">{sub.name}</span>
             <span className="fmeta">{count(sub)}</span>
           </button>
@@ -195,7 +204,7 @@ export function FilesPane({
       {d.files.map((f) => (
         <li key={f.id}>
           <button type="button" className="frow" onClick={() => setOpenId(f.id)} title={f.path}>
-            <span className="fico">{f.locked ? "🔒" : "▤"}</span>
+            <span className="fico">{f.locked ? <LockClosedIcon /> : <DocumentTextIcon />}</span>
             <span className="fname">{f.name}</span>
             <span className="fmeta">
               {who(f.updated_by_kind, f.updated_by_name)} · {timeAgo(f.updated_at)}
@@ -228,7 +237,13 @@ export function FilesPane({
           onChange={(e) => setQuery(e.target.value)}
         />
         <button type="button" className="pbtn" onClick={() => setAdding((a) => !a)}>
-          {adding ? "Close" : "+ Add"}
+          {adding ? (
+            "Close"
+          ) : (
+            <>
+              <PlusIcon /> Add
+            </>
+          )}
         </button>
       </div>
 
@@ -273,7 +288,8 @@ export function FilesPane({
       {trash.length > 0 && (
         <div className="ftrash">
           <button type="button" className="linklike" onClick={() => setShowTrash((s) => !s)}>
-            {showTrash ? "▾" : "▸"} Recently deleted ({trash.length})
+            {showTrash ? <ChevronDownIcon /> : <ChevronRightIcon />} Recently deleted (
+            {trash.length})
           </button>
           {showTrash && (
             <ul className="ftree">
@@ -436,7 +452,7 @@ function FileView({
 
   const back = (
     <button type="button" className="linklike" onClick={onClose}>
-      ← All files
+      <ArrowLeftIcon /> All files
     </button>
   );
   if (!f) {
@@ -454,7 +470,12 @@ function FileView({
       {back}
       <div className="fpath">
         {f.path}
-        {f.locked && <span title="Locked: bots can read it but not change it"> 🔒</span>}
+        {f.locked && (
+          <span title="Locked: bots can read it but not change it">
+            {" "}
+            <LockClosedIcon />
+          </span>
+        )}
       </div>
       <p className="fmeta-line">
         v{f.version} · {sizeOf(f)} · changed by {who(f.updated_by_kind, f.updated_by_name)}{" "}

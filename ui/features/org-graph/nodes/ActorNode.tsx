@@ -1,6 +1,7 @@
 "use client";
 
 import type { NodeProps } from "@xyflow/react";
+import { ClockIcon } from "@heroicons/react/24/outline";
 import { BadgeRow, Chip, Pill } from "@/components/ui";
 import { cents, relative } from "@/lib/format";
 import type { ActorNodeData } from "@/lib/types";
@@ -29,7 +30,7 @@ export function ActorNode({ data, selected }: NodeProps) {
         <Pill status={d.status} />
         {d.triggers.length > 0 && (
           <Chip tone="warn" title="cron triggers">
-            ⏱ {d.triggers.length}
+            <ClockIcon /> {d.triggers.length}
           </Chip>
         )}
       </BadgeRow>

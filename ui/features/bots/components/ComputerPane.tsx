@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  AcademicCapIcon,
+  ArrowLeftIcon,
+  ArrowPathIcon,
+  ArrowTurnDownLeftIcon,
+} from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -396,7 +402,7 @@ function Screen({ bot }: { bot: Bot }) {
           onClick={() => input({ kind: "back" })}
           aria-label="Back"
         >
-          ←
+          <ArrowLeftIcon />
         </button>
         <button
           type="button"
@@ -405,7 +411,7 @@ function Screen({ bot }: { bot: Bot }) {
           onClick={() => input({ kind: "reload" })}
           aria-label="Reload"
         >
-          ↻
+          <ArrowPathIcon />
         </button>
         <input
           className="urlbox"
@@ -502,8 +508,14 @@ function Screen({ bot }: { bot: Bot }) {
             >
               Type
             </button>
-            <button type="button" className="pbtn" onClick={() => input({ kind: "key", key: "Enter" })}>
-              ⏎
+            <button
+              type="button"
+              className="pbtn"
+              title="Press Enter"
+              aria-label="Press Enter"
+              onClick={() => input({ kind: "key", key: "Enter" })}
+            >
+              <ArrowTurnDownLeftIcon />
             </button>
           </div>
         </>
@@ -584,7 +596,7 @@ function Screen({ bot }: { bot: Bot }) {
             title="Do a task yourself on this screen; the bot learns it as a skill"
             onClick={() => setGoal("")}
           >
-            🎓 Teach a task
+            <AcademicCapIcon /> Teach a task
           </button>
         )}
         <button

@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowRightIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Button, Empty, ErrorNotice, Section } from "@/components/ui";
@@ -162,7 +163,9 @@ export function PlanPane({
           <p className="ok-note">
             applied {apply.result.changed} change(s): {apply.result.created} created,{" "}
             {apply.result.updated} updated, {apply.result.deactivated} deactivated.{" "}
-            <Link href={`/org/${organizationId}`}>open the canvas →</Link>
+            <Link href={`/org/${organizationId}`}>
+              open the canvas <ArrowRightIcon />
+            </Link>
           </p>
         )}
         {apply.result && !apply.result.applied && <Empty>{apply.result.detail}</Empty>}
