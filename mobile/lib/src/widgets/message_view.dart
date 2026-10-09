@@ -209,15 +209,20 @@ class _ItemViewState extends State<ItemView> {
                   spacing: 6,
                   children: [
                     for (final e in reactions)
-                      GestureDetector(
-                        onTap: () => _react(m, e),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: p.raised,
-                            borderRadius: BorderRadius.circular(Radii.pill),
+                      Semantics(
+                        button: true,
+                        label: 'Remove reaction $e',
+                        excludeSemantics: true,
+                        child: GestureDetector(
+                          onTap: () => _react(m, e),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: p.raised,
+                              borderRadius: BorderRadius.circular(Radii.pill),
+                            ),
+                            child: Text(e),
                           ),
-                          child: Text(e),
                         ),
                       ),
                   ],

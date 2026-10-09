@@ -57,62 +57,64 @@ class SettingsScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          if (me != null)
+      body: Readable(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            if (me != null)
+              _Group(
+                children: [
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    leading: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: p.raised,
+                      child: Text(
+                        me.initial,
+                        style: TextStyle(color: p.text, fontSize: 20, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    title: Text(
+                      me.name.isEmpty ? me.email : me.name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text('${me.email} · ${me.role}', style: TextStyle(color: p.textDim)),
+                  ),
+                ],
+              ),
+            const SectionLabel('Server'),
             _Group(
               children: [
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  leading: CircleAvatar(
-                    radius: 24,
-                    backgroundColor: p.raised,
-                    child: Text(
-                      me.initial,
-                      style: TextStyle(color: p.text, fontSize: 20, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  title: Text(
-                    me.name.isEmpty ? me.email : me.name,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text('${me.email} · ${me.role}', style: TextStyle(color: p.textDim)),
+                _Row(
+                  icon: Icons.dns_outlined,
+                  label: session.server.replaceFirst(RegExp('^https?://'), ''),
+                  detail: session.mode == 'members' ? 'Team sign-in' : 'Single user',
                 ),
+                _Row(
+                  icon: Icons.open_in_new,
+                  label: 'Open the web app',
+                  detail: 'Briefs, files, skills, routines and apps',
+                  onTap: () =>
+                      launchUrl(Uri.parse(session.server), mode: LaunchMode.externalApplication),
+                ),
+                _Row(icon: Icons.swap_horiz, label: 'Change server', onTap: changeServer),
+                if (session.mode == 'members')
+                  _Row(
+                    icon: Icons.logout,
+                    label: 'Sign out',
+                    danger: true,
+                    onTap: () => leave(session.signOut),
+                  ),
               ],
             ),
-          const SectionLabel('Server'),
-          _Group(
-            children: [
-              _Row(
-                icon: Icons.dns_outlined,
-                label: session.server.replaceFirst(RegExp('^https?://'), ''),
-                detail: session.mode == 'members' ? 'Team sign-in' : 'Single user',
-              ),
-              _Row(
-                icon: Icons.open_in_new,
-                label: 'Open the web app',
-                detail: 'Briefs, files, skills, routines and apps',
-                onTap: () =>
-                    launchUrl(Uri.parse(session.server), mode: LaunchMode.externalApplication),
-              ),
-              _Row(icon: Icons.swap_horiz, label: 'Change server', onTap: changeServer),
-              if (session.mode == 'members')
-                _Row(
-                  icon: Icons.logout,
-                  label: 'Sign out',
-                  danger: true,
-                  onTap: () => leave(session.signOut),
-                ),
-            ],
-          ),
-          const SizedBox(height: 28),
-          Text(
-            'Orgbots · open source, MIT',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: p.textFaint, fontSize: 13),
-          ),
-        ],
+            const SizedBox(height: 28),
+            Text(
+              'Orgbots · open source, MIT',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: p.textFaint, fontSize: 13),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -125,10 +127,11 @@ class _Group extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: p.surface,
-        border: Border.all(color: p.line),
+    // A Material, not a coloured box, so the rows' press highlight shows.
+    return Material(
+      color: p.surface,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: p.line),
         borderRadius: BorderRadius.circular(Radii.lg),
       ),
       clipBehavior: Clip.antiAlias,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'src/bot3d/snapshots.dart';
 import 'src/screens/connect.dart';
@@ -29,7 +30,19 @@ class OrgbotsApp extends StatelessWidget {
         themeMode: ThemeMode.system,
         // The renderer for list avatars sits behind every screen: it has to be laid out
         // to draw, but the screens' opaque backgrounds cover it.
-        builder: (context, child) => Stack(children: [const SnapshotRenderer(), ?child]),
+        builder: (context, child) {
+          // Status and navigation bar icons that read on the theme's background, for the
+          // screens without an app bar (an app bar sets its own).
+          final dark = Theme.of(context).brightness == Brightness.dark;
+          final bg = Palette.of(context).bg;
+          return AnnotatedRegion<SystemUiOverlayStyle>(
+            value: (dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark).copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: bg,
+            ),
+            child: Stack(children: [const SnapshotRenderer(), ?child]),
+          );
+        },
         home: const _Gate(),
       ),
     );

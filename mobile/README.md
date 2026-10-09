@@ -108,6 +108,12 @@ flutter test
 The tests drive the real screens against a fake Orgbots server, and check that bots
 with no saved look get exactly the colours the web app derives for them.
 
+`test/layout_test.dart` renders every screen at a small phone, a phone and a tablet, at
+normal, 1.4× and 2× text, in both themes, with data built to break layouts (very long
+names, URLs and replies, every kind of card), and an empty and an unreachable server. It
+fails on any overflow or cut-off button label, and runs Flutter's accessibility checks:
+48-point tap targets, a label on everything tappable, and WCAG text contrast.
+
 ## Not yet
 
 - **Push notifications.** The server sends Web Push to the browser app; native push

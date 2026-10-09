@@ -145,7 +145,7 @@ class _ComposerState extends State<Composer> {
     final p = Palette.of(context);
     final showStop = widget.working && !_hasText && _attached.isEmpty;
     return Container(
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+      padding: const EdgeInsets.fromLTRB(3, 0, 3, 3),
       decoration: BoxDecoration(
         color: p.raised,
         border: Border.all(color: p.line),
@@ -156,10 +156,10 @@ class _ComposerState extends State<Composer> {
         children: [
           if (_attached.isNotEmpty || _uploading > 0)
             SizedBox(
-              height: 40,
+              height: 44,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.only(left: 4, bottom: 8),
+                padding: const EdgeInsets.only(left: 9, top: 10, bottom: 2),
                 children: [
                   for (final a in _attached)
                     _Chip(
@@ -180,9 +180,16 @@ class _ComposerState extends State<Composer> {
             decoration: InputDecoration(
               isCollapsed: true,
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.fromLTRB(10, 2, 10, 10),
+              // Tall enough to be a 48-point target, laid out as before.
+              contentPadding: const EdgeInsets.fromLTRB(15, 14, 15, 6),
+              constraints: const BoxConstraints(minHeight: 48),
               hintText: 'Ask ${widget.botName} anything',
-              hintStyle: TextStyle(color: p.textFaint, fontSize: 16),
+              hintMaxLines: 1,
+              hintStyle: TextStyle(
+                color: p.textFaint,
+                fontSize: 16,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
           Row(
@@ -254,14 +261,24 @@ class _Round extends StatelessWidget {
     message: tooltip,
     child: Semantics(
       button: true,
+      enabled: onTap != null,
       label: tooltip,
-      child: Material(
-        color: fill ?? Colors.transparent,
-        shape: CircleBorder(side: border == null ? BorderSide.none : BorderSide(color: border!)),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: SizedBox.square(dimension: 38, child: Center(child: child)),
+      excludeSemantics: true,
+      // A 38-point circle to look at, a 48-point target to hit.
+      child: InkResponse(
+        onTap: onTap,
+        radius: 24,
+        child: SizedBox.square(
+          dimension: 48,
+          child: Center(
+            child: Material(
+              color: fill ?? Colors.transparent,
+              shape: CircleBorder(
+                side: border == null ? BorderSide.none : BorderSide(color: border!),
+              ),
+              child: SizedBox.square(dimension: 38, child: Center(child: child)),
+            ),
+          ),
         ),
       ),
     ),
@@ -279,8 +296,8 @@ class _Chip extends StatelessWidget {
     final p = Palette.of(context);
     return Container(
       margin: const EdgeInsets.only(right: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      constraints: const BoxConstraints(maxWidth: 200),
+      padding: EdgeInsets.only(left: 10, right: onRemove == null ? 10 : 2),
+      constraints: const BoxConstraints(maxWidth: 220),
       decoration: BoxDecoration(color: p.pressed, borderRadius: BorderRadius.circular(14)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -301,9 +318,17 @@ class _Chip extends StatelessWidget {
             ),
           ),
           if (onRemove != null)
-            GestureDetector(
-              onTap: onRemove,
-              child: Icon(Icons.close, size: 15, color: p.textDim),
+            Semantics(
+              button: true,
+              label: 'Remove $label',
+              child: InkResponse(
+                onTap: onRemove,
+                radius: 16,
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(Icons.close, size: 15, color: p.textDim),
+                ),
+              ),
             ),
         ],
       ),

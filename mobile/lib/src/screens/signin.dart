@@ -1,10 +1,10 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../session.dart';
+import '../web_views.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -39,7 +39,7 @@ class _SignInScreenState extends State<SignInScreen> {
   @override
   void initState() {
     super.initState();
-    if (kIsWeb) return;
+    if (!WebViews.enabled) return;
     _web = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
@@ -131,7 +131,7 @@ class _SignInScreenState extends State<SignInScreen> {
           child: Divider(height: 1, color: p.line),
         ),
       ),
-      body: kIsWeb
+      body: !WebViews.enabled
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),

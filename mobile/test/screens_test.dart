@@ -1,9 +1,5 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:orgbots/main.dart';
 import 'package:orgbots/src/api.dart';
@@ -11,139 +7,8 @@ import 'package:orgbots/src/bot3d/snapshots.dart';
 import 'package:orgbots/src/screens/chat.dart';
 import 'package:orgbots/src/screens/home.dart';
 import 'package:orgbots/src/session.dart';
-import 'package:orgbots/src/theme.dart';
 
-/// The screens against a fake Orgbots server that answers the way the real one does,
-/// recording every write the app makes.
-String ago(Duration d) => DateTime.now().subtract(d).toIso8601String();
-
-Map<String, dynamic> message(
-  int seq,
-  String role,
-  String content, [
-  Map<String, dynamic>? payload,
-]) => {
-  'id': 'm$seq',
-  'seq': seq,
-  'bot_id': 'b1',
-  'role': role,
-  'content': content,
-  'payload': payload ?? {},
-  'created_at': ago(const Duration(minutes: 5)),
-  'reactions': <String>[],
-};
-
-final bots = [
-  {
-    'id': 'b1',
-    'name': 'Price Tracker',
-    'label': 'Shopping',
-    'appearance': <String, dynamic>{},
-    'brief': {'mission': 'Find the best price.'},
-    'pinned': false,
-    'working': false,
-    'needs_attention': false,
-    'unread': false,
-    'updated_at': ago(const Duration(minutes: 5)),
-    'last_message': message(9, 'bot', 'The cheapest is **£23.21**'),
-  },
-  {
-    'id': 'b2',
-    'name': 'Researcher',
-    'label': 'Web research',
-    'appearance': <String, dynamic>{},
-    'brief': <String, dynamic>{},
-    'pinned': false,
-    'working': true,
-    'needs_attention': true,
-    'unread': true,
-    'updated_at': ago(const Duration(hours: 2)),
-    'last_message': null,
-  },
-];
-
-final transcript = [
-  message(1, 'user', 'Find the cheapest travel book'),
-  message(2, 'activity', '', {
-    'action': {'type': 'navigate', 'url': 'https://books.toscrape.com'},
-    'ok': true,
-  }),
-  message(3, 'activity', '', {
-    'action': {'type': 'click', 'element': 3, 'element_label': 'Travel'},
-    'ok': false,
-    'error': '504',
-  }),
-  message(4, 'bot', 'The cheapest is **The Road to Little Dribbling** at £23.21.'),
-  message(5, 'approval', 'This places an order.', {
-    'pending_id': 'p1',
-    'action': {
-      'type': 'click',
-      'element': 7,
-      'element_label': 'Buy now',
-      'page_url': 'https://books.toscrape.com/x',
-    },
-  }),
-  message(6, 'credentials', 'The store wants me to sign in.', {
-    'credential_request_id': 'c1',
-    'host': 'books.toscrape.com',
-    'purpose': 'sign_in',
-    'fields': [
-      {'key': 'email', 'kind': 'email', 'label': 'Email'},
-      {'key': 'pw', 'kind': 'password', 'label': 'Password'},
-    ],
-    'saved': <dynamic>[],
-  }),
-];
-
-class FakeServer {
-  final writes = <(String, String, Object?)>[];
-
-  late final client = MockClient((request) async {
-    final path = request.url.path.replaceFirst('/rt/v1', '');
-    if (request.method != 'GET') {
-      writes.add((request.method, path, request.body.isEmpty ? null : jsonDecode(request.body)));
-    }
-    Object body;
-    if (path == '/bots') {
-      body = {'organization_id': 'o', 'bots': bots};
-    } else if (path == '/bots/b1') {
-      body = bots.first;
-    } else if (path == '/bots/b1/messages' && request.method == 'GET') {
-      final after = int.parse(request.url.queryParameters['after'] ?? '0');
-      body = {
-        'messages': transcript.where((m) => (m['seq'] as int) > after).toList(),
-        'pending': ['p1'],
-        'credential_requests': ['c1'],
-        'working': false,
-        'run_status': null,
-      };
-    } else {
-      body = {'ok': true, 'admitted': true, 'run_id': 'r', 'refusal_reason': null};
-    }
-    return http.Response(jsonEncode(body), 200, headers: {'content-type': 'application/json'});
-  });
-}
-
-/// A phone-width screen tall enough to lay out a whole test conversation at once.
-Future<(Session, FakeServer)> pump(WidgetTester tester, Widget screen) async {
-  BotSnapshots.instance.enabled = false;
-  final server = FakeServer();
-  final session = Session(api: Api(client: server.client))
-    ..api.server = 'https://bots.example.com'
-    ..status = Status.ready;
-  tester.view.physicalSize = const Size(1170, 9000);
-  tester.view.devicePixelRatio = 3;
-  addTearDown(tester.view.reset);
-  await tester.pumpWidget(
-    SessionScope(
-      session: session,
-      child: MaterialApp(theme: themeFor(Palette.dark), home: screen),
-    ),
-  );
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 100));
-  return (session, server);
-}
+import 'support.dart';
 
 void main() {
   testWidgets('home lists bots, the one waiting on you first', (tester) async {
@@ -254,5 +119,22 @@ void main() {
     expect(find.byType(ChatScreen), findsNothing);
     expect(find.text('Server address'), findsOneWidget);
     expect(server.writes.any((w) => w.$2 == '/auth/sign-out'), isFalse);
+  });
+
+  testWidgets('a lost connection says so in the chat, and clears when it is back', (tester) async {
+    final (_, server) = await pump(tester, ChatScreen(bot: Bot.fromJson(bots.first)));
+    const banner = 'Can’t reach the server — reconnecting…';
+    expect(find.text(banner), findsNothing);
+
+    server.failMessages = true;
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(banner), findsOneWidget);
+    expect(find.text('Find the cheapest travel book'), findsOneWidget);
+
+    server.failMessages = false;
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(banner), findsNothing);
   });
 }

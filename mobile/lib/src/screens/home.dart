@@ -179,152 +179,165 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final visible = _visible;
 
     return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 6, 6, 4),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => _open(const SettingsScreen()),
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: p.raised,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: p.line),
-                      ),
-                      child: session.me == null
-                          ? Icon(Icons.settings_outlined, size: 19, color: p.text)
-                          : Text(
-                              session.me!.initial,
-                              style: TextStyle(
-                                color: p.text,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 16,
-                              ),
-                            ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      'Orgbots',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: p.text,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                  ),
-                  RoundIcon(
-                    icon: Icons.edit_square,
-                    tooltip: 'New bot',
-                    onPressed: () => _open(const NewBotScreen()),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-              child: TextField(
-                onChanged: (v) => setState(() => _query = v),
-                textInputAction: TextInputAction.search,
-                style: TextStyle(color: p.text, fontSize: 16),
-                decoration: fieldDecoration(context, hint: 'Search bots and messages', pill: true)
-                    .copyWith(
-                      prefixIcon: Icon(Icons.search, color: p.textFaint, size: 20),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 11),
-                    ),
-              ),
-            ),
-            if (session.status == Status.offline)
+      body: Readable(
+        child: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Column(
-                  spacing: 8,
+                padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
+                child: Row(
                   children: [
-                    const Notice('Can’t reach your server right now.'),
-                    PillButton(
-                      label: 'Try again',
-                      kind: ButtonKind.secondary,
-                      onPressed: () async {
-                        await session.refresh();
-                        await _load();
-                      },
+                    // A labelled, 44-point target around the 36-point avatar.
+                    Tooltip(
+                      message: 'Settings',
+                      child: InkResponse(
+                        radius: 24,
+                        onTap: () => _open(const SettingsScreen()),
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: p.raised,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: p.line),
+                            ),
+                            child: session.me == null
+                                ? Icon(Icons.settings_outlined, size: 19, color: p.text)
+                                : Text(
+                                    session.me!.initial,
+                                    style: TextStyle(
+                                      color: p.text,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'Orgbots',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: p.text,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                    ),
+                    RoundIcon(
+                      icon: Icons.edit_square,
+                      tooltip: 'New bot',
+                      onPressed: () => _open(const NewBotScreen()),
                     ),
                   ],
                 ),
-              )
-            else if (_error != null && bots != null)
-              Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Notice(_error!)),
-            Expanded(
-              child: bots == null
-                  ? Center(
-                      child: _error == null
-                          ? const CircularProgressIndicator()
-                          : Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                spacing: 10,
-                                children: [
-                                  Notice(_error!),
-                                  PillButton(
-                                    label: 'Try again',
-                                    kind: ButtonKind.secondary,
-                                    onPressed: _load,
-                                  ),
-                                ],
-                              ),
-                            ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      color: p.text,
-                      backgroundColor: p.raised,
-                      child: visible.isEmpty
-                          ? ListView(
-                              children: [
-                                if (_query.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 48),
-                                    child: Text(
-                                      'Nothing matches “$_query”.',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(color: p.textFaint, fontSize: 16),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                child: TextField(
+                  onChanged: (v) => setState(() => _query = v),
+                  textInputAction: TextInputAction.search,
+                  style: TextStyle(color: p.text, fontSize: 16),
+                  decoration: fieldDecoration(context, hint: 'Search bots and messages', pill: true)
+                      .copyWith(
+                        prefixIcon: Icon(Icons.search, color: p.textFaint, size: 20),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
+                ),
+              ),
+              if (session.status == Status.offline)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Column(
+                    spacing: 8,
+                    children: [
+                      const Notice('Can’t reach your server right now.'),
+                      PillButton(
+                        label: 'Try again',
+                        kind: ButtonKind.secondary,
+                        onPressed: () async {
+                          await session.refresh();
+                          await _load();
+                        },
+                      ),
+                    ],
+                  ),
+                )
+              else if (_error != null && bots != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Notice(_error!),
+                ),
+              Expanded(
+                child: bots == null
+                    ? Center(
+                        child: _error == null
+                            ? const CircularProgressIndicator()
+                            : Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  spacing: 10,
+                                  children: [
+                                    Notice(_error!),
+                                    PillButton(
+                                      label: 'Try again',
+                                      kind: ButtonKind.secondary,
+                                      onPressed: _load,
                                     ),
-                                  )
-                                else
-                                  _EmptyState(onCreate: () => _open(const NewBotScreen())),
-                              ],
-                            )
-                          : ListView.builder(
-                              padding: EdgeInsets.only(
-                                bottom: MediaQuery.paddingOf(context).bottom + 100,
+                                  ],
+                                ),
                               ),
-                              itemCount: visible.length,
-                              itemBuilder: (context, i) {
-                                final bot = visible[i];
-                                return _BotRow(
-                                  bot: bot,
-                                  parent: bot.parentBotId == null ? null : names[bot.parentBotId],
-                                  onTap: () {
-                                    tap();
-                                    _open(ChatScreen(bot: bot));
-                                  },
-                                  onLongPress: () => _options(bot),
-                                );
-                              },
-                            ),
-                    ),
-            ),
-          ],
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _load,
+                        color: p.text,
+                        backgroundColor: p.raised,
+                        child: visible.isEmpty
+                            ? ListView(
+                                children: [
+                                  if (_query.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 48),
+                                      child: Text(
+                                        'Nothing matches “$_query”.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: p.textFaint, fontSize: 16),
+                                      ),
+                                    )
+                                  else
+                                    _EmptyState(onCreate: () => _open(const NewBotScreen())),
+                                ],
+                              )
+                            : ListView.builder(
+                                padding: EdgeInsets.only(
+                                  bottom: MediaQuery.paddingOf(context).bottom + 100,
+                                ),
+                                itemCount: visible.length,
+                                itemBuilder: (context, i) {
+                                  final bot = visible[i];
+                                  return _BotRow(
+                                    bot: bot,
+                                    parent: bot.parentBotId == null ? null : names[bot.parentBotId],
+                                    onTap: () {
+                                      tap();
+                                      _open(ChatScreen(bot: bot));
+                                    },
+                                    onLongPress: () => _options(bot),
+                                  );
+                                },
+                              ),
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
@@ -398,21 +411,30 @@ class _BotRow extends StatelessWidget {
                   Row(
                     spacing: 6,
                     children: [
-                      Flexible(
-                        child: Text(
-                          bot.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: p.text,
-                            fontSize: 16,
-                            fontWeight: bot.unread ? FontWeight.w700 : FontWeight.w600,
-                          ),
+                      // The name gets all the room the time does not need; its icons
+                      // follow it rather than drifting to the right edge.
+                      Expanded(
+                        child: Row(
+                          spacing: 6,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                bot.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: p.text,
+                                  fontSize: 16,
+                                  fontWeight: bot.unread ? FontWeight.w700 : FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            if (bot.pinned) Icon(Icons.push_pin, size: 13, color: p.textFaint),
+                            if (bot.visibility == 'team')
+                              Icon(Icons.group, size: 14, color: p.textFaint),
+                          ],
                         ),
                       ),
-                      if (bot.pinned) Icon(Icons.push_pin, size: 13, color: p.textFaint),
-                      if (bot.visibility == 'team') Icon(Icons.group, size: 14, color: p.textFaint),
-                      const Spacer(),
                       if (last != null)
                         Text(
                           timeAgo(last.createdAt),

@@ -29,34 +29,57 @@ class ScreenshotThumb extends StatelessWidget {
         ),
       ),
     );
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        PageRouteBuilder<void>(
-          opaque: false,
-          barrierColor: Colors.black,
-          pageBuilder: (context, _, _) => GestureDetector(
-            onTap: () => Navigator.of(context).pop(),
-            child: InteractiveViewer(
-              maxScale: 5,
-              child: Center(
-                child: Image.network(
-                  api.screenshotUrl(botId, screenshotId).toString(),
-                  headers: api.authHeaders,
+    return Semantics(
+      button: true,
+      label: 'Screenshot of the bot’s screen. Open full size',
+      child: GestureDetector(
+        onTap: () => Navigator.of(context).push(
+          PageRouteBuilder<void>(
+            opaque: false,
+            barrierColor: Colors.black,
+            pageBuilder: (context, _, _) => Stack(
+              children: [
+                GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: InteractiveViewer(
+                    maxScale: 5,
+                    child: Center(
+                      child: Image.network(
+                        api.screenshotUrl(botId, screenshotId).toString(),
+                        headers: api.authHeaders,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                SafeArea(
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: IconButton(
+                        tooltip: 'Close',
+                        color: Colors.white,
+                        style: IconButton.styleFrom(backgroundColor: Colors.white12),
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
-      ),
-      child: Container(
-        margin: const EdgeInsets.only(top: 8),
-        decoration: BoxDecoration(
-          color: p.raised,
-          border: Border.all(color: p.line),
-          borderRadius: BorderRadius.circular(Radii.md),
+        child: Container(
+          margin: const EdgeInsets.only(top: 8),
+          decoration: BoxDecoration(
+            color: p.raised,
+            border: Border.all(color: p.line),
+            borderRadius: BorderRadius.circular(Radii.md),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: AspectRatio(aspectRatio: viewportWidth / viewportHeight, child: image),
         ),
-        clipBehavior: Clip.antiAlias,
-        child: AspectRatio(aspectRatio: viewportWidth / viewportHeight, child: image),
       ),
     );
   }
@@ -211,26 +234,33 @@ class _ApprovalCardState extends State<ApprovalCard> {
         if (widget.live) ...[
           const SizedBox(height: 2),
           PillButton(label: 'Allow once', busy: _busy == 'once', onPressed: () => _answer('once')),
-          Row(
-            spacing: 8,
-            children: [
-              Expanded(
-                child: PillButton(
-                  label: 'Always allow',
-                  kind: ButtonKind.secondary,
-                  busy: _busy == 'always',
-                  onPressed: () => _answer('always'),
-                ),
-              ),
-              Expanded(
-                child: PillButton(
-                  label: 'Deny',
-                  kind: ButtonKind.danger,
-                  busy: _busy == 'deny',
-                  onPressed: () => _answer('deny'),
-                ),
-              ),
-            ],
+          // Side by side where both labels fit; stacked on a narrow phone or large text,
+          // so "Always allow" is never cut short.
+          LayoutBuilder(
+            builder: (context, box) {
+              final always = PillButton(
+                label: 'Always allow',
+                kind: ButtonKind.secondary,
+                busy: _busy == 'always',
+                onPressed: () => _answer('always'),
+              );
+              final deny = PillButton(
+                label: 'Deny',
+                kind: ButtonKind.danger,
+                busy: _busy == 'deny',
+                onPressed: () => _answer('deny'),
+              );
+              final roomy = box.maxWidth >= MediaQuery.textScalerOf(context).scale(300);
+              return roomy
+                  ? Row(
+                      spacing: 8,
+                      children: [
+                        Expanded(child: always),
+                        Expanded(child: deny),
+                      ],
+                    )
+                  : Column(spacing: 8, children: [always, deny]);
+            },
           ),
         ],
       ],
@@ -386,12 +416,10 @@ class _CredentialCardState extends State<CredentialCard> {
           Text('Answered', style: TextStyle(color: p.textFaint, fontSize: 13.5))
         else ...[
           for (final s in m.savedLogins)
-            PillButton(
-              label: 'Use saved login ${s.label}',
-              kind: ButtonKind.secondary,
-              icon: Icons.key_outlined,
+            _SavedLogin(
+              account: s.label,
               busy: _busy == s.id,
-              onPressed: () => _finish(
+              onTap: () => _finish(
                 s.id,
                 () => api.chooseSavedLogin(widget.botId, m.credentialRequestId, s.id),
               ),
@@ -433,16 +461,19 @@ class _CredentialCardState extends State<CredentialCard> {
             ),
           ),
           if (keepable)
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Save this login so ${widget.botName} can sign in again without asking',
-                    style: TextStyle(color: p.textDim, fontSize: 13.5, height: 1.4),
+            // One control for screen readers: the sentence is the switch's label.
+            MergeSemantics(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Save this login so ${widget.botName} can sign in again without asking',
+                      style: TextStyle(color: p.textDim, fontSize: 13.5, height: 1.4),
+                    ),
                   ),
-                ),
-                Switch(value: _save, onChanged: (v) => setState(() => _save = v)),
-              ],
+                  Switch(value: _save, onChanged: (v) => setState(() => _save = v)),
+                ],
+              ),
             ),
           if (_error != null) Notice(_error!),
           PillButton(
@@ -464,6 +495,62 @@ class _CredentialCardState extends State<CredentialCard> {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// A saved login to use instead of typing: the account on its own line, in full, since
+/// an email address rarely fits beside "Use saved login" on a phone.
+class _SavedLogin extends StatelessWidget {
+  const _SavedLogin({required this.account, required this.busy, required this.onTap});
+  final String account;
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Material(
+      color: p.raised,
+      borderRadius: BorderRadius.circular(Radii.md),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Radii.md),
+        onTap: busy
+            ? null
+            : () {
+                tap();
+                onTap();
+              },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            spacing: 12,
+            children: [
+              Icon(Icons.key_outlined, size: 20, color: p.text),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: 2,
+                  children: [
+                    Text(
+                      'Use saved login',
+                      style: TextStyle(color: p.text, fontSize: 15, fontWeight: FontWeight.w600),
+                    ),
+                    Text(account, style: TextStyle(color: p.textDim, fontSize: 13.5)),
+                  ],
+                ),
+              ),
+              if (busy)
+                SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: p.textDim),
+                )
+              else
+                Icon(Icons.chevron_right, color: p.textFaint),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

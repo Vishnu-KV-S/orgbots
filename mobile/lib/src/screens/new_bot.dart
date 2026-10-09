@@ -94,59 +94,80 @@ class _NewBotScreenState extends State<NewBotScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.paddingOf(context).bottom + 24),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        children: [
-          Center(
-            child: Bot3D(
-              key: const ValueKey('preview'),
-              botId: 'new-${t.preset}',
-              appearance: presets[t.preset]!,
-              mood: 'happy',
-              size: 170,
+      body: Readable(
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.paddingOf(context).bottom + 24),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          children: [
+            Center(
+              child: Bot3D(
+                key: const ValueKey('preview'),
+                botId: 'new-${t.preset}',
+                appearance: presets[t.preset]!,
+                mood: 'happy',
+                size: 170,
+              ),
             ),
-          ),
-          const SectionLabel('Start from'),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 1.25,
-            children: [
-              for (var i = 0; i < botTemplates.length; i++)
-                _TemplateCard(selected: i == _chosen, index: i, onTap: () => _choose(i)),
-            ],
-          ),
-          const SectionLabel('Name'),
-          TextField(
-            controller: _name,
-            maxLength: 60,
-            onChanged: (_) => setState(() {}),
-            style: TextStyle(color: p.text, fontSize: 16),
-            decoration: fieldDecoration(context).copyWith(counterText: ''),
-          ),
-          const SectionLabel('What is it for?'),
-          TextField(
-            controller: _mission,
-            minLines: 3,
-            maxLines: 6,
-            style: TextStyle(color: p.text, fontSize: 16, height: 1.4),
-            decoration: fieldDecoration(
-              context,
-              hint: 'e.g. Keep an eye on competitor pricing and tell me when it changes.',
+            const SectionLabel('Start from'),
+            // Rows of cards that grow with their text (large type, long names), two
+            // across on a phone and three on a wider screen.
+            LayoutBuilder(
+              builder: (context, box) {
+                final across = box.maxWidth >= 560 ? 3 : 2;
+                return Column(
+                  spacing: 10,
+                  children: [
+                    for (var start = 0; start < botTemplates.length; start += across)
+                      IntrinsicHeight(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          spacing: 10,
+                          children: [
+                            for (var i = start; i < start + across; i++)
+                              Expanded(
+                                child: i < botTemplates.length
+                                    ? _TemplateCard(
+                                        selected: i == _chosen,
+                                        index: i,
+                                        onTap: () => _choose(i),
+                                      )
+                                    : const SizedBox(),
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
-          ),
-          const SizedBox(height: 16),
-          if (_error != null) ...[Notice(_error!), const SizedBox(height: 12)],
-          PillButton(
-            label: 'Create ${_name.text.trim().isEmpty ? 'bot' : _name.text.trim()}',
-            busy: _busy,
-            onPressed: _name.text.trim().isEmpty ? null : _create,
-          ),
-        ],
+            const SectionLabel('Name'),
+            TextField(
+              controller: _name,
+              maxLength: 60,
+              onChanged: (_) => setState(() {}),
+              style: TextStyle(color: p.text, fontSize: 16),
+              decoration: fieldDecoration(context).copyWith(counterText: ''),
+            ),
+            const SectionLabel('What is it for?'),
+            TextField(
+              controller: _mission,
+              minLines: 3,
+              maxLines: 6,
+              style: TextStyle(color: p.text, fontSize: 16, height: 1.4),
+              decoration: fieldDecoration(
+                context,
+                hint: 'e.g. Keep an eye on competitor pricing and tell me when it changes.',
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_error != null) ...[Notice(_error!), const SizedBox(height: 12)],
+            PillButton(
+              label: 'Create ${_name.text.trim().isEmpty ? 'bot' : _name.text.trim()}',
+              busy: _busy,
+              onPressed: _name.text.trim().isEmpty ? null : _create,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -182,7 +203,7 @@ class _TemplateCard extends StatelessWidget {
                 size: 44,
                 mood: selected ? 'happy' : 'idle',
               ),
-              const Spacer(),
+              const SizedBox(height: 10),
               Text(
                 t.name,
                 style: TextStyle(color: p.text, fontSize: 15.5, fontWeight: FontWeight.w700),

@@ -50,8 +50,12 @@ class PillButton extends StatelessWidget {
             children: [
               if (icon != null) ...[Icon(icon, size: 19, color: fg), const SizedBox(width: 8)],
               Flexible(
+                // Wraps to a second line before it would cut a label short (very
+                // large text on a small phone).
                 child: Text(
                   label,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: fg, fontSize: 16, fontWeight: FontWeight.w600),
                 ),
@@ -76,7 +80,7 @@ class PillButton extends StatelessWidget {
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: 50, minWidth: expand ? double.infinity : 0),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               child: Center(widthFactor: 1, child: child),
             ),
           ),
@@ -106,20 +110,27 @@ class RoundIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
+    // The circle is [size]; the target around it is at least 48 points, as both
+    // platforms' guidelines ask.
     return Tooltip(
       message: tooltip,
-      child: Material(
-        color: filled ? p.raised : Colors.transparent,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () {
-            tap();
-            onPressed();
-          },
-          child: SizedBox.square(
-            dimension: size,
-            child: Icon(icon, size: size * 0.55, color: p.text),
+      child: SizedBox.square(
+        dimension: size < 48 ? 48 : size,
+        child: Center(
+          child: Material(
+            color: filled ? p.raised : Colors.transparent,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () {
+                tap();
+                onPressed();
+              },
+              child: SizedBox.square(
+                dimension: size,
+                child: Icon(icon, size: size * 0.55, color: p.text),
+              ),
+            ),
           ),
         ),
       ),
@@ -141,7 +152,12 @@ class Notice extends StatelessWidget {
       decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.md)),
       child: Text(
         text,
-        style: TextStyle(color: error ? p.danger : p.textDim, fontSize: 13.5, height: 1.4),
+        style: TextStyle(
+          color: error ? p.danger : p.textDim,
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          height: 1.4,
+        ),
       ),
     );
   }
@@ -182,5 +198,22 @@ InputDecoration fieldDecoration(BuildContext context, {String? hint, bool pill =
     border: border,
     enabledBorder: border,
     focusedBorder: border.copyWith(borderSide: BorderSide(color: p.lineStrong)),
+  );
+}
+
+/// Keeps a column of content at a readable width on tablets and in landscape,
+/// centred, the way a chat app does; on a phone it changes nothing.
+class Readable extends StatelessWidget {
+  const Readable({super.key, required this.child, this.maxWidth = 720});
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.topCenter,
+    child: ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: child,
+    ),
   );
 }

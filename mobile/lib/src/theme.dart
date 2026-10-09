@@ -48,8 +48,9 @@ class Palette extends ThemeExtension<Palette> {
     line: Color(0xFF1F1F1F),
     lineStrong: Color(0xFF2E2E2E),
     text: Color(0xFFF1F1F1),
-    textDim: Color(0xFFA3A3A3),
-    textFaint: Color(0xFF6B6B6B),
+    textDim: Color(0xFFB0B0B0),
+    // At least 4.5:1 (WCAG AA) on every dark surface, even the faintest text.
+    textFaint: Color(0xFF8C8C8C),
     accent: Color(0xFFF1F1F1),
     onAccent: Color(0xFF000000),
     bubble: Color(0xFF1C1C1C),
@@ -65,12 +66,13 @@ class Palette extends ThemeExtension<Palette> {
     line: Color(0xFFECECEC),
     lineStrong: Color(0xFFD9D9D9),
     text: Color(0xFF0D0D0D),
-    textDim: Color(0xFF5C5C5C),
-    textFaint: Color(0xFF9A9A9A),
+    textDim: Color(0xFF4A4A4A),
+    // At least 4.5:1 (WCAG AA) on every light surface.
+    textFaint: Color(0xFF666666),
     accent: Color(0xFF0D0D0D),
     onAccent: Color(0xFFFFFFFF),
     bubble: Color(0xFFF1F1F1),
-    danger: Color(0xFFD93A2B),
+    danger: Color(0xFFB42318),
     brightness: Brightness.light,
   );
 
@@ -100,8 +102,10 @@ ThemeData themeFor(Palette p) {
     scaffoldBackgroundColor: p.bg,
     canvasColor: p.bg,
     extensions: [p],
-    splashFactory: NoSplash.splashFactory,
-    highlightColor: Colors.transparent,
+    // Flat, but every tap still answers: a soft wash rather than Material's ripple.
+    splashFactory: InkRipple.splashFactory,
+    splashColor: p.text.withValues(alpha: 0.05),
+    highlightColor: p.text.withValues(alpha: 0.07),
     dividerColor: p.line,
     textTheme: base.textTheme.apply(bodyColor: p.text, displayColor: p.text),
     iconTheme: IconThemeData(color: p.text),

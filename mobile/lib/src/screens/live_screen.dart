@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../api.dart';
 import '../session.dart';
+import '../web_views.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -41,7 +41,7 @@ class _LiveScreenState extends State<LiveScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (kIsWeb || _web != null) return;
+    if (!WebViews.enabled || _web != null) return;
     final session = SessionScope.read(context);
     final p = Palette.of(context);
     String hex(Color c) => '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
@@ -175,128 +175,142 @@ class _LiveScreenState extends State<LiveScreen> {
           ],
         ),
       ),
-      body: SafeArea(
-        top: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              decoration: BoxDecoration(
-                border: Border.all(color: _human ? amber : p.line, width: 1.5),
-                borderRadius: BorderRadius.circular(Radii.md),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: AspectRatio(
-                aspectRatio: viewportWidth / viewportHeight,
-                child: _web == null
-                    ? Center(
+      body: Readable(
+        maxWidth: 900,
+        child: SafeArea(
+          top: false,
+          // Fills the screen with the controls at the bottom; scrolls when large text or
+          // the keyboard leaves too little room for them.
+          child: CustomScrollView(
+            slivers: [
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: _human ? amber : p.line, width: 1.5),
+                        borderRadius: BorderRadius.circular(Radii.md),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: AspectRatio(
+                        aspectRatio: viewportWidth / viewportHeight,
+                        child: _web == null
+                            ? Center(
+                                child: Text(
+                                  'The live screen is in the phone app.',
+                                  style: TextStyle(color: p.textFaint),
+                                ),
+                              )
+                            : WebViewWidget(controller: _web!),
+                      ),
+                    ),
+                    if (_url.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
                         child: Text(
-                          'The live screen is in the phone app.',
-                          style: TextStyle(color: p.textFaint),
+                          _url,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: p.textFaint, fontSize: 11.5),
                         ),
-                      )
-                    : WebViewWidget(controller: _web!),
-              ),
-            ),
-            if (_url.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-                child: Text(
-                  _url,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: p.textFaint, fontSize: 11.5),
-                ),
-              ),
-            const Spacer(),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                spacing: 10,
-                children: [
-                  if (_error != null) Notice(_error!),
-                  if (_human) ...[
-                    Text(
-                      'Tap the picture to click. Pinch to zoom.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: p.textDim, fontSize: 13.5),
-                    ),
-                    Row(
-                      spacing: 8,
-                      children: [
-                        _Tool(
-                          Icons.arrow_back,
-                          'Back',
-                          () => _send([
-                            {'kind': 'back'},
-                          ]),
-                        ),
-                        _Tool(
-                          Icons.refresh,
-                          'Reload',
-                          () => _send([
-                            {'kind': 'reload'},
-                          ]),
-                        ),
-                        _Tool(Icons.keyboard_arrow_up, 'Scroll up', () => _scroll(-500)),
-                        _Tool(Icons.keyboard_arrow_down, 'Scroll down', () => _scroll(500)),
-                        _Tool(
-                          Icons.keyboard_return,
-                          'Enter',
-                          () => _send([
-                            {'kind': 'key', 'key': 'Enter'},
-                          ]),
-                        ),
-                      ],
-                    ),
-                    _Field(
-                      controller: _text,
-                      hint: 'Type into the focused field',
-                      icon: Icons.arrow_upward,
-                      onSubmit: (v) {
-                        if (v.isEmpty) return;
-                        _send([
-                          {'kind': 'type', 'text': v},
-                        ]);
-                        _text.clear();
-                      },
-                    ),
-                    _Field(
-                      controller: _address,
-                      hint: 'Go to address',
-                      icon: Icons.public,
-                      onSubmit: (v) {
-                        final raw = v.trim();
-                        if (raw.isEmpty) return;
-                        _send([
-                          {
-                            'kind': 'navigate',
-                            'url': RegExp('^https?://').hasMatch(raw) ? raw : 'https://$raw',
-                          },
-                        ]);
-                        _address.clear();
-                      },
-                    ),
-                    PillButton(label: 'Give control back', busy: _busy, onPressed: _toggle),
-                  ] else ...[
-                    Text(
-                      'Take control to sign in, solve a CAPTCHA or finish a step yourself. The bot pauses until you hand it back.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: p.textDim, fontSize: 13.5, height: 1.45),
-                    ),
-                    PillButton(
-                      label: 'Take control',
-                      icon: Icons.back_hand_outlined,
-                      busy: _busy,
-                      onPressed: _toggle,
+                      ),
+                    const Spacer(),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        spacing: 10,
+                        children: [
+                          if (_error != null) Notice(_error!),
+                          if (_human) ...[
+                            Text(
+                              'Tap the picture to click. Pinch to zoom.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: p.textDim, fontSize: 13.5),
+                            ),
+                            Row(
+                              spacing: 8,
+                              children: [
+                                _Tool(
+                                  Icons.arrow_back,
+                                  'Back',
+                                  () => _send([
+                                    {'kind': 'back'},
+                                  ]),
+                                ),
+                                _Tool(
+                                  Icons.refresh,
+                                  'Reload',
+                                  () => _send([
+                                    {'kind': 'reload'},
+                                  ]),
+                                ),
+                                _Tool(Icons.keyboard_arrow_up, 'Scroll up', () => _scroll(-500)),
+                                _Tool(Icons.keyboard_arrow_down, 'Scroll down', () => _scroll(500)),
+                                _Tool(
+                                  Icons.keyboard_return,
+                                  'Enter',
+                                  () => _send([
+                                    {'kind': 'key', 'key': 'Enter'},
+                                  ]),
+                                ),
+                              ],
+                            ),
+                            _Field(
+                              controller: _text,
+                              hint: 'Type into the focused field',
+                              icon: Icons.arrow_upward,
+                              onSubmit: (v) {
+                                if (v.isEmpty) return;
+                                _send([
+                                  {'kind': 'type', 'text': v},
+                                ]);
+                                _text.clear();
+                              },
+                            ),
+                            _Field(
+                              controller: _address,
+                              hint: 'Go to address',
+                              icon: Icons.public,
+                              onSubmit: (v) {
+                                final raw = v.trim();
+                                if (raw.isEmpty) return;
+                                _send([
+                                  {
+                                    'kind': 'navigate',
+                                    'url': RegExp('^https?://').hasMatch(raw)
+                                        ? raw
+                                        : 'https://$raw',
+                                  },
+                                ]);
+                                _address.clear();
+                              },
+                            ),
+                            PillButton(label: 'Give control back', busy: _busy, onPressed: _toggle),
+                          ] else ...[
+                            Text(
+                              'Take control to sign in, solve a CAPTCHA or finish a step yourself. The bot pauses until you hand it back.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: p.textDim, fontSize: 13.5, height: 1.45),
+                            ),
+                            PillButton(
+                              label: 'Take control',
+                              icon: Icons.back_hand_outlined,
+                              busy: _busy,
+                              onPressed: _toggle,
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                   ],
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

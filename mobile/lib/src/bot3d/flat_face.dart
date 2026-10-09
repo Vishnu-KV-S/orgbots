@@ -8,8 +8,8 @@ Color hexColor(Object? hex, [Color fallback = const Color(0xFFECEBE7)]) {
   return v == null ? fallback : Color(0xFF000000 | v);
 }
 
-/// A flat face in the bot's colours — the web app's `FlatFace`: shown while the 3D
-/// bot loads, and in its place where WebGL is unavailable.
+/// A flat face in the bot's colours: shown while the 3D bot loads, and in its place
+/// where WebGL is unavailable.
 class FlatFace extends StatelessWidget {
   const FlatFace({super.key, required this.look, required this.size});
 
@@ -44,7 +44,9 @@ class FlatFace extends StatelessWidget {
           width: size * 0.9,
           height: size * 0.84,
           decoration: BoxDecoration(
-            color: hexColor(look['body']),
+            // The 3D bots' shells are white whatever their colours (the colour is in the
+            // eyes and accents), so the stand-in matches the picture that replaces it.
+            color: const Color(0xFFECEBE7),
             borderRadius: BorderRadius.circular(radius),
           ),
           alignment: Alignment.center,

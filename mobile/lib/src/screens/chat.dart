@@ -155,94 +155,123 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Divider(height: 1, color: p.line),
         ),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: !convo.loaded
-                ? Center(
-                    child: convo.error != null
-                        ? Padding(padding: const EdgeInsets.all(24), child: Notice(convo.error!))
-                        : const CircularProgressIndicator(),
-                  )
-                : empty
-                ? _Welcome(bot: _bot, mood: mood)
-                : ListView.separated(
-                    reverse: true,
-                    keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                    padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
-                    itemCount: items.length + (thinking ? 1 : 0),
-                    separatorBuilder: (_, _) => const SizedBox(height: 18),
-                    itemBuilder: (context, i) {
-                      if (thinking && i == 0) return _Thinking(name: _bot.name);
-                      final index = items.length - 1 - (i - (thinking ? 1 : 0));
-                      final item = items[index];
-                      return ItemView(
-                        key: ValueKey(item.id),
-                        item: item,
-                        bot: _bot,
-                        live: index == items.length - 1 && convo.working,
-                        conversation: convo,
-                      );
-                    },
-                  ),
-          ),
-          SafeArea(
-            top: false,
-            minimum: const EdgeInsets.only(bottom: 10),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-              child: Column(
-                spacing: 8,
-                children: [
-                  if (_sendError != null)
-                    GestureDetector(
-                      onTap: () => setState(() => _sendError = null),
-                      child: Notice(_sendError!),
-                    ),
-                  if (empty)
-                    SizedBox(
-                      height: 42,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
+      body: Readable(
+        child: Column(
+          children: [
+            // The conversation stays on screen when the server stops answering; this
+            // says so, and goes away by itself on the next answer.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              child: convo.loaded && convo.error != null
+                  ? Container(
+                      width: double.infinity,
+                      color: p.raised,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        spacing: 10,
                         children: [
-                          for (final (title, text) in [
-                            for (final d in _bot.duties.take(3)) (d, '$d: '),
-                            ...starters,
-                          ].take(5))
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: OutlinedButton(
-                                onPressed: () {
-                                  tap();
-                                  _draft
-                                    ..text = text
-                                    ..selection = TextSelection.collapsed(offset: text.length);
-                                },
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: p.text,
-                                  side: BorderSide(color: p.lineStrong),
-                                  shape: const StadiumBorder(),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                                ),
-                                child: Text(title, style: const TextStyle(fontSize: 14.5)),
-                              ),
+                          SizedBox.square(
+                            dimension: 12,
+                            child: CircularProgressIndicator(strokeWidth: 1.5, color: p.textDim),
+                          ),
+                          Expanded(
+                            child: Text(
+                              'Can’t reach the server — reconnecting…',
+                              style: TextStyle(color: p.textDim, fontSize: 13),
                             ),
+                          ),
                         ],
                       ),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+            Expanded(
+              child: !convo.loaded
+                  ? Center(
+                      child: convo.error != null
+                          ? Padding(padding: const EdgeInsets.all(24), child: Notice(convo.error!))
+                          : const CircularProgressIndicator(),
+                    )
+                  : empty
+                  ? _Welcome(bot: _bot, mood: mood)
+                  : ListView.separated(
+                      reverse: true,
+                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
+                      itemCount: items.length + (thinking ? 1 : 0),
+                      separatorBuilder: (_, _) => const SizedBox(height: 18),
+                      itemBuilder: (context, i) {
+                        if (thinking && i == 0) return _Thinking(name: _bot.name);
+                        final index = items.length - 1 - (i - (thinking ? 1 : 0));
+                        final item = items[index];
+                        return ItemView(
+                          key: ValueKey(item.id),
+                          item: item,
+                          bot: _bot,
+                          live: index == items.length - 1 && convo.working,
+                          conversation: convo,
+                        );
+                      },
                     ),
-                  Composer(
-                    controller: _draft,
-                    botId: _bot.id,
-                    botName: _bot.name,
-                    working: convo.working,
-                    onSend: _send,
-                    onStop: _stop,
-                  ),
-                ],
+            ),
+            SafeArea(
+              top: false,
+              minimum: const EdgeInsets.only(bottom: 10),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                child: Column(
+                  spacing: 8,
+                  children: [
+                    if (_sendError != null)
+                      GestureDetector(
+                        onTap: () => setState(() => _sendError = null),
+                        child: Notice(_sendError!),
+                      ),
+                    if (empty)
+                      SizedBox(
+                        height: 42,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: [
+                            for (final (title, text) in [
+                              for (final d in _bot.duties.take(3)) (d, '$d: '),
+                              ...starters,
+                            ].take(5))
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: OutlinedButton(
+                                  onPressed: () {
+                                    tap();
+                                    _draft
+                                      ..text = text
+                                      ..selection = TextSelection.collapsed(offset: text.length);
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: p.text,
+                                    side: BorderSide(color: p.lineStrong),
+                                    shape: const StadiumBorder(),
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  ),
+                                  child: Text(title, style: const TextStyle(fontSize: 14.5)),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    Composer(
+                      controller: _draft,
+                      botId: _bot.id,
+                      botName: _bot.name,
+                      working: convo.working,
+                      onSend: _send,
+                      onStop: _stop,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
