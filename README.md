@@ -1,4 +1,108 @@
-# agent-org-runtime — M0 + M1 + M2 + M3 + M4 + M5a
+<div align="center">
+
+# Orgbots
+
+**Open-source AI employees that work on a computer of their own.**<br/>
+They browse real websites, remember what they learn and work in teams: a self-hosted alternative to Grok Bot, OpenAI Dots and Meta Muse, on a durable, governed agent runtime.
+
+![Five bots: idle, happy, thinking, asleep, and asking for you](docs/images/bots.png)
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?logo=langchain&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)
+![three.js](https://img.shields.io/badge/three.js-000000?logo=threedotjs&logoColor=white)
+
+</div>
+
+**Orgbots** is an open-source platform for running **autonomous AI agents as persistent employees**. Each bot has its own screen on a shared cloud computer, browses and acts on real websites, keeps a job brief and a long-term memory, builds its own team of helper bots, and asks you before it does anything that matters. Under the bots sits a production-minded **agent runtime**: durable runs that survive crashes, exactly-once tool effects, budgets, approvals, a kill switch, prompt-injection defences and an audit trail for every decision.
+
+## Why it is different
+
+Like Grok Bot, OpenAI Dots and Meta Muse, every bot is an always-on coworker with its own screen on a cloud computer. Unlike them, Orgbots is **open source and runs on your own infrastructure**, and where most agent frameworks stop at a loop around a model, it is built like infrastructure:
+
+- **Durable by construction.** Runs are journaled. Kill a worker in the middle of a tool call and the run resumes elsewhere, and the effect journal proves the tool ran **exactly once**.
+- **Governed.** Every action goes through a tool gateway that checks authority, budgets at every level, rate limits and approvals, writes an audit row for each *decision*, and honours a kill switch you can pull without a redeploy.
+- **Safe with real credentials.** Secrets live in an encrypted vault rather than the environment, passwords are typed by the computer rather than the model, and an injection corpus is part of the test suite.
+- **Organization as code.** Departments, actors and their authority are YAML documents with a `validate | plan | apply | drift` control plane, like Terraform for an AI team.
+- **Built to be measured.** Each milestone ships with the numbers that decide whether it deserves to exist: cost per accepted outcome, rejection rate, unassisted completion rate.
+
+## Features
+
+**Bots (AI employees)**
+- **Computer use with a real browser:** each bot drives its own tab in a persistent Chromium profile, one action per step, re-reading the page each time
+- **Human in the loop:** approvals for consequential steps (*Allow once*, *Always allow*, *Deny*), stop and redirect, and *take control* to sign in or solve a CAPTCHA
+- **A job brief and a memory:** typed long-term memories that strengthen with use and fade when unused, plus a diary of every turn
+- **Helper bots and delegation:** a bot can create helpers and hand them tasks, each with its own budget and isolation
+- **Login vault, team files, attachments, uploads, vision, long tasks and working memory**
+- **Routines** on a schedule or on events, **skills** taught by demonstration, a sandboxed **terminal**
+- **Group chats** where bots message bots, **Auto Review** by a second model, **voice** chat and dictation
+- **MCP connectors** (apps) every bot can call, **shareable bot templates**, an installable **PWA** with push notifications
+- **Teams and enterprise:** roles, team bots, network allowlists, team secrets, **SCIM 2.0**, an audit log and **OpenTelemetry** export
+- **Tag @bot on X** to hand it a task
+- **Animated 3D avatars** in three.js: glossy, expressive, with a mood for every action
+
+**Runtime**
+- Durable runs on **LangGraph** with Postgres checkpoints, a transactional outbox and a Redis-backed worker pool
+- An authority resolver, a budget hierarchy, escalating approvals, a kill switch and credentials out of the environment
+- Memory with shadow mode (**Mem0** or native, optional **pgvector**) that ships dark until it proves it pays for itself
+- Bounded **multi-agent delegation** with per-tree budget pools and parent/child isolation
+- An **Anthropic-compatible** model client, used with **DeepSeek**
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI["Next.js UI<br/>bots, chat, 3D avatars"] -->|REST + SSE| API["FastAPI API"]
+  API -->|start_run| DB[("PostgreSQL<br/>runs, journal, audit")]
+  DB -->|outbox| Q[("Redis")]
+  Q --> W["Workers<br/>LangGraph graphs"]
+  W --> GW["Tool gateway<br/>authority, budgets,<br/>approvals, kill switch"]
+  GW --> LLM["LLM provider<br/>DeepSeek"]
+  GW --> PC["Computer<br/>shared Chromium,<br/>one tab per bot"]
+  GW --> MEM["Memory<br/>native or Mem0"]
+```
+
+## Quick start
+
+Requires Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 20+ and Docker (or see [Without Docker](#without-docker)).
+
+```bash
+git clone https://github.com/Vishnu-KV-S/orgbots.git
+cd orgbots
+
+docker compose up -d --wait                   # Postgres, Redis, MinIO
+uv venv --python 3.12 && uv pip install -e ".[dev,computer]"
+uv run playwright install chromium            # the browser the bots drive
+uv run alembic upgrade head
+
+export RUNTIME_DEEPSEEK_API_KEY=...           # or put it in .env (gitignored)
+uv run python -m runtime.computer.main        # the shared browser, :8020
+uv run uvicorn runtime.api.app:app --port 8000
+uv run python -m runtime.worker.main
+cd ui && npm install && npm run dev           # http://localhost:3000
+```
+
+Run the tests with `uv run pytest -q`. Everything below is the full technical write-up: how each part works, why it was built that way, and what each test proves.
+
+## Tech stack
+
+- **Backend:** Python 3.12, FastAPI, LangGraph, SQLAlchemy (async), Alembic, PostgreSQL, Redis, Playwright, OpenTelemetry, structlog
+- **Frontend:** Next.js, React 19, three.js with React Three Fiber, CodeMirror, React Flow
+- **Quality:** pytest with Hypothesis, chaos tests that kill workers mid-run, ruff, mypy and import-linter layer contracts
+
+## Author
+
+Built by **[Vishnu KV](https://github.com/Vishnu-KV-S)**. If this project is useful to you, a ⭐ helps others find it. Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Licensed under the [MIT License](LICENSE).
+
+---
+
+## How it was built: milestones M0 to M5a
 
 **M0** proved runtime correctness: kill a worker mid-tool-call; the run resumes and
 the effect journal proves the tool executed exactly once. Test T7, fifty iterations,

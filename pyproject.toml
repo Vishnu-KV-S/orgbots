@@ -1,7 +1,15 @@
 [project]
 name = "agent-org-runtime"
 version = "0.1.0"
-description = "Agent org runtime — M0: runtime correctness"
+description = "Orgbots: open-source AI employees that work on a computer of their own. A self-hosted alternative to Grok Bot, OpenAI Dots and Meta Muse, on a durable, governed agent runtime"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Vishnu KV", email = "vishnukv@stockeds.com" }]
+keywords = [
+    "ai-agents", "autonomous-agents", "multi-agent", "browser-automation", "computer-use",
+    "langgraph", "fastapi", "llm", "agent-runtime", "human-in-the-loop",
+    "ai-employees", "grok-bot-alternative", "openai-dots-alternative", "meta-muse-alternative",
+]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.115",
@@ -76,6 +84,11 @@ dev = [
     "types-boto3",
     "types-PyYAML",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Vishnu-KV-S/orgbots"
+Repository = "https://github.com/Vishnu-KV-S/orgbots"
+Issues = "https://github.com/Vishnu-KV-S/orgbots/issues"
 
 [build-system]
 requires = ["hatchling"]

@@ -84,36 +84,25 @@ const COMMON = /* glsl */ `
   varying vec2 vPos;
 
   // --- the sleep screen ---------------------------------------------------------------
-  // A flowing vector field, coloured by its velocity. The field is from MartinRGB's
-  // https://www.shadertoy.com/view/DttSRB (mode 0), via its "Thank you to MartinRGB"
-  // remix; constants are inlined from the original's settings.
-
-  float flowF(vec2 p) {
-    return sin(p.x + sin(p.y + uTime * 0.1)) * sin(p.y * p.x * 0.1 + uTime * 0.2);
-  }
-
-  vec2 flowField(vec2 p) {
-    vec2 ep = vec2(0.05, 0.0);
-    vec2 g = vec2(0.0);
-    // The drift is the same every step, so it is worked out once.
-    vec2 drift = vec2(sin(uTime * 0.25), cos(uTime * 0.25)) / 10.0;
-    for (int i = 0; i < 20; i++) {
-      float t0 = flowF(p);
-      float t1 = flowF(p + ep.xy);
-      float t2 = flowF(p + ep.yx);
-      g = vec2(t1 - t0, t2 - t0) / ep.xx;
-      // Along the field's tangent (twist 50), a little up its gradient (detail 200).
-      p += 0.5 * vec2(-g.y, g.x) + g / 200.0 + drift;
+  // Slow, broad, horizontal waves. A point's height on the screen picks its colour band;
+  // before that, the point is pushed about by a few layers of slow sine currents, each
+  // finer and weaker than the last and moving at its own pace, so the bands bend, swell
+  // and drift instead of lying in straight stripes. Returns the band position; shade
+  // is a soft light and dark that runs along the bands.
+  float sleepWaves(vec2 p, out float shade) {
+    vec2 q = p;
+    for (int i = 1; i <= 5; i++) {
+      float n = float(i);
+      q.y += 0.7 / n * sin(q.x * (0.55 + 0.35 * n) + uTime * (0.17 + 0.05 * n) + n * 1.9);
+      q.x += 0.3 / n * cos(q.y * (0.8 + 0.4 * n) - uTime * (0.11 + 0.04 * n) + n * 0.7);
     }
-    return g;
+    shade = 0.5 + 0.5 * sin(q.y * 5.0 + q.x * 0.6 - uTime * 0.3);
+    return q.y;
   }
 
-  // Hash without Sine, by David Hoskins — https://www.shadertoy.com/view/4djSRW
-  // (Creative Commons Attribution-ShareAlike 4.0). Used to dither the gradients.
-  float hash12(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 19.19);
-    return fract((p3.x + p3.y) * p3.z);
+  // Interleaved gradient noise (Jimenez, 2014): cheap, even noise for dithering.
+  float dither(vec2 frag) {
+    return fract(52.9829189 * fract(dot(frag, vec2(0.06711056, 0.00583715))));
   }
 
   float eye(vec2 p, vec4 e, vec3 lid) {
@@ -195,20 +184,16 @@ const COMMON = /* glsl */ `
     float vignette = 1.0 - 0.6 * smoothstep(0.4, 1.1, max(edge.x, edge.y));
     col += vec3(0.0012, 0.0014, 0.0024) * vignette;
 
-    // Asleep: the whole panel is the flow field, glowing and breathing with the body.
-    // The field is turned a quarter turn, so its bands lie horizontally, and drawn
-    // about twice the original's size — a few broad waves across the screen — and a
-    // little longer still from side to side.
+    // Asleep: the whole panel fills with slow horizontal waves, glowing and breathing
+    // with the body — a few broad bands from top to bottom.
     if (uSleep > 0.001) {
-      vec2 q = p / uHalf.y;
-      vec2 g = flowField(vec2(q.y * 1.5, -q.x * 1.1));
-      // Coloured by which way the field flows there, round a blue-green palette (iq's
-      // cosine palette held to the cool side of the wheel: deep blue, azure, aqua,
-      // emerald) that drifts slowly, so each wave band is its own shade; the field's
-      // speed keeps the original's soft light and dark between bands.
-      float hue = atan(g.y, g.x) / 6.2832 * 1.5 + length(g) * 0.12 + uTime * 0.03;
+      float shade;
+      float band = sleepWaves(p / uHalf.y * vec2(0.8, 1.2), shade);
+      // Each band its own shade of a blue-green palette (a cosine palette held to the
+      // cool side of the wheel: deep blue, azure, aqua, emerald), drifting slowly.
+      float hue = band * 0.7 + uTime * 0.03;
       vec3 flow = vec3(0.05, 0.62, 0.68) + vec3(0.05, 0.38, 0.32) * cos(6.2832 * (hue + vec3(0.5, 0.0, 0.32)));
-      flow *= 1.15 * (0.75 + 0.35 * clamp(length(g) * 0.5, 0.0, 1.0));
+      flow *= 1.15 * (0.75 + 0.35 * shade);
       // Glow: the brightest bands push toward white, and light pools along the glass's
       // edge instead of falling off into shadow.
       float crest = smoothstep(0.7, 1.2, max(max(flow.r, flow.g), flow.b));
@@ -227,7 +212,7 @@ const FRAG = /* glsl */ `
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
     // A half-step of noise, so the soft gradients do not band.
-    gl_FragColor.rgb += (hash12(gl_FragCoord.xy) - 0.5) / 255.0 * uSleep;
+    gl_FragColor.rgb += (dither(gl_FragCoord.xy) - 0.5) / 255.0 * uSleep;
   }
 `;
 

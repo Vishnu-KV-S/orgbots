@@ -26,3 +26,6 @@ htmlcov/
 # bot has logged into. Never committed.
 .computer/
 dump.rdb
+
+# Personal Claude Code settings: each person keeps their own.
+.claude/settings.local.json
