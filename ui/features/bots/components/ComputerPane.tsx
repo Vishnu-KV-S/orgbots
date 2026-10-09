@@ -109,6 +109,8 @@ function Screen({ bot }: { bot: Bot }) {
   const [live, setLive] = useState<boolean | null>(null);
   const [controller, setCtl] = useState<"bot" | "human">("bot");
   const [url, setUrl] = useState("");
+  /** Where the screen actually is — `url` is also what the person is typing. */
+  const [pageUrl, setPageUrl] = useState("");
   const [editingUrl, setEditingUrl] = useState(false);
   const [typing, setTyping] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -182,6 +184,7 @@ function Screen({ bot }: { bot: Bot }) {
       const mine = status.screens?.find((s) => s.screen_id === bot.id);
       if (mine) {
         setCtl(mine.controller === "human" ? "human" : "bot");
+        setPageUrl(mine.url);
         if (!editingUrl) setUrl(mine.url);
       }
     } catch {
@@ -269,6 +272,7 @@ function Screen({ bot }: { bot: Bot }) {
       inputQueue(
         async (events) => {
           const result = await sendInputs(bot.id, events);
+          if (result.url) setPageUrl(result.url);
           if (result.url && !editing.current) setUrl(result.url);
         },
         (cause) => {
@@ -481,7 +485,15 @@ function Screen({ bot }: { bot: Bot }) {
           <div className="screen-overlay">
             The cloud computer isn&apos;t running.
             <br />
-            Start it with <code>python -m runtime.computer.main</code>
+            Start it with <code>scripts/computer.sh up</code>
+          </div>
+        )}
+        {loaded && reachable !== false && (!pageUrl || pageUrl === "about:blank") && (
+          // A browser with nothing open is a white page; say so, rather than look broken.
+          <div className="screen-overlay screen-empty">
+            {human
+              ? "Nothing is open yet. Type an address in the bar above, then click and type on the page."
+              : `Nothing is open on ${bot.name}'s screen yet. Give it a task, or take control and type an address.`}
           </div>
         )}
         {loaded && (

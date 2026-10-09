@@ -1042,6 +1042,11 @@ a.pbtn {
   padding: 20px;
 }
 
+/* The empty-screen note lets clicks through to the page under it. */
+.screen-empty {
+  pointer-events: none;
+}
+
 .screen-badge {
   position: absolute;
   right: 8px;
