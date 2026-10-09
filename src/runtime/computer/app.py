@@ -28,13 +28,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, SecretStr
 
 from runtime.computer.browser import (
@@ -122,12 +124,18 @@ def _view(
     }
 
 
+_ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
+
+
 class TerminalBody(BaseModel):
     screen_id: str = Field(min_length=1, max_length=64)
     command: str = Field(min_length=1, max_length=20_000)
     timeout_s: float = Field(default=DEFAULT_TIMEOUT_S, ge=1, le=300)
     local: bool = False
     profile: str = Field(default="", pattern=PROFILE.pattern)
+    network: bool = True
+    secrets: dict[str, str] = Field(default_factory=dict, repr=False, max_length=100)
+    """The organization's team secrets, as environment variables in the sandbox."""
 
 
 class WorkspaceWrite(BaseModel):
@@ -172,6 +180,20 @@ def create_app(
             await computer.stop()
 
     app = FastAPI(title="agent-org computer", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def network_policy(request: Request, call_next: Any) -> Any:
+        """`X-Allow-Hosts` on a call about a profile is its organization's network
+        policy: `*` for any host, else the hosts its browser may reach."""
+        raw = request.headers.get("x-allow-hosts")
+        if raw is not None:
+            hosts = None if raw.strip() == "*" else tuple(h for h in raw.split(",") if h)
+            try:
+                await computer.set_allow(request.query_params.get("profile", ""), hosts)
+            except ComputerError as exc:
+                return JSONResponse(status_code=400, content={"detail": str(exc)})
+        return await call_next(request)
+
     app.state.computer = computer
     app.state.terminal = terminal
     app.state.terminal_for = terminal_for
@@ -349,7 +371,12 @@ def create_app(
     async def terminal_run(body: TerminalBody) -> dict[str, Any]:
         try:
             ran = await terminal_for(body.profile).run(
-                body.screen_id, body.command, timeout_s=body.timeout_s, local=body.local
+                body.screen_id,
+                body.command,
+                timeout_s=body.timeout_s,
+                local=body.local,
+                network=body.network,
+                secrets={k: v for k, v in body.secrets.items() if _ENV_NAME.match(k)},
             )
         except TerminalError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

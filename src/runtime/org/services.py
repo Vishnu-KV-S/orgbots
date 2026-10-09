@@ -24,6 +24,7 @@ from runtime.org.goals import GoalService
 from runtime.org.groups import GroupService
 from runtime.org.inbox import InboxService
 from runtime.org.metrics import MetricsService
+from runtime.org.policies import PolicyService
 from runtime.org.routines import RoutineService
 from runtime.org.sessions import SessionService
 from runtime.org.skills import SkillService
@@ -46,6 +47,7 @@ class OrgServices:
     skills: SkillService
     groups: GroupService
     connectors: ConnectorService
+    policies: PolicyService
 
 
 def build_org_services(
@@ -77,4 +79,5 @@ def build_org_services(
         skills=SkillService(uow_factory),
         groups=GroupService(uow_factory),
         connectors=ConnectorService(uow_factory),
+        policies=PolicyService(uow_factory),
     )

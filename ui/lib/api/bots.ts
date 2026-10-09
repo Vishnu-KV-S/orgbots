@@ -1212,3 +1212,97 @@ export const saveSSO = (config: {
 }) => request<SSOConfig>(`${MEMBERS_BASE}/sso`, json("PUT", config));
 
 export const deleteSSO = () => request<SSOConfig>(`${MEMBERS_BASE}/sso`, { method: "DELETE" });
+
+// --- organization admin: policies, secrets, provisioning, telemetry, audit ---------------
+
+export const ADMIN_BASE = "/rt/v1/admin";
+
+export interface OrgPolicy {
+  network: "open" | "allowlist";
+  allowed_hosts: string[];
+  require_review: boolean;
+  template_links: boolean;
+  members_add_apps: boolean;
+}
+
+export interface TeamSecret {
+  name: string;
+  bytes: number;
+  updated_at: string;
+}
+
+export interface ScimStatus {
+  base_url: string;
+  configured: boolean;
+  hint: string | null;
+  last_used_at: string | null;
+}
+
+export interface Telemetry {
+  configured: boolean;
+  endpoint?: string;
+  has_headers?: boolean;
+  include_email?: boolean;
+  include_actions?: boolean;
+  enabled?: boolean;
+  last_error?: string;
+  last_sent_at?: string | null;
+}
+
+export interface AuditEvent {
+  id: number;
+  occurred_at: string;
+  actor: string;
+  action: string;
+  target: string;
+  detail: Record<string, unknown>;
+}
+
+export const getPolicy = (signal?: AbortSignal) =>
+  request<OrgPolicy>(`${ADMIN_BASE}/policy`, { signal });
+
+export const savePolicy = (policy: OrgPolicy) =>
+  request<OrgPolicy>(`${ADMIN_BASE}/policy`, json("PUT", policy));
+
+export const listSecrets = (signal?: AbortSignal) =>
+  request<{ secrets: TeamSecret[] }>(`${ADMIN_BASE}/secrets`, { signal });
+
+export const putSecret = (name: string, value: string) =>
+  request<{ saved: boolean }>(
+    `${ADMIN_BASE}/secrets/${encodeURIComponent(name)}`,
+    json("PUT", { value }),
+  );
+
+export const deleteSecret = (name: string) =>
+  request<{ deleted: string }>(`${ADMIN_BASE}/secrets/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+
+export const scimStatus = (signal?: AbortSignal) =>
+  request<ScimStatus>(`${ADMIN_BASE}/scim`, { signal });
+
+export const makeScimToken = () =>
+  request<{ token: string; base_url: string }>(`${ADMIN_BASE}/scim/token`, json("POST", {}));
+
+export const revokeScim = () =>
+  request<{ configured: boolean }>(`${ADMIN_BASE}/scim`, { method: "DELETE" });
+
+export const getTelemetry = (signal?: AbortSignal) =>
+  request<Telemetry>(`${ADMIN_BASE}/telemetry`, { signal });
+
+export const saveTelemetry = (config: {
+  endpoint: string;
+  headers?: Record<string, string>;
+  clear_headers?: boolean;
+  include_email: boolean;
+  include_actions: boolean;
+  enabled: boolean;
+}) => request<Telemetry>(`${ADMIN_BASE}/telemetry`, json("PUT", config));
+
+export const deleteTelemetry = () =>
+  request<Telemetry>(`${ADMIN_BASE}/telemetry`, { method: "DELETE" });
+
+export const auditEvents = (action = "", signal?: AbortSignal) =>
+  request<{ events: AuditEvent[] }>(`${ADMIN_BASE}/audit?action=${encodeURIComponent(action)}`, {
+    signal,
+  });

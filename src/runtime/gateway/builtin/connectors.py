@@ -25,6 +25,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from runtime.domain.enums import BlastRadius, RecoveryPolicy
+from runtime.gateway.builtin.profiles import org_policy, record_block, refusal
 from runtime.gateway.mcp import Auth, Connect, MCPError, connect, result_text
 from runtime.gateway.tools import EffectCapabilities, ToolContext, ToolDef, ToolRegistry
 from runtime.gateway.vault import VaultUnavailableError, load_cipher
@@ -79,6 +80,10 @@ def build(
             row = await uow.connectors.by_name(uuid.UUID(ctx.organization_id), typed.connector)
         if row is None or not row.enabled:
             return CallResult(ok=False, error=f"there is no connector {typed.connector!r}", **base)
+        refused = refusal(await org_policy(uow_factory, ctx), row.url)
+        if refused:
+            await record_block(uow_factory, ctx, row.url, "connector.call@1")
+            return CallResult(ok=False, error=refused, **base)
         try:
             auth = open_auth(row, settings)
         except (VaultUnavailableError, ValueError) as exc:

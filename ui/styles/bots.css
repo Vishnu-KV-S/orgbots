@@ -2967,3 +2967,19 @@ button.frow:hover {
   text-transform: uppercase;
   color: var(--text-faint);
 }
+
+.team-tabs {
+  flex-wrap: wrap;
+  height: auto;
+}
+
+.audit-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+}
+
+.audit-row code {
+  font-family: var(--mono);
+  font-size: 12px;
+}

@@ -27,7 +27,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from runtime.api.bots import _bot_or_404, _computer_call, _relay
+from runtime.api.bots import _bot_or_404, _computer_call, _organization, _relay
 from runtime.api.identity import current_member
 from runtime.domain.members import can_edit, computer_profile
 
@@ -121,6 +121,8 @@ async def put_workspace_file(
 @router.post("/terminal")
 async def run(body: CommandBody, request: Request, bot_id: UUID | None = None) -> dict[str, Any]:
     profile = await _profile(request, bot_id, writing=True)
+    async with request.app.state.uow() as uow:
+        policy = await uow.policies.get(await _organization(request))
     return _relay(
         await _computer_call(
             request,
@@ -132,6 +134,9 @@ async def run(body: CommandBody, request: Request, bot_id: UUID | None = None) -
                 "timeout_s": body.timeout_s,
                 "local": False,
                 "profile": profile,
+                # The organization's allowlist holds commands to no network; and a
+                # person's own commands never get team secrets — `env` would show them.
+                "network": policy.network == "open",
             },
             timeout_s=body.timeout_s + 15,
         )

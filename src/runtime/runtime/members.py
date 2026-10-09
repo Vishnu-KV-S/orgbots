@@ -48,6 +48,7 @@ from runtime.domain.members import (
 from runtime.gateway.oidc import OIDCClient, OIDCError, pkce_pair
 from runtime.gateway.vault import load_cipher
 from runtime.observability.logging import get_logger
+from runtime.org.audit import record
 from runtime.persistence.repositories.members import LinkRow, MemberRow, SSORow
 from runtime.persistence.uow import UnitOfWork, UnitOfWorkFactory
 from runtime.settings import Settings
@@ -178,6 +179,9 @@ class MemberService:
                 member_id=row.id,
                 made_by=None,
             )
+            await record(
+                uow, organization_id, "member.owner_added", actor_label="cli", target=email
+            )
         return row, token
 
     async def operator_link(self, organization_id: uuid.UUID, email: str) -> tuple[MemberRow, str]:
@@ -199,6 +203,9 @@ class MemberService:
                 member_id=row.id,
                 made_by=None,
             )
+            await record(
+                uow, organization_id, "member.sign_in_link", actor_label="cli", target=email
+            )
         return row, token
 
     async def invite(self, actor: Member, email: str, role: Role) -> tuple[LinkRow, str]:
@@ -208,7 +215,7 @@ class MemberService:
             existing = await uow.members.by_email(actor.organization_id, email)
             if existing is not None:
                 raise MemberError(f"{email} is already a member")
-            return await self._link(
+            made = await self._link(
                 uow,
                 actor.organization_id,
                 kind="invite",
@@ -217,6 +224,15 @@ class MemberService:
                 member_id=None,
                 made_by=actor.id,
             )
+            await record(
+                uow,
+                actor.organization_id,
+                "member.invited",
+                actor=actor,
+                target=email,
+                detail={"role": role},
+            )
+            return made
 
     async def sign_in_link(self, actor: Member, member_id: uuid.UUID) -> str:
         if not actor.is_admin and actor.id != member_id:
@@ -235,6 +251,9 @@ class MemberService:
                 role=cast(Role, row.role),
                 member_id=row.id,
                 made_by=actor.id,
+            )
+            await record(
+                uow, actor.organization_id, "member.sign_in_link", actor=actor, target=row.email
             )
         return token
 
@@ -278,7 +297,15 @@ class MemberService:
                 await uow.members.update(row.id, {"name": name.strip()[:80]})
             session = await self._session(uow, row.id, user_agent)
             row = await uow.members.get(row.id)
-        assert row is not None
+            assert row is not None
+            await record(
+                uow,
+                link.organization_id,
+                "member.joined" if info.joining else "member.signed_in",
+                actor=as_member(row),
+                target=row.email,
+                detail={"via": "link", "role": row.role},
+            )
         log.info("member.signed_in", member_id=str(row.id), via=link.kind)
         return SignedIn(member=as_member(row), token=session)
 
@@ -288,6 +315,13 @@ class MemberService:
         async with self._uow.transaction() as uow:
             if not await uow.members.revoke_link(actor.organization_id, link_id):
                 raise MemberError("no such open invitation")
+            await record(
+                uow,
+                actor.organization_id,
+                "member.invite_revoked",
+                actor=actor,
+                target=str(link_id),
+            )
 
     async def open_invites(self, actor: Member) -> list[LinkRow]:
         if not actor.is_admin:
@@ -313,6 +347,15 @@ class MemberService:
             owners = await uow.members.owners(actor.organization_id)
             check_role_change(actor, cast(Role, row.role), role, owners)
             await uow.members.update(member_id, {"role": role})
+            if row.role != role:
+                await record(
+                    uow,
+                    actor.organization_id,
+                    "member.role_changed",
+                    actor=actor,
+                    target=row.email,
+                    detail={"from": row.role, "to": role},
+                )
             changed = await uow.members.get(member_id)
         assert changed is not None
         return changed
@@ -326,12 +369,18 @@ class MemberService:
                 if row.role == "owner" and actor.role != "owner":
                     raise NotAllowedError("only an owner can restore an owner")
                 await uow.members.update(member_id, {"status": "active"})
+                await record(
+                    uow, actor.organization_id, "member.restored", actor=actor, target=row.email
+                )
             else:
                 owners = await uow.members.owners(actor.organization_id)
                 check_suspend(actor, row.id, cast(Role, row.role), owners)
                 await uow.members.update(member_id, {"status": "suspended"})
                 await uow.members.drop_sessions(member_id)
                 await uow.members.revoke_links_for(actor.organization_id, row.email)
+                await record(
+                    uow, actor.organization_id, "member.removed", actor=actor, target=row.email
+                )
             changed = await uow.members.get(member_id)
         assert changed is not None
         return changed
@@ -384,6 +433,19 @@ class MemberService:
                 auto_join=auto_join,
                 enabled=enabled,
             )
+            await record(
+                uow,
+                actor.organization_id,
+                "sso.saved",
+                actor=actor,
+                target=provider.issuer,
+                detail={
+                    "domains": clean,
+                    "auto_join": auto_join,
+                    "enabled": enabled,
+                    "secret_changed": client_secret is not None,
+                },
+            )
             row = await uow.members.sso(actor.organization_id)
         assert row is not None
         return row
@@ -393,6 +455,7 @@ class MemberService:
             raise NotAllowedError("only an owner or an admin can turn off single sign-on")
         async with self._uow.transaction() as uow:
             await uow.members.delete_sso(actor.organization_id)
+            await record(uow, actor.organization_id, "sso.removed", actor=actor)
 
     async def sso_start(self, email: str, *, return_to: str = "/") -> str:
         """Where to send the browser to sign `email` in, or `MemberError`."""
@@ -467,6 +530,7 @@ class MemberService:
         org = config.organization_id
         async with self._uow.transaction() as uow:
             row = await uow.members.by_email(org, email)
+            joined = row is None
             if row is None:
                 if not config.auto_join:
                     raise MemberError(
@@ -479,6 +543,14 @@ class MemberService:
             elif row.status != "active":
                 raise MemberError(f"{email} is suspended in this organization")
             session = await self._session(uow, row.id, user_agent)
+            await record(
+                uow,
+                org,
+                "member.joined" if joined else "member.signed_in",
+                actor=as_member(row),
+                target=email,
+                detail={"via": "sso"},
+            )
         log.info("member.signed_in", member_id=str(row.id), via="sso")
         return SignedIn(member=as_member(row), token=session, return_to=pending.return_to)
 

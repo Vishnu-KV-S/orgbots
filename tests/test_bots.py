@@ -410,6 +410,13 @@ class NoGroups:
         return None
 
 
+class OpenPolicies:
+    """An organization with the default policies and no team secrets."""
+
+    async def for_prompt(self, organization_id: Any) -> str:
+        return ""
+
+
 class NoConnectors:
     """An organization with no apps connected (`tests/test_bot_connectors.py` has some)."""
 
@@ -428,6 +435,7 @@ class _Org:
     skills: Any = field(default_factory=NoSkills)
     groups: Any = field(default_factory=NoGroups)
     connectors: Any = field(default_factory=NoConnectors)
+    policies: Any = field(default_factory=lambda: OpenPolicies())
 
 
 @dataclass

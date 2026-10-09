@@ -30,6 +30,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
 from runtime.api.access import bot_access, group_access
+from runtime.api.admin import router as admin_router
 from runtime.api.attachments import router as attachments_router
 from runtime.api.auth import router as auth_router
 from runtime.api.bots import computer_router as bots_computer_router
@@ -55,6 +56,7 @@ from runtime.api.schemas import (
     StartRunBody,
     StartRunResponse,
 )
+from runtime.api.scim import router as scim_router
 from runtime.api.skills import marketplace_router, teach_router
 from runtime.api.skills import router as skills_router
 from runtime.api.templates import router as templates_bots_router
@@ -131,6 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Signing in and out, and the organization's people.
     app.include_router(auth_router)
     app.include_router(members_router, dependencies=signed_in)
+    # The organization's policies, secrets, provisioning, telemetry and audit trail.
+    app.include_router(admin_router, dependencies=signed_in)
 
     # Read-only. Mounted here rather than kept in a second process so that the
     # viewer reads through the same session factory and the same connection pool
@@ -170,6 +174,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # from outside, and authenticated by its token and the sender's signature).
     app.include_router(routines_router, dependencies=bot_routes)
     app.include_router(hooks_router)
+    # SCIM provisioning (`/scim/v2`): an identity provider, authenticated by its bearer
+    # token — not a session, and not behind the UI's proxy.
+    app.include_router(scim_router)
     # Skills: the organization's library, the packaged ones, and teaching by
     # demonstration (`/v1/bots/{id}/teach`), which drives the computer's recorder.
     app.include_router(skills_router, dependencies=signed_in)

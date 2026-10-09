@@ -19,6 +19,13 @@ import {
 import { cx } from "@/lib/cx";
 import { useAction } from "@/lib/hooks/useAction";
 import { useResource } from "@/lib/hooks/useResource";
+import {
+  AuditPanel,
+  PoliciesPanel,
+  ProvisioningPanel,
+  SecretsPanel,
+  TelemetryPanel,
+} from "./AdminPanels";
 import { Modal } from "./Dialogs";
 
 /**
@@ -31,30 +38,44 @@ import { Modal } from "./Dialogs";
  * A link appears once, here, as the URL to send. It works once; an invitation for a
  * week, a sign-in link for a day.
  */
+type Tab = "people" | "sso" | "policies" | "secrets" | "provisioning" | "telemetry" | "audit";
+
+const TABS: [Tab, string][] = [
+  ["people", "People"],
+  ["sso", "Single sign-on"],
+  ["policies", "Policies"],
+  ["secrets", "Secrets"],
+  ["provisioning", "Provisioning"],
+  ["telemetry", "Telemetry"],
+  ["audit", "Audit log"],
+];
+
 export function TeamDialog({ me, onClose }: { me: Me; onClose: () => void }) {
   const admin = me.role !== "member";
-  const [tab, setTab] = useState<"people" | "sso">("people");
+  const [tab, setTab] = useState<Tab>("people");
   return (
     <Modal title="Team" onClose={onClose}>
       {admin && (
-        <div className="seg subtabs" style={{ marginBottom: 12 }}>
-          <button
-            type="button"
-            className={cx("seg-btn", tab === "people" && "on")}
-            onClick={() => setTab("people")}
-          >
-            People
-          </button>
-          <button
-            type="button"
-            className={cx("seg-btn", tab === "sso" && "on")}
-            onClick={() => setTab("sso")}
-          >
-            Single sign-on
-          </button>
+        <div className="seg subtabs team-tabs" style={{ marginBottom: 12 }}>
+          {TABS.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={cx("seg-btn", tab === key && "on")}
+              onClick={() => setTab(key)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       )}
-      {tab === "people" ? <People me={me} /> : <SSOSettings />}
+      {tab === "people" && <People me={me} />}
+      {tab === "sso" && <SSOSettings />}
+      {tab === "policies" && <PoliciesPanel />}
+      {tab === "secrets" && <SecretsPanel />}
+      {tab === "provisioning" && <ProvisioningPanel />}
+      {tab === "telemetry" && <TelemetryPanel />}
+      {tab === "audit" && <AuditPanel />}
     </Modal>
   );
 }

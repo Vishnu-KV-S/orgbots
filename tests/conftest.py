@@ -69,6 +69,13 @@ _TRUNCATE_ORDER = [
     "bot_rules",
     "bot_messages",
     "bots",
+    # Enterprise (053): policies, secrets, the control-plane trail, SCIM, telemetry.
+    "org_policies",
+    "team_secrets",
+    "org_audit_events",
+    "scim_tokens",
+    "otel_configs",
+    "otel_cursors",
     # Members (052): referenced by bots, groups and devices, so after them.
     "oidc_states",
     "sso_configs",

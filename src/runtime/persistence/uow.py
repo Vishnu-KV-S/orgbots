@@ -30,6 +30,13 @@ from runtime.persistence.repositories.credentials import CredentialRepository
 from runtime.persistence.repositories.delegations import DelegationRepository
 from runtime.persistence.repositories.departments import DepartmentRepository
 from runtime.persistence.repositories.effects import EffectRepository
+from runtime.persistence.repositories.enterprise import (
+    OrgAuditRepository,
+    OtelRepository,
+    PolicyRepository,
+    ScimRepository,
+    TeamSecretRepository,
+)
 from runtime.persistence.repositories.files import TeamFileRepository
 from runtime.persistence.repositories.groups import GroupRepository
 from runtime.persistence.repositories.inbox import InboxRepository
@@ -144,6 +151,11 @@ class UnitOfWork:
         self.push = PushRepository(session)
         self.template_shares = TemplateShareRepository(session)
         self.members = MemberRepository(session)
+        self.policies = PolicyRepository(session)
+        self.team_secrets = TeamSecretRepository(session)
+        self.org_audit = OrgAuditRepository(session)
+        self.scim = ScimRepository(session)
+        self.otel = OtelRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

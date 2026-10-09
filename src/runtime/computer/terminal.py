@@ -100,9 +100,20 @@ class Terminal:
     # --- commands ----------------------------------------------------------------------
 
     async def run(
-        self, screen_id: str, command: str, *, timeout_s: float, local: bool = False
+        self,
+        screen_id: str,
+        command: str,
+        *,
+        timeout_s: float,
+        local: bool = False,
+        network: bool = True,
+        secrets: dict[str, str] | None = None,
     ) -> Ran:
-        """Run one command for one bot. A bot's commands run one at a time."""
+        """Run one command for one bot. A bot's commands run one at a time.
+
+        `network` False runs the sandbox with no network at all — how an organization's
+        allowlist applies to commands, which a host list cannot hold. `secrets` are the
+        organization's team secrets, as environment variables in the sandbox only."""
         if not command.strip():
             raise TerminalError("there is no command to run")
         timeout_s = max(1.0, min(MAX_TIMEOUT_S, timeout_s))
@@ -117,7 +128,11 @@ class Terminal:
                 raise TerminalError(
                     "the sandbox (bubblewrap, `bwrap`) is not installed on the computer"
                 )
-            argv, env, cwd = self._sandboxed(command), self._env(local=False), self._root
+            argv, env, cwd = (
+                self._sandboxed(command, network=network),
+                {**(secrets or {}), **self._env(local=False)},
+                self._root,
+            )
         lock = self._locks.setdefault(screen_id, asyncio.Lock())
         async with lock:
             return await _execute(argv, env, cwd, timeout_s, mode="local" if local else "sandbox")
@@ -133,13 +148,12 @@ class Terminal:
         env["WORKSPACE"] = "/workspace" if not local else str(self._root)
         return env
 
-    def _sandboxed(self, command: str) -> list[str]:
+    def _sandboxed(self, command: str, *, network: bool = True) -> list[str]:
         argv = [
             self.bwrap or "bwrap",
             "--unshare-all",
             "--die-with-parent",
             "--new-session",
-            "--clearenv",
             "--ro-bind",
             "/usr",
             "/usr",
@@ -155,7 +169,7 @@ class Terminal:
             "--chdir",
             "/workspace",
         ]
-        if self.network:
+        if self.network and network:
             argv.append("--share-net")
         for top in ("bin", "lib", "lib64", "sbin"):
             target = Path("/") / top
@@ -166,8 +180,9 @@ class Terminal:
         for path in _RO_ETC:
             if os.path.exists(path):
                 argv += ["--ro-bind", path, path]
-        for key, value in self._env(local=False).items():
-            argv += ["--setenv", key, value]
+        # The environment is not on this command line: bwrap is started with exactly the
+        # sandbox's (`run`), and its child inherits it — so a team secret is never in
+        # an argument another user on this machine could read in the process table.
         return [*argv, "/bin/bash", "-c", command]
 
     # --- the workspace -------------------------------------------------------------------
