@@ -20,6 +20,17 @@ They browse real websites, remember what they learn and work in teams: a self-ho
 
 **Orgbots** is an open-source platform for running **autonomous AI agents as persistent employees**. Each bot has its own screen on a shared cloud computer, browses and acts on real websites, keeps a job brief and a long-term memory, builds its own team of helper bots, and asks you before it does anything that matters. Under the bots sits a production-minded **agent runtime**: durable runs that survive crashes, exactly-once tool effects, budgets, approvals, a kill switch, prompt-injection defences and an audit trail for every decision.
 
+## See it work
+
+![A bot's answer beside its own live browser, in the dark theme](docs/images/app-computer.png)
+<sub>**Price Tracker** finished a shopping task. Its live screen on the right shows the store it browsed; take control at any time to sign in or solve a CAPTCHA.</sub>
+
+![A bot mid-task: a failed shell command, the fix, and the parsed results, beside its live browser](docs/images/app-working.png)
+<sub>Mid-task: the bot pulls the catalogue with a command in its sandboxed terminal, recovers from its own broken command, and reads every title and price.</sub>
+
+![Every step the bot took, with its reasoning, retries and plan](docs/images/app-steps.png)
+<sub>Every step is recorded with the bot's reasoning. Here it works around repeated 504 errors from GitHub before answering.</sub>
+
 ## Why it is different
 
 Like Grok Bot, OpenAI Dots and Meta Muse, every bot is an always-on coworker with its own screen on a cloud computer. Unlike them, Orgbots is **open source and runs on your own infrastructure**, and where most agent frameworks stop at a loop around a model, it is built like infrastructure:
@@ -68,7 +79,31 @@ flowchart LR
 
 ## Quick start
 
-Requires Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 20+ and Docker (or see [Without Docker](#without-docker)).
+### One container
+
+Everything (PostgreSQL, Redis, the shared Chromium, the API, the worker and the web UI) runs in a single container. Bring a [DeepSeek API key](https://platform.deepseek.com/api_keys):
+
+```bash
+docker run -d --name orgbots -p 3000:3000 -v orgbots-data:/data \
+  -e RUNTIME_DEEPSEEK_API_KEY=sk-... \
+  ghcr.io/vishnu-kv-s/orgbots:latest
+```
+
+Open **http://localhost:3000** and create your first bot. Everything is kept in the `orgbots-data` volume, so `docker rm -f orgbots` followed by the same `docker run` picks up where you left off. To build the image yourself instead:
+
+```bash
+docker build -t orgbots https://github.com/Vishnu-KV-S/orgbots.git
+```
+
+| Setting | |
+|---|---|
+| `RUNTIME_DEEPSEEK_API_KEY` | The model key. Without it the app runs, but bots cannot think. |
+| `RUNTIME_CREDENTIAL_KEYS` | Optional. The login vault's encryption key; one is generated on first boot and kept in `/data`. |
+| `/data` | The volume: database, browser profile and sign-ins, files, and the generated key. |
+
+### From source
+
+For development. Requires Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 20+ and Docker (or see [Without Docker](#without-docker)).
 
 ```bash
 git clone https://github.com/Vishnu-KV-S/orgbots.git
