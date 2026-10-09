@@ -11,6 +11,7 @@ import {
   chooseSavedLogin,
 } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
+import { Screenshot } from "./Screenshot";
 
 const TITLE = {
   sign_in: "Sign in to",
@@ -109,6 +110,9 @@ export function CredentialCard({
         </span>
       </div>
       {message.content && <div className="reason">{botName}: {message.content}</div>}
+      {p.screenshot_id && (
+        <Screenshot botId={botId} screenshotId={p.screenshot_id} caption={`The page on ${host}`} size="sm" />
+      )}
       {live && p.retry && (
         <div className="reason creds-warn">
           The last attempt didn&apos;t get past this form. The details may be wrong.

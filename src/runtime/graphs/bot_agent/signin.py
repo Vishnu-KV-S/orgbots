@@ -41,6 +41,7 @@ from runtime.domain.vault import (
     with_next_page,
 )
 from runtime.gateway.tools import ToolCall
+from runtime.graphs.bot_agent.shots import capture
 from runtime.graphs.common.state import whole
 
 _PURPOSE = {"sign_in": "sign in to", "sign_up": "create an account on", "verify": "verify on"}
@@ -191,6 +192,8 @@ async def sign_in(
         thought = (
             f"{thought}\n(I don't type passwords or codes myself — please enter them here.)"
         ).strip()
+    # The page the person is being asked to sign in to, so the card is not only a host.
+    screenshot = await capture(node, bot, n=n, kind="credentials")
     request = await bots.request_credentials(
         bot,
         run_id=node.ctx.run_id,
@@ -205,6 +208,7 @@ async def sign_in(
         retry=retry,
         reason=reason,
         working=working,
+        screenshot_id=screenshot,
     )
     if delegated_by:
         await say(

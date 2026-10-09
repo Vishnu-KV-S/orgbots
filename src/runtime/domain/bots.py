@@ -380,6 +380,12 @@ class BotStep(BaseModel):
         "publicly, deleting something, accepting terms, changing account settings, or "
         "entering a password or other secret.",
     )
+    screenshot: bool = Field(
+        default=False,
+        description="For reply and ask_user: attach a picture of your screen to the "
+        "message, when seeing it helps the person — a result page, something to check or "
+        "choose, a form, an error. Not for small talk or when the screen is not relevant.",
+    )
 
     @model_validator(mode="after")
     def _check_fields(self) -> BotStep:
@@ -476,8 +482,9 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=11)
-"""Version 11 added `upload` (with `paths`): files from the team drive or /workspace, given
+BOT_STEP = SCHEMAS.register(BotStep, version=12)
+"""Version 12 added `screenshot` (a picture of the screen on a reply or a question).
+Version 11 added `upload` (with `paths`): files from the team drive or /workspace, given
 to a website's file field. Version 10 added `use_connector` (with `connector`, `tool`
 and `args`). Version 9 added `message_bot` (with `handoff`). Version 8 added the
 terminal (`run_command` with `timeout` and `local`, `copy_file`). Version 7 let `look`

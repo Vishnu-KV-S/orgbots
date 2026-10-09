@@ -56,6 +56,7 @@ from runtime.persistence.repositories.push import PushRepository
 from runtime.persistence.repositories.ratelimits import RateLimitRepository
 from runtime.persistence.repositories.routines import RoutineRepository
 from runtime.persistence.repositories.runs import RunRepository
+from runtime.persistence.repositories.screenshots import ScreenshotRepository
 from runtime.persistence.repositories.sessions import SessionRepository
 from runtime.persistence.repositories.skills import SkillRepository
 from runtime.persistence.repositories.spec import SpecRepository
@@ -158,6 +159,9 @@ class UnitOfWork:
         self.scim = ScimRepository(session)
         self.otel = OtelRepository(session)
         self.x = XRepository(session)
+        # Screenshots for the bot chat (055). Bound here so a picture and the message
+        # that points at it can be written in one transaction.
+        self.screenshots = ScreenshotRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

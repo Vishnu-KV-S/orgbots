@@ -13,6 +13,7 @@ import { canSpeak, speak, stopSpeaking } from "../lib/speech";
 import { ACTION_ICON, OPENS_FILE, RichText, describeAction } from "../lib/text";
 import { ApprovalCard } from "./ApprovalCard";
 import { CredentialCard } from "./CredentialCard";
+import { Screenshot } from "./Screenshot";
 import { Avatar } from "./Avatar";
 
 type Item =
@@ -53,10 +54,12 @@ function useReactions(botId: string) {
 }
 
 function WorkBlock({
+  botId,
   steps,
   live,
   onOpenFile,
 }: {
+  botId: string;
   steps: BotMessage[];
   live: boolean;
   onOpenFile: (path: string) => void;
@@ -107,6 +110,14 @@ function WorkBlock({
                     <div className="fail">{s.payload.error}</div>
                   )}
                   {s.payload.note && <div className="why">“{s.payload.note}”</div>}
+                  {s.payload.screenshot_id && (
+                    <Screenshot
+                      botId={botId}
+                      screenshotId={s.payload.screenshot_id}
+                      caption={describeAction(action)}
+                      size="sm"
+                    />
+                  )}
                   {s.payload.url && <div className="where">{s.payload.url}</div>}
                   {s.payload.output && (
                     <pre className="cmd-out">
@@ -261,6 +272,7 @@ export function MessageList({
           return (
             <WorkBlock
               key={item.id}
+              botId={bot.id}
               steps={item.steps}
               live={working && index === items.length - 1}
               onOpenFile={onOpenFile}
@@ -303,6 +315,9 @@ export function MessageList({
             <div key={m.id} className={m.payload.voice_call ? "sysline callcard" : "sysline"}>
               {m.payload.voice_call ? "📞 " : ""}
               {m.content}
+              {m.payload.screenshot_id && (
+                <Screenshot botId={bot.id} screenshotId={m.payload.screenshot_id} />
+              )}
             </div>
           );
         }
@@ -360,6 +375,13 @@ export function MessageList({
                   <Attachments bot={bot} files={m.payload.attachments} onOpen={onOpenFile} />
                 )}
               </div>
+              {!isUser && m.payload.screenshot_id && (
+                <Screenshot
+                  botId={bot.id}
+                  screenshotId={m.payload.screenshot_id}
+                  caption={`${bot.name}'s screen`}
+                />
+              )}
               {reactionsOf(m).length > 0 && (
                 <div
                   className="reactions"

@@ -398,6 +398,7 @@ class BotManager:
                 await uow.bots.soft_delete(victim)
                 await uow.vault.forget_bot(victim)
                 await uow.routines.delete_for_bot(victim)
+                await uow.screenshots.delete_for_bot(victim)
             # A team's drive outlives any one member — helpers kept here keep it — but
             # not the last one. Trashed rather than dropped, like the bots themselves.
             if not await uow.bots.team(bot.team_id):

@@ -300,6 +300,7 @@ class VaultBots(FakeBots):
         retry,
         reason,
         working=None,
+        screenshot_id=None,
     ):
         rid = request_id(run_id, step)
         self.requests[rid] = _Request(
@@ -322,6 +323,7 @@ class VaultBots(FakeBots):
                 "fields": [{"key": f.key, "kind": f.kind} for f in fields if f.key in ask],
                 "saved": [{"id": str(o.id), "label": o.label} for o in saved],
                 "retry": retry,
+                **({"screenshot_id": str(screenshot_id)} if screenshot_id else {}),
             },
         )
         return rid

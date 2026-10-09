@@ -168,6 +168,7 @@ class FakeBots:
         self.episodes: list[str] = []
         self.brief_edits: list[tuple[str, str, str, str]] = []
         self.notified: list[tuple[str, str, str]] = []
+        self.screenshots: dict[uuid.UUID, tuple[str, bytes]] = {}
 
     async def get(self, bot_id: uuid.UUID) -> _Bot:
         return self._who(bot_id)
@@ -241,7 +242,8 @@ class FakeBots:
         self.brief_edits.append((target.name, editor_kind, editor.name, reason))
         return BriefChange(after, 1, brief_changes(before, after))
 
-    async def park(self, bot_id, *, run_id, step, action, display, reason, thought):  # type: ignore[no-untyped-def]
+    async def park(self, bot_id, *, run_id, step, action, display, reason, thought,  # type: ignore[no-untyped-def]
+                   screenshot_id=None):
         pid = uuid.uuid5(uuid.NAMESPACE_URL, f"{run_id}:{step}")
         self.pendings[pid] = _Pending(pid, action)
         await self.record(
@@ -251,9 +253,15 @@ class FakeBots:
             kind="approval",
             role="approval",
             content=thought,
-            payload={"pending_id": str(pid), "action": display},
+            payload={"pending_id": str(pid), "action": display,
+                     **({"screenshot_id": str(screenshot_id)} if screenshot_id else {})},
         )
         return pid
+
+    async def save_screenshot(self, bot_id, *, run_id, step, kind, data, page_url=""):  # type: ignore[no-untyped-def]
+        sid = uuid.uuid5(uuid.NAMESPACE_URL, f"botshot:{run_id}:{step}:{kind}")
+        self.screenshots[sid] = (kind, data)
+        return sid
 
     async def helpers(self, bot_id: uuid.UUID) -> list[_Bot]:
         return list(self.helpers_)
