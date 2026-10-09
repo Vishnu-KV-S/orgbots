@@ -180,6 +180,82 @@ async def test_the_computer_records_what_a_person_does_but_not_their_password(
     assert "hunter2" not in str(steps)
 
 
+@pytest.mark.skipif(not _chromium_available(), reason="no Chromium to drive")
+async def test_a_recording_reads_the_live_input_a_taken_over_screen_sends(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The takeover pane sends raw input — moves, presses and releases, one key at a
+    time — and a demonstration still comes out as clicks, typing per field and keys."""
+    import http.server
+    import threading
+
+    from runtime.computer.browser import Computer
+
+    if not os.environ.get("COMPUTER_CHROMIUM_PATH"):
+        monkeypatch.setenv("COMPUTER_CHROMIUM_PATH", "/usr/bin/google-chrome")
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text(
+        "<title>Shop</title>"
+        "<input id=q aria-label='Search products' style='position:absolute;top:20px;left:20px'>"
+        "<input id=p type=password aria-label=Password "
+        "style='position:absolute;top:80px;left:20px'>"
+        "<button style='position:absolute;top:140px;left:20px;width:120px;height:40px'>"
+        "Find it</button><div style='height:3000px'></div>"
+    )
+    handler = lambda *a, **k: http.server.SimpleHTTPRequestHandler(  # noqa: E731
+        *a, directory=str(site), **k
+    )
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def click(x: float, y: float, clicks: int = 1) -> list[dict[str, Any]]:
+        at = {"x": x, "y": y, "button": "left", "clicks": clicks}
+        return [{"kind": "move", "x": x, "y": y}, {"kind": "down", **at}, {"kind": "up", **at}]
+
+    def keys(*names: str) -> list[dict[str, Any]]:
+        return [{"kind": kind, "key": k} for k in names for kind in ("keydown", "keyup")]
+
+    def wheel(dy: float) -> dict[str, Any]:
+        return {"kind": "wheel", "x": 200, "y": 300, "dx": 0, "dy": dy}
+
+    computer = Computer(tmp_path / "profile")
+    try:
+        screen = await computer.screen("s1")
+        await screen.page.goto(f"http://127.0.0.1:{server.server_address[1]}/")
+        await computer.start_recording(screen)
+        await computer.human_inputs(
+            screen,
+            [
+                *click(40, 30),
+                *click(40, 30, clicks=2),  # the second press of a double click
+                *keys("r", "o", "b", "o", "t"),
+                {"kind": "keydown", "key": "Control"},
+                *keys("a"),
+                {"kind": "keyup", "key": "Control"},
+                *click(40, 90),
+                *keys("h", "i"),
+                *click(60, 160),
+                wheel(120),
+                wheel(120),
+            ],
+        )
+        await computer.human_inputs(screen, [wheel(-240)])
+        steps = computer.stop_recording(screen)
+    finally:
+        await computer.stop()
+        server.shutdown()
+
+    kinds = [s["kind"] for s in steps]
+    assert kinds == ["start", "click", "type", "key", "click", "type", "click", "scroll"], steps
+    assert steps[1]["target"]["label"] == "Search products"
+    assert steps[2]["text"] == "robot" and steps[2]["target"]["label"] == "Search products"
+    assert steps[3]["key"] == "Control+a"
+    assert steps[5]["text"] == "•••" and steps[5]["target"]["secret"] is True
+    assert steps[6]["target"]["label"] == "Find it"
+    assert steps[7]["dy"] == 0, "scrolling down and back up is one step"
+
+
 # --- the graph ----------------------------------------------------------------------------
 
 

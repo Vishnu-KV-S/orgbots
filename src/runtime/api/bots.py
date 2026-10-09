@@ -7,8 +7,8 @@ screen in front of that door, not a second door.
 
 The computer endpoints are a proxy to `runtime.computer`, for watching a bot's screen
 and taking control of it. They never call `act` — a person's input goes through
-`/input`, which the computer refuses unless the person holds the screen, and a bot's
-actions go only through the gateway.
+`/inputs` (or `/input`), which the computer refuses unless the person holds the
+screen, and a bot's actions go only through the gateway.
 
 **Sign-in details** come in through `/credentials/{request_id}` and nowhere else. The
 values are `SecretStr` from the moment they are parsed, sealed into the vault by
@@ -28,11 +28,13 @@ since the vault, submit to a credential card. Do not expose it on a network.
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any, Literal
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from runtime.api.errors import http_errors
@@ -442,13 +444,26 @@ class ControlBody(BaseModel):
 
 
 class InputBody(BaseModel):
-    kind: Literal["click", "type", "key", "scroll", "navigate", "back", "forward", "reload"]
+    kind: Literal[
+        "move", "down", "up", "wheel", "keydown", "keyup", "paste",
+        "click", "type", "key", "scroll", "navigate", "back", "forward", "reload",
+    ]  # fmt: skip
     x: float | None = None
     y: float | None = None
-    text: str | None = Field(default=None, max_length=4_000)
+    text: str | None = Field(default=None, max_length=20_000)
     key: str | None = Field(default=None, max_length=64)
+    button: Literal["left", "middle", "right"] | None = None
+    clicks: int | None = Field(default=None, ge=1, le=3)
+    dx: float | None = None
     dy: float | None = None
     url: str | None = Field(default=None, max_length=2_048)
+    t: float | None = None
+    """The person's clock when they made this input, in ms; the computer replays a
+    batch with the spacing it was made at."""
+
+
+class InputsBody(BaseModel):
+    events: list[InputBody] = Field(min_length=1, max_length=500)
 
 
 # --- bots -----------------------------------------------------------------------------
@@ -1162,6 +1177,48 @@ async def screenshot(bot_id: UUID, request: Request, quality: int = 60) -> Respo
     )
 
 
+@router.get("/{bot_id}/computer/stream")
+async def stream(bot_id: UUID, request: Request) -> StreamingResponse:
+    """The live screen, relayed as the computer sends it (an MJPEG stream). Ends when
+    the watcher goes away or the computer's screen closes."""
+    bot = await _bot_or_404(request, bot_id)
+    base = _settings(request).computer_url.rstrip("/")
+    # No read timeout to speak of: a still page sends a frame only every few seconds.
+    client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=30.0))
+    try:
+        upstream = await client.send(
+            client.build_request(
+                "GET",
+                f"{base}/screens/{bot_id}/stream",
+                params={"profile": computer_profile(bot)},
+            ),
+            stream=True,
+        )
+    except httpx.TransportError as exc:
+        await client.aclose()
+        raise HTTPException(status_code=503, detail="the computer is not reachable") from exc
+    if upstream.status_code >= 400:
+        await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=503, detail="no live view available")
+
+    async def relay() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+        except httpx.TransportError:
+            return
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        relay(),
+        media_type=upstream.headers.get("content-type", "multipart/x-mixed-replace"),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.post("/{bot_id}/computer/control")
 async def control(bot_id: UUID, body: ControlBody, request: Request) -> dict[str, Any]:
     bot = await _bot_or_404(request, bot_id)
@@ -1197,6 +1254,22 @@ async def human_input(bot_id: UUID, body: InputBody, request: Request) -> dict[s
             request,
             "POST",
             f"/screens/{bot_id}/input",
+            json=body.model_dump(exclude_none=True),
+            profile=computer_profile(bot),
+        )
+    )
+
+
+@router.post("/{bot_id}/computer/inputs")
+async def human_inputs(bot_id: UUID, body: InputsBody, request: Request) -> dict[str, Any]:
+    """A batch of a person's input, in the order they made it. The UI sends the next
+    batch only when this one is done, so nothing overtakes anything."""
+    bot = await _bot_or_404(request, bot_id)
+    return _relay(
+        await _computer_call(
+            request,
+            "POST",
+            f"/screens/{bot_id}/inputs",
             json=body.model_dump(exclude_none=True),
             profile=computer_profile(bot),
         )

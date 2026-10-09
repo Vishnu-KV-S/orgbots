@@ -11,7 +11,16 @@ was shared, or made private) is closed and opened again in the new one.
 **Control is per screen and it is exclusive.** While a person holds a screen (to type a
 password, solve a CAPTCHA, finish a 2FA prompt) every bot action on it is refused with
 `HumanInControlError`, and the bot's run reports that and stops rather than fighting the
-person for the mouse. Handing control back is an explicit act.
+person for the mouse. Handing control back is an explicit act, and it lets go of any key
+or button the person was still holding, so a bot never types with a stuck Shift.
+
+**A person at the screen is using it, not sending commands to it.** They watch a live
+screencast (`frames`), and their input arrives as it happened (`human_inputs`): every
+pointer movement, each button press and release separately (so hover, drag, double and
+right clicks work), wheel ticks, key downs and ups with modifiers held, and pastes from
+their own clipboard. The events come in batches, in order, each stamped with the
+person's clock, and are replayed with the spacing they were made at, so what the page
+sees is the person's own hand rather than a burst of teleported clicks.
 
 **Actions are paced like a person's.** The pointer travels to an element before it
 clicks, keys are typed one at a time, and there is a short settle after each action.
@@ -19,7 +28,7 @@ Partly so sites that watch for robotic input behave normally, and partly so that
 person watching the screen can follow what is happening.
 
 **A person can teach by doing** (`start_recording`). While a screen is recorded, every
-input the person makes through `human_input` is written down as a step — what was
+input the person makes (`human_inputs`) is written down as a step — what was
 clicked (its role and label, read off the page), what was typed and into what, keys,
 scrolls and pages — for a bot to turn into a skill. Typing into a password, code or
 card box is recorded as `•••`: the value is never kept, here or anywhere after.
@@ -36,20 +45,22 @@ read back. Values are never logged and never in an error message.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import os
 import random
 import re
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from playwright.async_api import (
     Browser,
     BrowserContext,
+    CDPSession,
     Page,
     Playwright,
     async_playwright,
@@ -113,6 +124,28 @@ ACTION_TIMEOUT_MS = 15_000
 NAV_TIMEOUT_MS = 30_000
 HOME_URL = "about:blank"
 
+STREAM_FPS = 20
+"""The most frames a second a watcher is sent; in between, only the newest is kept."""
+STREAM_QUALITY = 60
+STREAM_HEARTBEAT_S = 2.0
+"""A still page repaints nothing, so the last frame is resent this often: it keeps the
+line alive through proxies and tells the watcher the computer is still there."""
+INPUT_BATCH_MAX = 500
+PACE_MAX_WAIT_S = 0.5
+"""The longest one event waits for its moment. Longer means the person's clock and ours
+disagree, and the events are replayed from now instead."""
+PACE_IDLE_S = 1.0
+"""After this long without input, the next event starts a fresh timeline, so a slow
+request once does not delay everything the person does after it."""
+FRAME_MS = 16.0
+"""Chrome hands a page at most one pointer move, and one wheel, a frame — and takes a
+frame to accept each one sent to it. Moves and wheel ticks closer together than this,
+or that we are already late for, are folded into the next."""
+Button = Literal["left", "middle", "right"]
+BUTTONS: frozenset[str] = frozenset({"left", "middle", "right"})
+NOT_STEPS: frozenset[str] = frozenset({"Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock"})
+"""Keys a demonstration does not record on their own: they only change other keys."""
+
 
 class ComputerError(Exception):
     """An action that could not be carried out. The message is shown to the bot."""
@@ -162,7 +195,8 @@ class Screen:
     controller: str = "bot"
     """`bot` or `human`."""
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    mouse: tuple[float, float] = (VIEWPORT["width"] / 2, VIEWPORT["height"] / 2)
+    mouse: tuple[float, float] = (0.0, 0.0)
+    """Where the pointer is: Playwright's starts at the corner of a new page."""
     last_action: str = ""
     last_active: float = field(default_factory=time.time)
     label: str = ""
@@ -172,6 +206,13 @@ class Screen:
     """Files this screen's page downloaded into the workspace, newest last. A download
     not yet `seen` is reported with the next observation, so the bot learns where it
     went."""
+    held_keys: set[str] = field(default_factory=set)
+    held_buttons: set[Button] = field(default_factory=set)
+    pace: tuple[float, float] | None = None
+    """`(person's ms, our monotonic s)` the person's input timeline is anchored at."""
+    last_input: float = 0.0
+    """Monotonic time the last piece of a person's input was applied."""
+    cast: Screencast | None = None
 
 
 @dataclass
@@ -208,6 +249,71 @@ class Recording:
         self.steps.append(step)
         if len(self.steps) >= RECORDING_STEPS:
             self.full = True
+
+
+class Screencast:
+    """One screen's live picture, shared by everyone watching it.
+
+    Chrome pushes a JPEG whenever the page repaints and waits for an ack before sending
+    the next, so a busy page is never more than one frame ahead. It runs only while
+    someone watches: the first watcher starts it, the last one to leave stops it.
+    """
+
+    def __init__(self, page: Page) -> None:
+        self._page = page
+        self._session: CDPSession | None = None
+        self._lock = asyncio.Lock()
+        self._fresh = asyncio.Event()
+        self.viewers = 0
+        self.frame: bytes | None = None
+        self.seq = 0
+
+    async def join(self) -> None:
+        async with self._lock:
+            self.viewers += 1
+            if self._session is not None:
+                return
+            try:
+                session = await self._page.context.new_cdp_session(self._page)
+                session.on("Page.screencastFrame", self._on_frame)
+                await session.send(
+                    "Page.startScreencast",
+                    {
+                        "format": "jpeg",
+                        "quality": STREAM_QUALITY,
+                        "maxWidth": VIEWPORT["width"],
+                        "maxHeight": VIEWPORT["height"],
+                    },
+                )
+            except PlaywrightError as exc:
+                self.viewers -= 1
+                raise ComputerError(f"could not start the live view: {exc}") from exc
+            self._session = session
+
+    async def leave(self) -> None:
+        async with self._lock:
+            self.viewers -= 1
+            if self.viewers > 0 or self._session is None:
+                return
+            session, self._session = self._session, None
+            with contextlib.suppress(PlaywrightError):
+                await session.send("Page.stopScreencast")
+                await session.detach()
+
+    async def _on_frame(self, params: dict[str, Any]) -> None:
+        self.frame = base64.b64decode(params["data"])
+        self.seq += 1
+        fresh, self._fresh = self._fresh, asyncio.Event()
+        fresh.set()
+        session = self._session
+        if session is not None:
+            with contextlib.suppress(PlaywrightError):
+                await session.send("Page.screencastFrameAck", {"sessionId": params["sessionId"]})
+
+    async def after(self, seen: int) -> None:
+        """Wait for a frame newer than `seen`."""
+        while self.seq <= seen:
+            await self._fresh.wait()
 
 
 class Computer:
@@ -441,10 +547,14 @@ class Computer:
             await _settle(screen.page)
         return await self.observe(screen)
 
-    def set_controller(self, screen: Screen, controller: str) -> None:
+    async def set_controller(self, screen: Screen, controller: str) -> None:
         if controller not in ("bot", "human"):
             raise ComputerError(f"unknown controller {controller!r}")
-        screen.controller = controller
+        # Switch first: input still queued behind the lock then sees it is too late.
+        previous, screen.controller = screen.controller, controller
+        if previous == "human" and controller == "bot":
+            async with screen.lock:
+                await _release(screen)
 
     # --- demonstrations --------------------------------------------------------------
 
@@ -502,6 +612,31 @@ class Computer:
         """What a *person* sees — the watch-and-take-control view. Unmasked: they are
         looking at their own screen, and a person who typed a value may see it."""
         return await screen.page.screenshot(type="jpeg", quality=quality)
+
+    async def frames(self, screen: Screen) -> AsyncGenerator[bytes]:
+        """The person's view, live: a JPEG each time the page repaints, at most
+        `STREAM_FPS` a second, and the last one again every `STREAM_HEARTBEAT_S` while
+        nothing moves. Ends when the screen's page closes (a reset, or the screen was
+        closed), and the watcher reconnects to the new one."""
+        if screen.cast is None:
+            screen.cast = Screencast(screen.page)
+        cast = screen.cast
+        await cast.join()
+        try:
+            # Chrome sends its first frame only at the next repaint, which on a still
+            # page may be never.
+            seen = cast.seq
+            yield cast.frame or await self.screenshot(screen, quality=STREAM_QUALITY)
+            while not screen.page.is_closed():
+                with contextlib.suppress(TimeoutError):
+                    async with asyncio.timeout(STREAM_HEARTBEAT_S):
+                        await cast.after(seen)
+                seen = cast.seq
+                if cast.frame is not None:
+                    yield cast.frame
+                await asyncio.sleep(1 / STREAM_FPS)
+        finally:
+            await cast.leave()
 
     async def bot_screenshot(self, screen: Screen, *, quality: int = 60) -> bytes:
         """What a *bot's* vision model sees. Everything the page snapshot seals is
@@ -624,59 +759,213 @@ class Computer:
     # --- human takeover --------------------------------------------------------------
 
     async def human_input(self, screen: Screen, event: dict[str, Any]) -> None:
-        """Input from a person who holds the screen. Coordinates are viewport pixels."""
+        """One piece of input from a person who holds the screen."""
+        await self.human_inputs(screen, [event])
+
+    async def human_inputs(self, screen: Screen, events: list[dict[str, Any]]) -> None:
+        """Input from a person who holds the screen, applied in order. Coordinates are
+        viewport pixels; `t`, when an event has it, is the person's clock in ms, and
+        events are spaced out to match it."""
         if screen.controller != "human":
             raise ComputerError("take control of the screen first")
-        page = screen.page
-        kind = event.get("kind")
-        recording = screen.recording
-        step: dict[str, Any] | None = None
+        if len(events) > INPUT_BATCH_MAX:
+            raise ComputerError(f"at most {INPUT_BATCH_MAX} input events at a time")
         async with screen.lock:
-            if kind == "click":
-                x, y = float(event["x"]), float(event["y"])
-                if recording is not None:
-                    step = {
-                        "kind": "click",
-                        "target": await self._describe(screen, x, y, focused=False),
-                    }
-                await page.mouse.click(x, y)
-                screen.mouse = (x, y)
-            elif kind == "type":
-                typed = str(event.get("text", ""))
-                if recording is not None:
-                    target = await self._describe(screen, 0, 0, focused=True) or {}
-                    step = {
-                        "kind": "type",
-                        "target": target,
-                        "text": "•••" if target.get("secret") else typed[:400],
-                    }
-                await page.keyboard.type(typed, delay=20)
-            elif kind == "key":
-                await page.keyboard.press(str(event["key"]))
-                step = {"kind": "key", "key": str(event["key"])[:40]}
-            elif kind == "scroll":
-                await page.mouse.wheel(0, float(event.get("dy", 400)))
-                step = {"kind": "scroll", "dy": float(event.get("dy", 400))}
-            elif kind == "navigate":
-                await page.goto(_normalise_url(str(event["url"])))
-                step = {"kind": "navigate"}
-            elif kind == "back":
-                await page.go_back()
-                step = {"kind": "back"}
-            elif kind == "forward":
-                await page.go_forward()
-                step = {"kind": "forward"}
-            elif kind == "reload":
-                await page.reload()
-                step = {"kind": "reload"}
-            else:
-                raise ComputerError(f"unknown input {kind!r}")
-            screen.last_active = time.time()
-            if recording is not None and step is not None:
-                # The page the step was made on — for a click that navigated, the click's
-                # own page is the one before, which the previous step already says.
-                step["url"] = _shown_url(page.url)
-                recording.add(step)
+            for i, event in enumerate(events):
+                if screen.controller != "human":
+                    # Handed back mid-batch: the rest is no longer the person's to send.
+                    break
+                due = _due(screen, event.get("t"))
+                late = time.monotonic() - due > FRAME_MS / 1000
+                if _fold(event, events[i + 1] if i + 1 < len(events) else None, late=late):
+                    continue
+                if (wait := due - time.monotonic()) > 0:
+                    await asyncio.sleep(wait)
+                recording = screen.recording
+                step = await self._step(screen, event) if recording is not None else None
+                await _human_event(screen, event)
+                screen.last_input = time.monotonic()
+                screen.last_active = time.time()
+                if recording is not None and step is not None:
+                    # The page the step was made on — for a click that navigated, the
+                    # click's own page is the one before, which the previous step says.
+                    step["url"] = _shown_url(screen.page.url)
+                    recording.add(step)
+
+    async def _step(self, screen: Screen, event: dict[str, Any]) -> dict[str, Any] | None:
+        """What a demonstration records for one piece of a person's input, if anything.
+
+        A click is recorded at its press, before it can navigate away from what it was
+        on. A character is typing into the focused field (`Recording.add` joins a field's
+        typing into one step); a key that types nothing, or one pressed with Control, Alt
+        or Meta held, is a key. Moves, releases, bare modifiers and the second press of a
+        double click are not steps."""
+        kind = event.get("kind")
+        if kind == "down" and (_button(event) != "left" or _clicks(event) > 1):
+            return None
+        if kind in ("down", "click"):
+            x, y = _point(event)
+            return {"kind": "click", "target": await self._describe(screen, x, y, focused=False)}
+        if kind == "keydown":
+            key = str(event.get("key", ""))
+            if key in NOT_STEPS:
+                return None
+            held = [m for m in ("Control", "Alt", "Meta") if m in screen.held_keys]
+            if held or len(key) != 1:
+                return {"kind": "key", "key": "+".join([*held, key])[:40]}
+            typed = key
+        elif kind in ("type", "paste"):
+            typed = str(event.get("text", ""))
+        elif kind == "key":
+            return {"kind": "key", "key": str(event["key"])[:40]}
+        elif kind in ("wheel", "scroll"):
+            dy = float(event.get("dy") or 0) if kind == "wheel" else float(event.get("dy", 400))
+            return {"kind": "scroll", "dy": dy} if dy else None
+        elif kind in ("navigate", "back", "forward", "reload"):
+            return {"kind": kind}
+        else:
+            return None
+        target = await self._describe(screen, 0, 0, focused=True) or {}
+        return {
+            "kind": "type",
+            "target": target,
+            "text": "•••" if target.get("secret") else typed[:400],
+        }
+
+
+# --- a person's input -----------------------------------------------------------------
+
+
+def _due(s: Screen, t: float | None) -> float:
+    """When, on our monotonic clock, an event the person made at `t` should happen.
+
+    The first event anchors the person's clock to ours; each later one is due as long
+    after the anchor as it was made after the anchor's event. An event already late is
+    due now, so a slow request is caught up rather than carried forward."""
+    now = time.monotonic()
+    if t is None:
+        return now
+    anchor = s.pace
+    if anchor is None or t < anchor[0] or now - s.last_input > PACE_IDLE_S:
+        s.pace = anchor = (t, now)
+    due = anchor[1] + (t - anchor[0]) / 1000
+    if due - now > PACE_MAX_WAIT_S:
+        s.pace = (t, now)
+        return now
+    return due
+
+
+def _fold(event: dict[str, Any], later: dict[str, Any] | None, *, late: bool) -> bool:
+    """Fold a pointer move or wheel tick into the next one of its kind, as Chrome does
+    with a real mouse, when the next comes within a frame or this one is already late.
+    Sending each would cost a frame apiece and fall further behind the person's hand
+    with every one. True if `event` was folded and has nothing left to do."""
+    kind = event.get("kind")
+    if kind not in ("move", "wheel") or later is None or later.get("kind") != kind:
+        return False
+    t, t_later = event.get("t"), later.get("t")
+    soon = t is not None and t_later is not None and t_later - t < FRAME_MS
+    if not (soon or late):
+        return False
+    if kind == "wheel":
+        for axis in ("dx", "dy"):
+            later[axis] = float(later.get(axis) or 0) + float(event.get(axis) or 0)
+    return True
+
+
+async def _human_event(s: Screen, event: dict[str, Any]) -> None:
+    page = s.page
+    kind = event.get("kind")
+    if kind in ("move", "down", "up", "wheel", "click"):
+        x, y = _point(event)
+        if (x, y) != s.mouse:
+            await page.mouse.move(x, y)
+            s.mouse = (x, y)
+    if kind == "move":
+        pass
+    elif kind == "down":
+        button = _button(event)
+        await page.mouse.down(button=button, click_count=_clicks(event))
+        s.held_buttons.add(button)
+    elif kind == "up":
+        button = _button(event)
+        await page.mouse.up(button=button, click_count=_clicks(event))
+        s.held_buttons.discard(button)
+    elif kind == "click":
+        await page.mouse.down()
+        await page.mouse.up()
+    elif kind == "wheel":
+        await page.mouse.wheel(float(event.get("dx") or 0), float(event.get("dy") or 0))
+    elif kind == "keydown":
+        key = str(event.get("key", ""))
+        try:
+            await page.keyboard.down(key)
+        except PlaywrightError:
+            # Not a key on Playwright's keyboard: an accented letter, a symbol from
+            # another layout. A character goes in as text; anything else (a dead key,
+            # an input method's composition) has nothing to send.
+            if len(key) == 1:
+                await page.keyboard.insert_text(key)
+        else:
+            s.held_keys.add(key)
+    elif kind == "keyup":
+        key = str(event.get("key", ""))
+        if key in s.held_keys:
+            s.held_keys.discard(key)
+            await page.keyboard.up(key)
+    elif kind == "paste":
+        await page.keyboard.insert_text(str(event.get("text", "")))
+    elif kind == "type":
+        await page.keyboard.type(str(event.get("text", "")), delay=20)
+    elif kind == "key":
+        await page.keyboard.press(str(event["key"]))
+    elif kind == "scroll":
+        await page.mouse.wheel(0, float(event.get("dy", 400)))
+    elif kind == "navigate":
+        await page.goto(_normalise_url(str(event["url"])))
+    elif kind == "back":
+        await page.go_back()
+    elif kind == "forward":
+        await page.go_forward()
+    elif kind == "reload":
+        await page.reload()
+    else:
+        raise ComputerError(f"unknown input {kind!r}")
+
+
+async def _release(s: Screen) -> None:
+    """Let go of whatever the person was still holding when they handed the screen back."""
+    for key in sorted(s.held_keys):
+        with contextlib.suppress(PlaywrightError):
+            await s.page.keyboard.up(key)
+    for button in sorted(s.held_buttons):
+        with contextlib.suppress(PlaywrightError):
+            await s.page.mouse.up(button=button)
+    s.held_keys.clear()
+    s.held_buttons.clear()
+    s.pace = None
+
+
+def _point(event: dict[str, Any]) -> tuple[float, float]:
+    try:
+        x, y = float(event["x"]), float(event["y"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ComputerError(f"{event.get('kind')} needs x and y") from exc
+    return (
+        min(max(x, 0.0), VIEWPORT["width"] - 1.0),
+        min(max(y, 0.0), VIEWPORT["height"] - 1.0),
+    )
+
+
+def _button(event: dict[str, Any]) -> Button:
+    button = str(event.get("button") or "left")
+    if button not in BUTTONS:
+        raise ComputerError(f"unknown mouse button {button!r}")
+    return cast(Button, button)
+
+
+def _clicks(event: dict[str, Any]) -> int:
+    return min(3, max(1, int(event.get("clicks") or 1)))
 
 
 # --- action implementations -----------------------------------------------------------

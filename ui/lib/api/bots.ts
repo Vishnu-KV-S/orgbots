@@ -459,9 +459,6 @@ export const searchBots = (q: string, signal?: AbortSignal) =>
     signal,
   });
 
-export const screenshotUrl = (id: string, nonce: number) =>
-  `${BOTS_BASE}/${id}/computer/screenshot?quality=60&t=${nonce}`;
-
 /** A screenshot a run kept for the chat. Never changes, so no cache-buster. */
 export const savedScreenshotUrl = (id: string, screenshotId: string) =>
   `${BOTS_BASE}/${id}/screenshots/${screenshotId}`;
@@ -469,16 +466,36 @@ export const savedScreenshotUrl = (id: string, screenshotId: string) =>
 export const setController = (id: string, controller: "bot" | "human") =>
   request<unknown>(`${BOTS_BASE}/${id}/computer/control`, json("POST", { controller }));
 
-export type HumanInput =
-  | { kind: "click"; x: number; y: number }
-  | { kind: "type"; text: string }
+/** The live screen: an MJPEG stream, one JPEG part per repaint. */
+export const streamUrl = (id: string) => `${BOTS_BASE}/${id}/computer/stream`;
+
+export type MouseButton = "left" | "middle" | "right";
+
+/**
+ * A person's input on a screen they hold. Coordinates are the bot's viewport pixels;
+ * `t` is when the person made it (`performance.now()`), so the computer can replay a
+ * batch at the pace it was made.
+ */
+export type HumanInput = { t?: number } & (
+  | { kind: "move"; x: number; y: number }
+  | { kind: "down" | "up"; x: number; y: number; button: MouseButton; clicks: number }
+  | { kind: "wheel"; x: number; y: number; dx: number; dy: number }
+  | { kind: "keydown" | "keyup"; key: string }
+  | { kind: "paste" | "type"; text: string }
   | { kind: "key"; key: string }
-  | { kind: "scroll"; dy: number }
   | { kind: "navigate"; url: string }
-  | { kind: "back" | "forward" | "reload" };
+  | { kind: "back" | "forward" | "reload" }
+);
 
 export const sendInput = (id: string, input: HumanInput) =>
   request<{ ok: boolean; url: string }>(`${BOTS_BASE}/${id}/computer/input`, json("POST", input));
+
+/** Input in the order it was made. Send the next batch only once this one is done. */
+export const sendInputs = (id: string, events: HumanInput[]) =>
+  request<{ ok: boolean; url: string }>(
+    `${BOTS_BASE}/${id}/computer/inputs`,
+    json("POST", { events }),
+  );
 
 export const computerStatus = (signal?: AbortSignal) =>
   request<ComputerStatus>(COMPUTER_BASE, { signal });
