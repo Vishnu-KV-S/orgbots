@@ -14,21 +14,29 @@ read, there is room — is still true when the write lands.
 id of the revision it writes; a replayed step finds that revision already there and
 gets back what it did the first time instead of doing it again.
 
+**Bytes come in through `upload`** — an attachment, a file saved from the web. Text
+types become ordinary text files; anything else is stored once by its hash
+(`team_file_blobs`) with the text that could be read out of it, and is never edited
+as text (`check_text_op`): moved, deleted, restored, read — but a PDF stays the PDF.
+
 Nothing here calls a model or leaves the database.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import uuid
 from dataclasses import dataclass
 
 from runtime.domain.files import (
+    MAX_BLOB_BYTES,
     MAX_REVISIONS,
     SEARCH_HITS,
     Editor,
     FilePathError,
     FileTakenError,
+    FileTooLargeError,
     NoSuchFileError,
     Team,
     appended,
@@ -36,6 +44,7 @@ from runtime.domain.files import (
     check_base,
     check_room,
     check_size,
+    check_text_op,
     check_unlocked,
     move_target,
     normalize_path,
@@ -44,6 +53,7 @@ from runtime.domain.files import (
     snippet,
     terms,
 )
+from runtime.org.extract import extract_text, is_text, safe_name
 from runtime.persistence.repositories.files import FileRevisionRow, TeamFileRow
 from runtime.persistence.uow import UnitOfWork, UnitOfWorkFactory
 
@@ -139,6 +149,7 @@ class TeamDrive:
             if existing is None:
                 return await self._create(uow, team, path, content, editor, op_id)
             check_unlocked(existing, editor)
+            check_text_op(existing, "rewritten")
             return await self._save(uow, existing, "write", existing.path, content, editor, op_id)
 
     async def create(self, team: Team, path: str, content: str, *, editor: Editor) -> Change:
@@ -175,6 +186,7 @@ class TeamDrive:
                 check_size(text)
                 return await self._create(uow, team, path, text, editor, op_id)
             check_unlocked(existing, editor)
+            check_text_op(existing, "appended to")
             content = appended(existing.content or "", text)
             check_size(content)
             return await self._save(uow, existing, "append", existing.path, content, editor, op_id)
@@ -197,6 +209,7 @@ class TeamDrive:
             await uow.files.lock_team(team.team_id)
             existing = await self._existing(uow, team, path)
             check_unlocked(existing, editor)
+            check_text_op(existing, "edited")
             content = apply_edit(
                 existing.content or "", clean_content(find), clean_content(replacement)
             )
@@ -325,6 +338,7 @@ class TeamDrive:
             if current is None or current.team_id != team.team_id:
                 raise NoSuchFileError(f"no file {file_id}")
             content = current.content or ""
+            blob: tuple[str, str | None] = (current.media_type, current.blob_sha)
             note = "restored from the trash" if current.deleted_at else ""
             if version is None and current.deleted_at is None:
                 raise FilePathError(f"{current.path} is not deleted; name a revision to restore")
@@ -333,6 +347,7 @@ class TeamDrive:
                 if revision is None:
                     raise NoSuchFileError(f"{current.path} has no revision {version} any more")
                 content = revision.content
+                blob = (revision.media_type, revision.blob_sha)
                 note = f"restored revision {version}" + (" from the trash" if note else "")
             if current.deleted_at is not None:
                 taken = await uow.files.live_by_path(team.team_id, current.path)
@@ -342,8 +357,104 @@ class TeamDrive:
                     )
                 check_room(await uow.files.count_live(team.team_id))
             return await self._save(
-                uow, current, "restore", current.path, content, editor, None, note=note
+                uow,
+                current,
+                "restore",
+                current.path,
+                content,
+                editor,
+                None,
+                note=note,
+                media_type=blob[0],
+                blob_sha=blob[1],
             )
+
+    # --- bytes ----------------------------------------------------------------------
+
+    async def upload(
+        self,
+        team: Team,
+        folder: str,
+        name: str,
+        data: bytes,
+        media_type: str,
+        *,
+        editor: Editor,
+        op_id: uuid.UUID | None = None,
+    ) -> Change:
+        """Store a file someone brought in, under `folder`, at a free name.
+
+        `name` is cleaned to what a path accepts and, when it is taken, numbered
+        (`invoice-2.pdf`) rather than replacing what is there: an attachment is a new
+        file, never an overwrite of a teammate's. Text types become text files; the rest
+        keep their bytes and the text extracted from them.
+        """
+        if len(data) > MAX_BLOB_BYTES:
+            raise FileTooLargeError(
+                f"{name} is {len(data) / 1_048_576:.1f} MB; files are at most "
+                f"{MAX_BLOB_BYTES // 1_048_576} MB"
+            )
+        folder = normalize_path(folder, folder=True)
+        clean = safe_name(name)
+        text_file = is_text(media_type)
+        if text_file:
+            content = clean_content(data.decode("utf-8", errors="replace"))
+            check_size(content)
+            sha = None
+        else:
+            content = clean_content(extract_text(media_type, data))
+            sha = hashlib.sha256(data).hexdigest()
+        async with self._uow.transaction() as uow:
+            done = await self._replayed(uow, op_id)
+            if done is not None:
+                return done
+            await uow.files.lock_team(team.team_id)
+            path = await self._free_path(uow, team, folder, clean)
+            if sha is not None:
+                await uow.files.put_blob(sha, data)
+            return await self._create(
+                uow,
+                team,
+                path,
+                content,
+                editor,
+                op_id,
+                media_type="text/plain" if text_file else media_type,
+                blob_sha=sha,
+                size=len(data),
+            )
+
+    async def blob(self, team: Team, file_id: uuid.UUID) -> tuple[TeamFileRow, bytes]:
+        """A file's bytes: the blob for a binary file, the text encoded for a text one."""
+        row = await self.get(team, file_id)
+        if row is None:
+            raise NoSuchFileError(f"no file {file_id}")
+        if row.blob_sha is None:
+            return row, (row.content or "").encode()
+        async with self._uow() as uow:
+            data = await uow.files.blob(row.blob_sha)
+        if data is None:
+            raise NoSuchFileError(f"the bytes of {row.path} are missing")
+        return row, data
+
+    async def blob_at(self, team: Team, path: str) -> tuple[TeamFileRow, bytes]:
+        row = await self.find(team, path)
+        if row is None:
+            raise NoSuchFileError(f"there is no {normalize_path(path)} in the team drive")
+        return await self.blob(team, row.id)
+
+    @staticmethod
+    async def _free_path(uow: UnitOfWork, team: Team, folder: str, name: str) -> str:
+        stem, dot, ext = name.rpartition(".")
+        if not dot or not stem:
+            stem, ext = name, ""
+        prefix = "" if folder == "/" else folder
+        for n in range(1, 200):
+            candidate = name if n == 1 else f"{stem}-{n}" + (f".{ext}" if ext else "")
+            path = normalize_path(f"{prefix}/{candidate}")
+            if await uow.files.live_by_path(team.team_id, path) is None:
+                return path
+        raise FileTakenError(f"{folder} already has too many files called {name}")
 
     # --- internals ---------------------------------------------------------------
 
@@ -382,6 +493,10 @@ class TeamDrive:
         content: str,
         editor: Editor,
         op_id: uuid.UUID | None,
+        *,
+        media_type: str = "text/plain",
+        blob_sha: str | None = None,
+        size: int | None = None,
     ) -> Change:
         check_room(await uow.files.count_live(team.team_id))
         file_id = uuid.uuid4()
@@ -394,6 +509,9 @@ class TeamDrive:
             editor_kind=editor.kind,
             editor_bot_id=editor.bot_id,
             editor_name=editor.name,
+            media_type=media_type,
+            blob_sha=blob_sha,
+            size=size,
         )
         await uow.files.add_revision(
             op_id or uuid.uuid4(),
@@ -406,6 +524,8 @@ class TeamDrive:
             editor_bot_id=editor.bot_id,
             editor_name=editor.name,
             run_id=editor.run_id,
+            media_type=media_type,
+            blob_sha=blob_sha,
         )
         row = await uow.files.get(file_id)
         assert row is not None
@@ -423,8 +543,19 @@ class TeamDrive:
         *,
         note: str = "",
         deleted: bool = False,
+        media_type: str | None = None,
+        blob_sha: str | None = None,
     ) -> Change:
         version = existing.version + 1
+        # A move, delete or restore keeps the file's bytes; only a restore names others.
+        if media_type is None:
+            media_type, blob_sha = existing.media_type, existing.blob_sha
+        size = None
+        if blob_sha is not None:
+            size = existing.bytes if blob_sha == existing.blob_sha else None
+            if size is None:
+                stored = await uow.files.blob(blob_sha)
+                size = len(stored) if stored is not None else 0
         await uow.files.save(
             existing.id,
             path=path,
@@ -434,6 +565,9 @@ class TeamDrive:
             editor_bot_id=editor.bot_id,
             editor_name=editor.name,
             deleted=deleted,
+            media_type=media_type,
+            blob_sha=blob_sha,
+            size=size,
         )
         await uow.files.add_revision(
             op_id or uuid.uuid4(),
@@ -447,6 +581,8 @@ class TeamDrive:
             editor_name=editor.name,
             run_id=editor.run_id,
             note=note,
+            media_type=media_type,
+            blob_sha=blob_sha,
         )
         await uow.files.prune_revisions(existing.id, MAX_REVISIONS)
         row = await uow.files.get(existing.id)

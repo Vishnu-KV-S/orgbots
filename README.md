@@ -192,6 +192,16 @@ and card boxes recorded as `•••`), keys, scrolls and pages, up to 10 minut
 gives the screen back and sends the bot the recording, and it writes it up as a
 **draft**. No bot is offered a draft until you read it and mark it ready.
 
+**Attachments.** Paste an image, drop files on the message box, or press 📎. Each file
+goes into the team's drive under `/attachments/<date>/` (migration 045), and the message
+says where it is. Text types become ordinary text files. Images, PDFs and Word,
+PowerPoint and Excel files keep their bytes, stored once by hash, with the text read
+out of them when they are stored (`runtime/org/extract.py`, type decided from the
+bytes, every reader size-bounded). A bot reads a PDF with `read_file` and looks at an
+image with `look` and `path`. Binary files cannot be edited as text, and their
+revisions, moves and restores keep the bytes. The Files pane uploads any type, shows
+images, opens PDFs and shows the text the bots read.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
@@ -204,7 +214,7 @@ drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs o
 context, not one per bot.
 
 Not yet built (the next phases): plugins/connectors, group chats with several bots,
-binary file attachments (team files are text), voice chat, team bots.
+voice chat, team bots.
 
 ---
 

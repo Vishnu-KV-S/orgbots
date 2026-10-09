@@ -217,8 +217,9 @@ class BotStep(BaseModel):
         "text = what replaces it). move_file renames or moves a file (path, to). delete_file "
         "deletes one (path). VISION: look asks a vision model about what is on your screen "
         "right now (text = your question) — for images, charts, maps, colours and layout, "
-        "or whenever the page listing does not explain what you see; the answer comes back "
-        "to you. ROUTINES (recurring work, only when your person asks for it): "
+        "or whenever the page listing does not explain what you see; with path = an image "
+        "file in your team drive (an attachment, say) it looks at that instead. The answer "
+        "comes back to you. ROUTINES (recurring work, only when your person asks for it): "
         "save_routine creates or changes one of your routines by name (routine = name, "
         "instruction, cron, timezone, output; active=false pauses it). delete_routine "
         "removes one (routine = its name). SKILLS (your organization's shared how-tos): "
@@ -251,7 +252,8 @@ class BotStep(BaseModel):
         default=None,
         max_length=400,
         description="For file actions: a path in your team drive, e.g. "
-        "/projects/acme/vendors.csv. For list_files, a folder (default /).",
+        "/projects/acme/vendors.csv. For list_files, a folder (default /). For look: an "
+        "image file to look at instead of the screen.",
     )
     to: str | None = Field(
         default=None,
@@ -395,15 +397,15 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=6)
-"""Version 6 added skills (`save_skill`, `use_skill`, with `skill`). Version 5 added
-routines (`save_routine`, `delete_routine`, with `routine`). Version 4 added the team
-drive (`list_files` … `delete_file`, with `path`, `to`, `find` and `from_line`) and
-`look` (vision: a question about the screen). Version 3 added working memory (`plan` and
-`notes`, carried from step to step within a turn) and `sign_in` (the login vault).
-Version 2 added memory (remember kinds, forget, recall, diary) and the brief
-(update_brief, create_bot's brief and seed memories). Version 1 was never run against
-stored data, so it is not kept."""
+BOT_STEP = SCHEMAS.register(BotStep, version=7)
+"""Version 7 let `look` take a `path` (an image in the team drive). Version 6 added skills
+(`save_skill`, `use_skill`, with `skill`). Version 5 added routines (`save_routine`,
+`delete_routine`, with `routine`). Version 4 added the team drive (`list_files` …
+`delete_file`, with `path`, `to`, `find` and `from_line`) and `look` (vision: a question
+about the screen). Version 3 added working memory (`plan` and `notes`, carried from step
+to step within a turn) and `sign_in` (the login vault). Version 2 added memory (remember
+kinds, forget, recall, diary) and the brief (update_brief, create_bot's brief and seed
+memories). Version 1 was never run against stored data, so it is not kept."""
 
 
 # --- appearance -------------------------------------------------------------------------

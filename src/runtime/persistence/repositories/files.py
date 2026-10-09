@@ -24,13 +24,13 @@ suite's session lock."""
 _META = """
     id, organization_id, team_id, path, chars, version, locked, created_by_kind,
     created_by_bot_id, created_by_name, updated_by_kind, updated_by_bot_id, updated_by_name,
-    created_at, updated_at, deleted_at
+    created_at, updated_at, deleted_at, media_type, blob_sha, bytes
 """
 _FULL = _META + ", content"
 
 _REVISION = """
     id, file_id, version, op, path, content, editor_kind, editor_bot_id, editor_name,
-    run_id, note, created_at
+    run_id, note, created_at, media_type, blob_sha
 """
 
 
@@ -60,7 +60,16 @@ class TeamFileRow:
     updated_at: datetime
     deleted_at: datetime | None
     content: str | None
-    """`None` when the query was a listing; listings never read file bodies."""
+    """`None` when the query was a listing; listings never read file bodies. For a
+    binary file, the text that could be read out of it (empty for an image)."""
+    media_type: str = "text/plain"
+    blob_sha: str | None = None
+    """Set for a binary file (migration 045): its bytes are `team_file_blobs[blob_sha]`."""
+    bytes: int = 0
+
+    @property
+    def is_binary(self) -> bool:
+        return self.blob_sha is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +86,8 @@ class FileRevisionRow:
     run_id: uuid.UUID | None
     note: str
     created_at: datetime
+    media_type: str = "text/plain"
+    blob_sha: str | None = None
 
 
 def _file(r: Any) -> TeamFileRow:
@@ -98,6 +109,9 @@ def _file(r: Any) -> TeamFileRow:
         updated_at=r.updated_at,
         deleted_at=r.deleted_at,
         content=getattr(r, "content", None),
+        media_type=r.media_type,
+        blob_sha=r.blob_sha,
+        bytes=int(r.bytes),
     )
 
 
@@ -115,6 +129,8 @@ def _revision(r: Any) -> FileRevisionRow:
         run_id=r.run_id,
         note=r.note,
         created_at=r.created_at,
+        media_type=r.media_type,
+        blob_sha=r.blob_sha,
     )
 
 
@@ -235,15 +251,19 @@ class TeamFileRepository:
         editor_kind: str,
         editor_bot_id: uuid.UUID | None,
         editor_name: str,
+        media_type: str = "text/plain",
+        blob_sha: str | None = None,
+        size: int | None = None,
     ) -> None:
         await self._s.execute(
             text(
                 """
                 INSERT INTO team_files (id, organization_id, team_id, path, content, chars,
                                         created_by_kind, created_by_bot_id, created_by_name,
-                                        updated_by_kind, updated_by_bot_id, updated_by_name)
+                                        updated_by_kind, updated_by_bot_id, updated_by_name,
+                                        media_type, blob_sha, bytes)
                 VALUES (:id, :org, :team, :path, :content, :chars,
-                        :kind, :bot, :name, :kind, :bot, :name)
+                        :kind, :bot, :name, :kind, :bot, :name, :media, :blob, :bytes)
                 """
             ),
             {
@@ -256,6 +276,9 @@ class TeamFileRepository:
                 "kind": editor_kind,
                 "bot": editor_bot_id,
                 "name": editor_name,
+                "media": media_type,
+                "blob": blob_sha,
+                "bytes": size if size is not None else len(content.encode()),
             },
         )
 
@@ -270,6 +293,9 @@ class TeamFileRepository:
         editor_bot_id: uuid.UUID | None,
         editor_name: str,
         deleted: bool = False,
+        media_type: str = "text/plain",
+        blob_sha: str | None = None,
+        size: int | None = None,
     ) -> None:
         """The file as it is after a change. `deleted` moves it to (or out of) the trash."""
         await self._s.execute(
@@ -279,7 +305,8 @@ class TeamFileRepository:
                    SET path = :path, content = :content, chars = :chars, version = :version,
                        updated_by_kind = :kind, updated_by_bot_id = :bot,
                        updated_by_name = :name, updated_at = now(),
-                       deleted_at = CASE WHEN :deleted THEN now() ELSE NULL END
+                       deleted_at = CASE WHEN :deleted THEN now() ELSE NULL END,
+                       media_type = :media, blob_sha = :blob, bytes = :bytes
                  WHERE id = :id
                 """
             ),
@@ -293,8 +320,29 @@ class TeamFileRepository:
                 "bot": editor_bot_id,
                 "name": editor_name,
                 "deleted": deleted,
+                "media": media_type,
+                "blob": blob_sha,
+                "bytes": size if size is not None else len(content.encode()),
             },
         )
+
+    async def put_blob(self, sha256: str, data: bytes) -> None:
+        """Store bytes by their hash. The same bytes stored twice are one row."""
+        await self._s.execute(
+            text(
+                "INSERT INTO team_file_blobs (sha256, data, bytes) VALUES (:sha, :data, :n) "
+                "ON CONFLICT (sha256) DO NOTHING"
+            ),
+            {"sha": sha256, "data": data, "n": len(data)},
+        )
+
+    async def blob(self, sha256: str) -> bytes | None:
+        row = (
+            await self._s.execute(
+                text("SELECT data FROM team_file_blobs WHERE sha256 = :sha"), {"sha": sha256}
+            )
+        ).one_or_none()
+        return None if row is None else bytes(row.data)
 
     async def set_locked(self, file_id: uuid.UUID, locked: bool) -> None:
         await self._s.execute(
@@ -361,15 +409,17 @@ class TeamFileRepository:
         editor_name: str,
         run_id: uuid.UUID | None,
         note: str = "",
+        media_type: str = "text/plain",
+        blob_sha: str | None = None,
     ) -> None:
         await self._s.execute(
             text(
                 """
                 INSERT INTO team_file_revisions (id, file_id, version, op, path, content,
                                                  editor_kind, editor_bot_id, editor_name,
-                                                 run_id, note)
+                                                 run_id, note, media_type, blob_sha)
                 VALUES (:id, :file, :version, :op, :path, :content,
-                        :kind, :bot, :name, :run, :note)
+                        :kind, :bot, :name, :run, :note, :media, :blob)
                 """
             ),
             {
@@ -384,6 +434,8 @@ class TeamFileRepository:
                 "name": editor_name,
                 "run": run_id,
                 "note": note,
+                "media": media_type,
+                "blob": blob_sha,
             },
         )
 

@@ -195,6 +195,8 @@ export interface BotMessage {
     file_id?: string;
     version?: number;
     chars?: number;
+    /** Files sent with a person's message — already in the team's drive. */
+    attachments?: Attachment[];
     /** A demonstration's message (role "user"): the goal, and how many steps. */
     demonstration?: string;
     recording_id?: string;
@@ -301,8 +303,26 @@ export const fetchMessages = (id: string, after: number, signal?: AbortSignal) =
     signal,
   });
 
-export const sendMessage = (id: string, text: string, replyTo?: string | null) =>
-  request<Sent>(`${BOTS_BASE}/${id}/messages`, json("POST", { text, reply_to: replyTo ?? null }));
+export interface Attachment {
+  id: string;
+  path: string;
+  name: string;
+  media_type: string;
+  bytes: number;
+  kind: string;
+  chars?: number;
+}
+
+export const sendMessage = (
+  id: string,
+  text: string,
+  replyTo?: string | null,
+  attachments: string[] = [],
+) =>
+  request<Sent>(
+    `${BOTS_BASE}/${id}/messages`,
+    json("POST", { text, reply_to: replyTo ?? null, attachments }),
+  );
 
 export const decide = (id: string, pendingId: string, decision: "once" | "always" | "deny") =>
   request<Sent>(`${BOTS_BASE}/${id}/pending/${pendingId}`, json("POST", { decision }));
@@ -421,6 +441,13 @@ export interface TeamFile {
   updated_at: string;
   /** Set when the file is in the trash. */
   deleted_at: string | null;
+  /** An image, a PDF or a document keeps its bytes; `content` is then the text read
+   * out of it (empty for an image), and it cannot be edited as text. */
+  media_type: string;
+  bytes: number;
+  binary: boolean;
+  /** "text", "image", "PDF", "Word document", "spreadsheet", "presentation" or "file". */
+  kind: string;
   content?: string;
   /** A search match: the text around the first hit. */
   snippet?: string;
@@ -489,6 +516,31 @@ export const deleteFile = (id: string, fileId: string, baseVersion?: number) =>
   request<FileChange>(
     `${filesOf(id)}/${fileId}${baseVersion ? `?base_version=${baseVersion}` : ""}`,
     { method: "DELETE" },
+  );
+
+/** A file's bytes — an image to show, a PDF to open, anything to download. */
+export const rawFileUrl = (id: string, fileId: string) => `${filesOf(id)}/${fileId}/raw`;
+
+const base64Of = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+    reader.onerror = () => reject(reader.error ?? new Error(`could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+/** Upload files into the team's drive — a message's attachments (default folder
+ * `/attachments/<today>`) or the Files pane's uploads. Any type: the runtime decides
+ * from the bytes whether it is text, and reads the text out of PDFs and documents. */
+export const uploadFiles = async (id: string, files: File[], folder?: string) =>
+  request<{ files: TeamFile[] }>(
+    `${filesOf(id)}/upload`,
+    json("POST", {
+      folder: folder || undefined,
+      files: await Promise.all(
+        files.map(async (f) => ({ name: f.name, media_type: f.type, data: await base64Of(f) })),
+      ),
+    }),
   );
 
 export const listFileRevisions = (id: string, fileId: string, signal?: AbortSignal) =>
