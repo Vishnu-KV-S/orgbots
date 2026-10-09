@@ -223,22 +223,31 @@ browser only through `browser.observe@1` / `browser.act@1` in the tool gateway.
 uv pip install -e ".[dev,computer]"
 export RUNTIME_DEEPSEEK_API_KEY=...          # or put it in .env (gitignored)
 
-docker compose up -d --build computer       # the bots' computer, :8020 (desktop: :6080)
+scripts/computer.sh up                      # the bots' computer, :8020 (desktop: :6080)
 uv run uvicorn runtime.api.app:app --port 8000
 uv run python -m runtime.worker.main
 cd ui && npm run dev                        # http://localhost:3000
 ```
 
-**The computer** (`docker/computer`) is two containers from one image. `computer` is the
-desktop: TigerVNC's X server, openbox, Google Chrome from Google's apt repository, and
-the service the runtime drives it through (`runtime.computer`), which starts Chrome as a
-person would — in windows, on the display, with none of a test harness's switches — and
-attaches to it. A person sees the whole desktop at http://127.0.0.1:6080 (*Whole
-desktop ↗* in the Computer pane). `shell` is where the bots' commands run: it shares the
-workspace volume and nothing else — no browser profiles, and its own network with no
-route to the computer. Profiles and workspaces are Docker volumes, so logins survive
-rebuilds; `docker compose build --pull computer` updates Chrome. Both ports are bound to
-this machine only.
+**The computer** (`docker/computer`, run with `scripts/computer.sh up | down | logs |
+rebuild | desktop`) is two containers from one image:
+
+- `computer` is the desktop: TigerVNC's X server, openbox, Google Chrome from Google's
+  apt repository, and the service the runtime drives it through (`runtime.computer`). It
+  starts Chrome as a person would — a window per bot, on the display, with Chrome's own
+  sandbox and none of a test harness's switches — on this machine's GPU when it has one
+  (`docker/computer/gpu.yml`; WebGL reports the real graphics card) and in this machine's
+  time zone. A person sees the whole desktop at http://127.0.0.1:6080 (*Whole desktop ↗*
+  in the Computer pane).
+- `shell` is where the bots' commands run, each in its own bubblewrap sandbox. It shares
+  the workspace volume and nothing else: no browser profiles (every login's cookies), and
+  a network of its own with no route to the computer, its API or its desktop.
+
+Profiles and workspaces are Docker volumes, so logins survive restarts and rebuilds;
+`scripts/computer.sh rebuild` updates Chrome. Both ports are bound to this machine only.
+Each container asks for exactly the user-namespace access its sandbox needs
+(`docker-compose.yml`). Chrome controlled over DevTools sets `navigator.webdriver`, as it
+does for any automated browser.
 
 Without Docker, `uv run python -m runtime.computer.main` runs the computer as a process
 here instead, on Playwright's Chromium (headless; set `COMPUTER_CHROMIUM_PATH` to use an

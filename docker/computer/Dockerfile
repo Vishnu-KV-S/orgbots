@@ -28,17 +28,34 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# The desktop, fonts a real machine has (a page that finds none looks broken, and odd),
-# and the tools a bot's terminal is likely to want.
+# The desktop, graphics drivers (Mesa's, for a GPU passed in: docker/computer/gpu.yml),
+# fonts a real machine has (a page that finds none looks broken, and odd), and the tools
+# a bot's terminal is likely to want.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg locales tzdata dbus-x11 xdg-utils \
-      tigervnc-standalone-server openbox novnc python3-websockify supervisor \
+      ca-certificates curl gnupg locales tzdata dbus-x11 xdg-utils util-linux \
+      tigervnc-standalone-server openbox supervisor \
+      mesa-vulkan-drivers libgl1-mesa-dri libegl1 \
       fonts-liberation fonts-dejavu-core fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
       python3.12 python3-pip python3-venv bubblewrap \
       git jq less nano file zip unzip wget ripgrep \
  && sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen \
+ && tr -d '-' < /proc/sys/kernel/random/uuid > /etc/machine-id \
+ && install -d -m 1777 /tmp/.X11-unix \
  && rm -rf /var/lib/apt/lists/*
+
+# noVNC (the whole desktop in a browser tab), from its own releases: Ubuntu's package
+# brings Node.js, numpy and OpenStack's configuration library with it. websockify's
+# numpy, requests, jwcrypto and redis are for speed-ups and token plugins it imports only
+# if they are there.
+ARG NOVNC_VERSION=1.7.0
+ARG WEBSOCKIFY_VERSION=0.13.0
+RUN curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" \
+      | tar -xz -C /opt \
+ && mv "/opt/noVNC-${NOVNC_VERSION}" /opt/novnc \
+ && ln -s vnc.html /opt/novnc/index.html \
+ && python3 -m venv /opt/websockify \
+ && /opt/websockify/bin/pip install --no-cache-dir --no-deps "websockify==${WEBSOCKIFY_VERSION}"
 
 # Google Chrome, signed by Google's key.
 RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
@@ -71,7 +88,6 @@ COPY docker/computer/supervisord.conf /etc/computer/supervisord.conf
 COPY docker/computer/openbox.xml /etc/computer/openbox.xml
 COPY docker/computer/chrome-policies.json /etc/opt/chrome/policies/managed/computer.json
 COPY docker/computer/start-computer /usr/local/bin/start-computer
-RUN ln -sf vnc.html /usr/share/novnc/index.html
 
 ENV PATH=/opt/computer/venv/bin:$PATH \
     PYTHONPATH=/opt/computer/src \
