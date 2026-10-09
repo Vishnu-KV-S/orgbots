@@ -20,3 +20,4 @@ docs
 ui/node_modules
 ui/.next
 ui/tsconfig.tsbuildinfo
+mobile
