@@ -22,6 +22,7 @@ from runtime.org.files import TeamDrive
 from runtime.org.goals import GoalService
 from runtime.org.inbox import InboxService
 from runtime.org.metrics import MetricsService
+from runtime.org.routines import RoutineService
 from runtime.org.sessions import SessionService
 from runtime.org.tasks import TaskService
 from runtime.persistence.uow import UnitOfWorkFactory
@@ -38,6 +39,7 @@ class OrgServices:
     metrics: MetricsService
     bots: BotService
     files: TeamDrive
+    routines: RoutineService
 
 
 def build_org_services(
@@ -65,4 +67,5 @@ def build_org_services(
         metrics=MetricsService(uow_factory),
         bots=BotService(uow_factory, inbox=inbox, max_chunks=bot_chunks),
         files=TeamDrive(uow_factory),
+        routines=RoutineService(uow_factory),
     )

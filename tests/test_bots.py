@@ -372,10 +372,19 @@ class EmptyDrive:
         return 0, []
 
 
+class NoRoutines:
+    """A bot with no routines, for the tests that are not about them
+    (`tests/test_bot_routines.py` is)."""
+
+    async def for_bot(self, bot_id: uuid.UUID) -> list[Any]:
+        return []
+
+
 @dataclass
 class _Org:
     bots: FakeBots
     files: Any = field(default_factory=EmptyDrive)
+    routines: Any = field(default_factory=NoRoutines)
 
 
 @dataclass

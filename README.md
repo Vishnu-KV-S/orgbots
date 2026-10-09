@@ -159,6 +159,25 @@ brings back deleted files. Clicking a file step in a conversation opens the file
 team keeps its files when its lead is deleted and the helpers move up; deleting a
 team's last bot deletes them.
 
+**Routines.** A bot can do work by itself, on a schedule or when an event arrives
+(`runtime/domain/routines.py`, migration 043). In the bot's Details, a routine is a name,
+what to do each time, and when: a schedule ("Weekdays at 08:00", any cron, in the
+person's timezone, at least 5 minutes apart, at most 50 per bot) or a webhook from
+GitHub, Slack or anything that POSTs JSON, matched by event name, text and sender. You
+can also just ask in the chat ("every weekday at 8, check the support inbox"), and the
+bot sets it up with `save_routine`. It can only do that on your own words in the
+conversation, never on a turn a routine, an event or another bot started. A firing is a
+message from the routine, so its result is in the conversation. It **never
+interrupts**: a busy bot, or one waiting on an approval or sign-in card, gets the
+firing when it is free, or it is skipped after two hours. Missed runs are recorded,
+not made up. *Drafts only* parks every consequential step, whatever the bot's "always
+allow" rules say. *Test run* runs it now, drafts only. The last 20 firings are kept per
+routine. Webhooks are checked by an unguessable URL token and, when a signing secret is
+saved, by GitHub's or Slack's signature. Set `RUNTIME_PUBLIC_URL` to the address GitHub
+or Slack can reach (a tunnel, say) so the URL shown is the right one. The worker runs
+routines (`RUNTIME_BOT_ROUTINES_ENABLED`, on by default) alongside the dispatcher. They
+need no `RUNTIME_SCHEDULER_ENABLED`, which only drives the department's crons.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
@@ -170,9 +189,9 @@ rings when it asks one, and more — preview each in the designer. All of them a
 drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs one
 context, not one per bot.
 
-Not yet built (the next phases): skills and teach-by-demonstration, scheduled and
-event routines, plugins/connectors, group chats with several bots, binary file
-attachments (team files are text), voice chat, team bots.
+Not yet built (the next phases): skills and teach-by-demonstration, plugins/connectors,
+group chats with several bots, binary file attachments (team files are text), voice
+chat, team bots.
 
 ---
 

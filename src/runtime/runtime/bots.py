@@ -15,6 +15,11 @@ person makes is a revision, like one a bot makes, so the history has no gaps.
 Duplicating copies the brief and rules but not memory or conversation, the way
 GrokBot documents it: a copy is a new employee with the same job description.
 
+**A routine's turn is a message the routine sends** (`fire_routine`): the same row in
+the conversation, the same bump of the turn, the same `_start` — at a lower priority,
+and only once the bot is free (`busy`), because unlike a person a routine must not
+supersede work in progress or expire a card the person has not answered yet.
+
 **Sign-in details come in here and go nowhere a run can read.** A credential card's
 submission is sealed into the vault (`runtime.gateway.vault`) in the same transaction
 that marks the card answered, and the run it starts carries the card's id — the
@@ -31,8 +36,10 @@ from typing import Any
 
 from runtime.domain.bot_memory import BotBrief, brief_changes, clean_memory
 from runtime.domain.bots import BOT_TURN_PRIORITY, actor_name_for, host_of
+from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
 from runtime.domain.errors import UnknownActorError
-from runtime.domain.ids import OrganizationId
+from runtime.domain.ids import OrganizationId, RunId
+from runtime.domain.routines import ROUTINE_PRIORITY, routine_message
 from runtime.domain.specs import StartRunRequest
 from runtime.domain.vault import CredentialField, check_value, same_site
 from runtime.gateway.vault import Vault
@@ -45,6 +52,7 @@ from runtime.org.bots import (
     write_brief,
 )
 from runtime.persistence.repositories.bots import BotRow
+from runtime.persistence.repositories.routines import RoutineRow, RoutineRunRow
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.runtime.bootstrap import Registrar
 from runtime.runtime.run_service import RunService
@@ -284,6 +292,7 @@ class BotManager:
                 await uow.bots.set_flags(victim, stop_requested=True)
                 await uow.bots.soft_delete(victim)
                 await uow.vault.forget_bot(victim)
+                await uow.routines.delete_for_bot(victim)
             # A team's drive outlives any one member — helpers kept here keep it — but
             # not the last one. Trashed rather than dropped, like the bots themselves.
             if not await uow.bots.team(bot.team_id):
@@ -511,6 +520,106 @@ class BotManager:
             anchor=note_id,
         )
 
+    # --- routines --------------------------------------------------------------------
+
+    async def busy(self, bot: BotRow) -> str | None:
+        """Why a routine must wait for this bot, or `None` when it may start.
+
+        Working is one reason. The other two are a card waiting on the person — an
+        approval or a credential request — because a new turn expires both, and a
+        routine that quietly cancelled the question the person was about to answer
+        would be worse than a routine that ran late.
+        """
+        async with self._uow() as uow:
+            if bot.last_run_id is not None:
+                run = await uow.runs.get(RunId(bot.last_run_id))
+                if run is not None and RunStatus(run.status) in LIVE_RUN_STATUSES:
+                    return "working"
+            if await uow.bots.live_pending(bot.id):
+                return "waiting for an approval"
+            if await uow.vault.live_requests(bot.id):
+                return "waiting for sign-in details"
+        return None
+
+    async def fire_routine(
+        self, routine: RoutineRow, fire: RoutineRunRow, *, interrupt: bool = False
+    ) -> Sent:
+        """Start the turn a routine's firing asks for.
+
+        The instruction becomes a person-side message carrying the routine's name, so
+        the conversation reads as what happened: the routine asked, the bot answered.
+        `interrupt` is a person's test run — pressed by someone at the screen, so it
+        supersedes like a message does; a scheduled or event firing never does.
+        """
+        bot = await self.get(routine.bot_id)
+        content = routine_message(
+            name=routine.name,
+            instruction=routine.instruction,
+            trigger=fire.trigger,
+            inputs=routine.inputs,
+            output=routine.output,
+            when_missing=routine.when_missing,
+            approval=routine.approval,
+            scheduled_for=fire.scheduled_for,
+            timezone=routine.timezone,
+            event=fire.event or None,
+        )
+        message_id = uuid.uuid5(fire.id, "message")
+        async with self._uow.transaction() as uow:
+            await uow.bots.add_message(
+                message_id,
+                bot.id,
+                role="user",
+                content=content,
+                payload={
+                    "routine_id": str(routine.id),
+                    "routine": routine.name,
+                    "trigger": fire.trigger,
+                    "fire_id": str(fire.id),
+                },
+            )
+            if interrupt:
+                await uow.bots.expire_pending(bot.id)
+                await uow.vault.expire_requests(bot.id)
+            turn = await uow.bots.bump_turn(bot.id)
+        return await self._start(
+            bot,
+            turn,
+            key=f"bot:{bot.id}:routine:{fire.id}",
+            extra={
+                "routine_id": str(routine.id),
+                "fire_id": str(fire.id),
+                "trigger": fire.trigger,
+                "drafts_only": routine.approval == "drafts" or fire.trigger == "test",
+            },
+            anchor=message_id,
+            priority=ROUTINE_PRIORITY,
+        )
+
+    async def test_routine(self, routine: RoutineRow) -> tuple[uuid.UUID, Sent]:
+        """A person's "Test run": now, drafts only, recorded in the routine's history."""
+        fire_row_id = uuid.uuid4()
+        async with self._uow.transaction() as uow:
+            await uow.routines.add_run(
+                fire_row_id,
+                routine_id=routine.id,
+                bot_id=routine.bot_id,
+                trigger="test",
+                status="started",
+            )
+            fire = await uow.routines.get_run(fire_row_id)
+        assert fire is not None
+        sent = await self.fire_routine(routine, fire, interrupt=True)
+        async with self._uow.transaction() as uow:
+            await uow.routines.finish_run(
+                fire_row_id,
+                status="started" if sent.admitted else "refused",
+                run_id=sent.run_id,
+                detail=sent.refusal_reason or "",
+            )
+            await uow.routines.note_fired(routine.id)
+        return fire_row_id, sent
+
     async def _start(
         self,
         bot: BotRow,
@@ -519,6 +628,7 @@ class BotManager:
         key: str,
         extra: dict[str, Any],
         anchor: uuid.UUID,
+        priority: int = BOT_TURN_PRIORITY,
     ) -> Sent:
         result = await self._runs.start_run(
             StartRunRequest(
@@ -526,7 +636,7 @@ class BotManager:
                 actor_name=bot.actor_name,
                 input={"bot_id": str(bot.id), "turn": turn, **extra},
                 idempotency_key=key,
-                priority=BOT_TURN_PRIORITY,
+                priority=priority,
             )
         )
         async with self._uow.transaction() as uow:

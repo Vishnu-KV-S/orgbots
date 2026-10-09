@@ -365,6 +365,21 @@ class Settings(BaseSettings):
     as it did before. **Worst case it is this many times a run's ceiling** — 5 x 300
     cents, $15, for one instruction — though a step costs about a cent."""
 
+    public_url: str = ""
+    """Where this API is reachable from outside, e.g. a tunnel's https URL. Used only to
+    show an event routine's webhook URL; unset, the URL is built from the request, which
+    is right for a sender on the same machine and wrong for GitHub or Slack."""
+
+    bot_routines_enabled: bool = True
+    """Whether the worker starts bots' routines (`runtime.runtime.routines`).
+
+    On by default, unlike `scheduler_enabled`, because a routine exists only when a
+    person created one, or asked their bot for it in the conversation: it is their
+    standing instruction, not the department's clock. It still runs only where the
+    conductor runs (`conductor_enabled`). A routine waits for a busy bot rather than
+    interrupting it, and a worker that was down fires each routine's latest missed
+    occurrence once, never the backlog."""
+
     credential_keys: str = ""
     """`RUNTIME_CREDENTIAL_KEYS`, read here so `.env` is enough for the login vault
     (`runtime.gateway.vault.load_cipher`). The credential broker still reads the process

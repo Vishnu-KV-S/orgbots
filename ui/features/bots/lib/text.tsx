@@ -146,6 +146,10 @@ export function describeAction(action: BotAction | undefined): string {
       return `Move ${action.path ?? "a file"} to ${action.to ?? ""}`;
     case "delete_file":
       return `Delete ${action.path ?? "a file"}`;
+    case "save_routine":
+      return `Save routine “${action.name ?? ""}”`;
+    case "delete_routine":
+      return `Delete routine “${action.name ?? ""}”`;
     default:
       return action.type;
   }
@@ -181,6 +185,8 @@ export const ACTION_ICON: Record<string, string> = {
   edit_file: "✐",
   move_file: "⇢",
   delete_file: "✕",
+  save_routine: "⏰",
+  delete_routine: "⏰",
 };
 
 /** File steps a person can follow into the Files pane (a deleted file is in the trash). */

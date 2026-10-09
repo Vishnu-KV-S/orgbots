@@ -154,6 +154,8 @@ export interface BotAction {
   /** File steps: the path in the team files; `to` is where a move put it. */
   path?: string;
   to?: string;
+  /** save_routine / delete_routine: the routine's name. */
+  name?: string;
 }
 
 export interface BotMessage {
@@ -193,6 +195,13 @@ export interface BotMessage {
     file_id?: string;
     version?: number;
     chars?: number;
+    /** A message a routine sent (role "user"), and save_routine's result. */
+    routine?: string;
+    routine_id?: string;
+    trigger?: RoutineTrigger;
+    schedule?: string;
+    active?: boolean;
+    next_fire_at?: string | null;
   };
   run_id: string | null;
   reply_to: string | null;
@@ -483,3 +492,90 @@ export const listFileRevisions = (id: string, fileId: string, signal?: AbortSign
 /** Out of the trash, or back to an earlier revision's content (as a new revision). */
 export const restoreFile = (id: string, fileId: string, version?: number) =>
   request<FileChange>(`${filesOf(id)}/${fileId}/restore`, json("POST", { version }));
+
+// --- routines -------------------------------------------------------------------------
+
+export type RoutineTrigger = "schedule" | "event" | "test";
+
+export interface EventMatch {
+  events: string[];
+  contains: string;
+  actor: string;
+}
+
+export interface RoutineRun {
+  id: string;
+  trigger: RoutineTrigger;
+  status: "queued" | "started" | "refused" | "skipped" | "missed";
+  scheduled_for: string | null;
+  run_id: string | null;
+  detail: string;
+  event: { source?: string; name?: string; actor?: string; text?: string; url?: string };
+  created_at: string;
+  started_at: string | null;
+}
+
+export interface Routine {
+  id: string;
+  bot_id: string;
+  name: string;
+  instruction: string;
+  kind: "schedule" | "event";
+  cron: string | null;
+  timezone: string;
+  /** The schedule as a person says it ("Weekdays at 08:00"); empty for an event routine. */
+  schedule: string;
+  source: "webhook" | "github" | "slack" | null;
+  match: Partial<EventMatch>;
+  /** Where the sender posts events. Whoever has it can start the routine. */
+  hook_url: string | null;
+  has_secret: boolean;
+  inputs: string;
+  output: string;
+  approval: "default" | "drafts";
+  when_missing: string;
+  active: boolean;
+  created_by_kind: "person" | "bot";
+  next_fire_at: string | null;
+  last_fired_at: string | null;
+  fire_count: number;
+  last_run: RoutineRun | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type RoutineDraft = Pick<
+  Routine,
+  | "name"
+  | "instruction"
+  | "kind"
+  | "cron"
+  | "timezone"
+  | "source"
+  | "inputs"
+  | "output"
+  | "approval"
+  | "when_missing"
+  | "active"
+> & { match: EventMatch; signing_secret?: string };
+
+const routinesOf = (id: string) => `${BOTS_BASE}/${id}/routines`;
+
+export const listRoutines = (id: string, signal?: AbortSignal) =>
+  request<{ routines: Routine[] }>(routinesOf(id), { signal });
+
+export const createRoutine = (id: string, draft: RoutineDraft) =>
+  request<Routine>(routinesOf(id), json("POST", draft));
+
+export const updateRoutine = (id: string, routineId: string, fields: Partial<RoutineDraft>) =>
+  request<Routine>(`${routinesOf(id)}/${routineId}`, json("PATCH", fields));
+
+export const deleteRoutine = (id: string, routineId: string) =>
+  request<{ deleted: string }>(`${routinesOf(id)}/${routineId}`, { method: "DELETE" });
+
+/** Run it now, drafts only — like a message, it interrupts whatever the bot is doing. */
+export const testRoutine = (id: string, routineId: string) =>
+  request<Sent & { fire_id: string }>(`${routinesOf(id)}/${routineId}/test`, json("POST", {}));
+
+export const listRoutineRuns = (id: string, routineId: string, signal?: AbortSignal) =>
+  request<{ runs: RoutineRun[] }>(`${routinesOf(id)}/${routineId}/runs`, { signal });

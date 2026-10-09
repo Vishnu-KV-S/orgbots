@@ -18,6 +18,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { type Appearance, Designer, appearanceFor } from "../avatar";
 import { BriefSection } from "./BriefEditor";
 import { MemorySection } from "./MemoryPane";
+import { RoutinesSection } from "./RoutinesPane";
 
 const RULE_ACTIONS = [
   ["*", "any action"],
@@ -57,6 +58,7 @@ export function DetailsPane({
     <div>
       <Team bot={bot} bots={bots} onSelect={onSelect} />
       <BriefSection bot={bot} bots={bots} onChanged={onChanged} />
+      <RoutinesSection bot={bot} />
       <MemorySection bot={bot} />
       <Profile bot={bot} onChanged={onChanged} />
       <Looks bot={bot} onChanged={onChanged} />
