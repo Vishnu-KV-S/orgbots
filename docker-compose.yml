@@ -60,7 +60,76 @@ services:
       mc version enable local/runtime-artifacts
       "
 
+  # The bots' computer: a Linux desktop with Google Chrome, and the service the runtime
+  # drives it through (docker/computer). Started on its own:
+  #   docker compose up -d --build computer
+  # Both ports are bound to this machine only — neither has a password, and the desktop
+  # is signed in to whatever the bots are signed in to.
+  computer:
+    build: &computer-build
+      context: .
+      dockerfile: docker/computer/Dockerfile
+    image: agent-org-runtime/computer
+    # Chrome's profile lock names the host; a fixed one means a recreated container
+    # still recognises its own profiles.
+    hostname: computer
+    shm_size: 2gb
+    # Chrome's own sandbox (each page in a process of its own, cut off from the rest)
+    # needs user namespaces, which Docker's default seccomp profile does not allow.
+    security_opt: [seccomp=unconfined]
+    ports:
+      - "127.0.0.1:${COMPUTER_PORT:-8020}:8020" # the computer's API (RUNTIME_COMPUTER_URL)
+      - "127.0.0.1:${COMPUTER_DESKTOP_PORT:-6080}:6080" # the whole desktop (noVNC)
+    environment:
+      COMPUTER_SCREEN: ${COMPUTER_SCREEN:-1440x900}
+      COMPUTER_DESKTOP_URL: http://127.0.0.1:${COMPUTER_DESKTOP_PORT:-6080}/vnc.html?autoconnect=1&resize=scale
+      COMPUTER_SHELL_SOCKET: /run/shell/shell.sock
+    volumes:
+      - computer-profiles:/data/profiles # browser profiles: every login's cookies
+      - computer-workspaces:/data/workspaces # the bots' shared /workspace
+      - computer-shell:/run/shell
+      # This machine's time zone, so the browser's clock agrees with where it browses from.
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    depends_on: [shell]
+    restart: unless-stopped
+
+  # Where the bots' commands run (runtime.computer.shell): the same image, apart from the
+  # browser. It has the workspaces and nothing else of the computer's — no profiles, and
+  # a network of its own with no route to the computer, its API or its desktop. The
+  # computer reaches it over the socket in computer-shell.
+  shell:
+    build: *computer-build
+    image: agent-org-runtime/computer
+    command: ["python", "-m", "runtime.computer.shell"]
+    hostname: shell
+    networks: [shell]
+    # Each command runs in a bubblewrap sandbox of its own inside this container — its
+    # profile's workspace as /workspace, its own process list, no network when the
+    # organization's policy says so — which needs user namespaces and a /proc of its
+    # own. No more than bubblewrap needs on any machine, inside a container that holds
+    # nothing of the browser's.
+    security_opt: [seccomp=unconfined, apparmor=unconfined, systempaths=unconfined]
+    environment:
+      COMPUTER_SHELL_SOCKET: /run/shell/shell.sock
+    volumes:
+      - computer-workspaces:/data/workspaces
+      - computer-shell:/run/shell
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/shell/shell.sock"]
+      interval: 10s
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:
   miniodata:
+  computer-profiles:
+  computer-workspaces:
+  computer-shell:
+
+networks:
+  # The shell's: the internet, and nothing of ours.
+  shell:

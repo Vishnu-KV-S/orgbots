@@ -50,8 +50,10 @@ from runtime.computer.browser import (
     HumanInControlError,
     check_profile,
 )
+from runtime.computer.engine import Engine
+from runtime.computer.shell import CommandBody, RemoteShell
 from runtime.computer.snapshot import render
-from runtime.computer.terminal import DEFAULT_TIMEOUT_S, Terminal, TerminalError
+from runtime.computer.terminal import Terminal, TerminalError, workspace_for
 
 
 class ActBody(BaseModel):
@@ -173,17 +175,6 @@ def _upload_name(raw: str, taken: set[str]) -> str:
     return candidate
 
 
-class TerminalBody(BaseModel):
-    screen_id: str = Field(min_length=1, max_length=64)
-    command: str = Field(min_length=1, max_length=20_000)
-    timeout_s: float = Field(default=DEFAULT_TIMEOUT_S, ge=1, le=300)
-    local: bool = False
-    profile: str = Field(default="", pattern=PROFILE.pattern)
-    network: bool = True
-    secrets: dict[str, str] = Field(default_factory=dict, repr=False, max_length=100)
-    """The organization's team secrets, as environment variables in the sandbox."""
-
-
 class WorkspaceWrite(BaseModel):
     path: str = Field(min_length=1, max_length=400)
     data: str = Field(repr=False)
@@ -191,27 +182,39 @@ class WorkspaceWrite(BaseModel):
 
 
 def create_app(
-    profile_dir: Path, *, headless: bool = True, workspace: Path | None = None
+    profile_dir: Path,
+    *,
+    headless: bool = True,
+    workspace: Path | None = None,
+    engine: Engine | None = None,
+    desktop_url: str | None = None,
+    desktop_size: str | None = None,
+    shell_socket: str | None = None,
 ) -> FastAPI:
+    """`engine` is where the browser comes from (`runtime.computer.engine`), Playwright's
+    own Chromium when not given. `desktop_url` is where a person can see the computer's
+    whole desktop (the noVNC view in `docker/computer`), and `desktop_size` its screen
+    (`1440x900`), both reported by `/healthz`.
+    `shell_socket` is the bots' shell (`runtime.computer.shell`): commands run there,
+    apart from the browser, instead of on this machine."""
     base = workspace or profile_dir.parent / "workspace"
     terminals: dict[str, Terminal] = {}
 
     def terminal_for(profile: str) -> Terminal:
-        """A profile's workspace: the base for `""`, a sibling directory for any other —
-        never inside the base, where the default profile's bots could read it."""
         try:
             check_profile(profile)
         except ComputerError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         found = terminals.get(profile)
         if found is None:
-            root = base if not profile else base.with_name(f"{base.name}-{profile}")
-            found = terminals[profile] = Terminal(root)
+            found = terminals[profile] = Terminal(workspace_for(base, profile))
         return found
 
     terminal = terminal_for("")
+    shell = RemoteShell(shell_socket) if shell_socket else None
     computer = Computer(
         profile_dir,
+        engine=engine,
         headless=headless,
         download_path=lambda name, profile: terminal_for(profile).free_download_path(name),
         shown=lambda path, profile: terminal_for(profile).shown(path),
@@ -224,6 +227,8 @@ def create_app(
             yield
         finally:
             await computer.stop()
+            if shell is not None:
+                await shell.close()
 
     app = FastAPI(title="agent-org computer", lifespan=lifespan)
 
@@ -251,6 +256,10 @@ def create_app(
             "screens": len(computer.screens()),
             "started_at": computer.started_at,
             "actions": sorted(ACTION_TYPES),
+            **computer.engine.describe(),
+            "desktop_url": desktop_url,
+            "desktop_size": desktop_size if desktop_url else None,
+            "shell": "container" if shell is not None else "local",
         }
 
     @app.get("/screens")
@@ -420,6 +429,16 @@ def create_app(
             headers={"Cache-Control": "no-store", "X-Controller": screen.controller},
         )
 
+    @app.post("/screens/{screen_id}/front")
+    async def front(
+        screen_id: str, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        """Bring the screen's window to the front of the desktop, for a person opening
+        the bot's computer."""
+        screen = await computer.screen(screen_id, profile=profile)
+        await computer.show(screen)
+        return {"screen_id": screen_id, "url": screen.page.url}
+
     @app.post("/screens/{screen_id}/control")
     async def control(
         screen_id: str, body: ControlBody, profile: str = Query(default="", pattern=PROFILE.pattern)
@@ -496,15 +515,18 @@ def create_app(
     # --- the terminal and the workspace --------------------------------------------------
 
     @app.post("/terminal/run")
-    async def terminal_run(body: TerminalBody) -> dict[str, Any]:
+    async def terminal_run(body: CommandBody) -> dict[str, Any]:
+        body.secrets = {k: v for k, v in body.secrets.items() if _ENV_NAME.match(k)}
         try:
+            if shell is not None:
+                return await shell.run(body)
             ran = await terminal_for(body.profile).run(
                 body.screen_id,
                 body.command,
                 timeout_s=body.timeout_s,
                 local=body.local,
                 network=body.network,
-                secrets={k: v for k, v in body.secrets.items() if _ENV_NAME.match(k)},
+                secrets=body.secrets,
             )
         except TerminalError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

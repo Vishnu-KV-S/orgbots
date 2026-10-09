@@ -743,6 +743,13 @@ kbd {
   background: var(--bg-hover);
 }
 
+/* A link that opens something else (the computer's desktop) looks like the buttons
+   beside it. */
+a.pbtn {
+  display: inline-block;
+  text-decoration: none;
+}
+
 .pbtn.primary {
   background: var(--text);
   color: var(--bg);
@@ -1033,6 +1040,29 @@ kbd {
   font-size: 13px;
   text-align: center;
   padding: 20px;
+}
+
+/* The computer's desktop (DesktopView): noVNC draws into this box, scaled to fit. */
+.screen.desktop {
+  background: #1e1e1e;
+}
+
+.desktop-view {
+  position: absolute;
+  inset: 0;
+}
+
+.screen.desktop.human {
+  cursor: auto;
+}
+
+.screen-bar .seg {
+  flex: none;
+}
+
+/* The empty-screen note lets clicks through to the page under it. */
+.screen-empty {
+  pointer-events: none;
 }
 
 .screen-badge {

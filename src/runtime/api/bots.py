@@ -1246,6 +1246,18 @@ async def control(bot_id: UUID, body: ControlBody, request: Request) -> dict[str
     return result
 
 
+@router.post("/{bot_id}/computer/front")
+async def front(bot_id: UUID, request: Request) -> dict[str, Any]:
+    """Bring the bot's window to the front of the computer's desktop, so the desktop a
+    person opens for this bot shows this bot's browser."""
+    bot = await _bot_or_404(request, bot_id)
+    return _relay(
+        await _computer_call(
+            request, "POST", f"/screens/{bot_id}/front", profile=computer_profile(bot)
+        )
+    )
+
+
 @router.post("/{bot_id}/computer/input")
 async def human_input(bot_id: UUID, body: InputBody, request: Request) -> dict[str, Any]:
     bot = await _bot_or_404(request, bot_id)

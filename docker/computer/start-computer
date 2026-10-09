@@ -1,0 +1,50 @@
+#!/bin/sh
+# Start the computer service once the screen is up: the service opens Chrome as it
+# starts, and Chrome needs a display to open its window on. Before that, decide the
+# three things that depend on the machine the container runs on.
+set -eu
+
+socket="/tmp/.X11-unix/X${DISPLAY#:}"
+waited=0
+while [ ! -S "$socket" ]; do
+  waited=$((waited + 1))
+  if [ "$waited" -gt 300 ]; then
+    echo "start-computer: no X display at $DISPLAY after 30s" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+# The host's time zone (docker-compose.yml mounts /etc/timezone), so the browser's clock
+# agrees with the place its traffic comes from.
+TZ="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
+export TZ
+
+# Graphics: the GPU when one is passed in and this user can open it (gpu.yml), else
+# Chrome's software renderer — so WebGL works either way.
+flags=""
+gpu=""
+for node in /dev/dri/renderD*; do
+  if [ -r "$node" ] && [ -w "$node" ]; then gpu="$node"; break; fi
+done
+if [ -n "$gpu" ]; then
+  flags="--use-angle=vulkan --enable-features=Vulkan"
+  echo "start-computer: graphics on the GPU ($gpu)"
+else
+  flags="--enable-unsafe-swiftshader"
+  echo "start-computer: no GPU passed in; graphics in software"
+fi
+
+# Chrome's own sandbox needs user namespaces (docker-compose.yml: seccomp=unconfined).
+# Without them Chrome would not start at all; it runs unsandboxed instead, and says so.
+if ! unshare --user true 2>/dev/null; then
+  flags="$flags --no-sandbox"
+  echo "start-computer: WARNING: no user namespaces here, so Chrome runs without its" \
+    "sandbox; give the container seccomp=unconfined (docker-compose.yml)" >&2
+fi
+
+COMPUTER_CHROME_FLAGS="$flags ${COMPUTER_CHROME_FLAGS:-}"
+export COMPUTER_CHROME_FLAGS
+
+mkdir -p "$(dirname "$RUNTIME_COMPUTER_PROFILE")" "$RUNTIME_COMPUTER_WORKSPACE"
+exec python -m runtime.computer.main

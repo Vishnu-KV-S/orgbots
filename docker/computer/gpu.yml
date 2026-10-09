@@ -1,0 +1,13 @@
+# Chrome on this machine's GPU: WebGL drawn by the real graphics card, as on a laptop,
+# instead of Chrome's software renderer. Linux with /dev/dri (Intel or AMD; Mesa's
+# drivers are in the image). scripts/computer.sh adds this file when the machine has a
+# GPU; by hand:
+#
+#   COMPUTER_RENDER_GID=$(getent group render | cut -d: -f3) \
+#     docker compose -f docker-compose.yml -f docker/computer/gpu.yml up -d computer
+services:
+  computer:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${COMPUTER_RENDER_GID:?set COMPUTER_RENDER_GID to the id of this machine's render group}"

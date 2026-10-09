@@ -1,6 +1,10 @@
 """The shared browser and its screens.
 
-A persistent Chromium context per **profile** — so a login done once, by a person or
+The browser itself comes from an **engine** (`runtime.computer.engine`): a real Google
+Chrome on the computer's desktop (`DesktopChrome`, in `docker/computer`), or Playwright's
+own Chromium for tests and machines without Docker. This module does not care which.
+
+A persistent browser context per **profile** — so a login done once, by a person or
 by a bot, is a login every bot in that profile has — and one page per screen. A screen
 is keyed by the bot's id. Without members there is one profile, `""`, in the profile
 directory; with members each member's bots share theirs and each team bot has its own
@@ -58,12 +62,9 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from playwright.async_api import (
-    Browser,
     BrowserContext,
     CDPSession,
     Page,
-    Playwright,
-    async_playwright,
 )
 from playwright.async_api import (
     Error as PlaywrightError,
@@ -72,9 +73,9 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeout,
 )
 
+from runtime.computer.engine import Engine, PlaywrightChromium
 from runtime.computer.snapshot import MAX_ELEMENTS, MAX_TEXT_CHARS, SNAPSHOT_JS
 
-VIEWPORT = {"width": 1280, "height": 800}
 SEALED_SELECTOR = (
     "input[type=password], [data-vault-filled], input[autocomplete~=one-time-code], "
     "input[autocomplete^=cc-]"
@@ -213,6 +214,8 @@ class Screen:
     last_input: float = 0.0
     """Monotonic time the last piece of a person's input was applied."""
     cast: Screencast | None = None
+    size: tuple[int, int] = (1280, 800)
+    """The page's viewport in CSS pixels: the window's, on a desktop."""
 
 
 @dataclass
@@ -259,8 +262,9 @@ class Screencast:
     someone watches: the first watcher starts it, the last one to leave stops it.
     """
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, size: tuple[int, int]) -> None:
         self._page = page
+        self._size = size
         self._session: CDPSession | None = None
         self._lock = asyncio.Lock()
         self._fresh = asyncio.Event()
@@ -281,8 +285,8 @@ class Screencast:
                     {
                         "format": "jpeg",
                         "quality": STREAM_QUALITY,
-                        "maxWidth": VIEWPORT["width"],
-                        "maxHeight": VIEWPORT["height"],
+                        "maxWidth": self._size[0],
+                        "maxHeight": self._size[1],
                     },
                 )
             except PlaywrightError as exc:
@@ -321,21 +325,22 @@ class Computer:
         self,
         profile_dir: Path,
         *,
+        engine: Engine | None = None,
         headless: bool = True,
         download_path: Callable[[str, str], Path] | None = None,
         shown: Callable[[Path, str], str] | None = None,
     ) -> None:
         self._profile_dir = profile_dir
-        self._headless = headless
+        self.engine = engine or PlaywrightChromium(
+            headless=headless, executable=os.environ.get("COMPUTER_CHROMIUM_PATH") or None
+        )
         self._download_path = download_path
         self._shown = shown or (lambda path, profile: str(path))
-        self._pw: Playwright | None = None
         self._contexts: dict[str, BrowserContext] = {}
         self._allow: dict[str, tuple[str, ...] | None] = {}
         """Per profile: the hosts its browser may reach, or None for any. Set by the
         runtime with every call (`set_allow`), from the organization's policy."""
         self._guarded: set[str] = set()
-        self._browser: Browser | None = None
         self._screens: dict[str, Screen] = {}
         self._start_lock = asyncio.Lock()
         self.started_at: float | None = None
@@ -359,21 +364,20 @@ class Computer:
                 return existing
             path = self.profile_path(profile)
             path.mkdir(parents=True, exist_ok=True)
-            if self._pw is None:
-                self._pw = await async_playwright().start()
-            kwargs: dict[str, Any] = {
-                "headless": self._headless,
-                "viewport": VIEWPORT,
-                "args": ["--no-first-run", "--no-default-browser-check"],
-                "accept_downloads": self._download_path is not None,
-            }
-            executable = os.environ.get("COMPUTER_CHROMIUM_PATH")
-            if executable:
-                kwargs["executable_path"] = executable
-            context = await self._pw.chromium.launch_persistent_context(str(path), **kwargs)
+            context = await self.engine.open(path, accept_downloads=self._download_path is not None)
+
+            # A browser that dies (a crash, a person closing it on the desktop) takes its
+            # screens with it; the next screen asked for in the profile starts it again,
+            # and puts the profile's network policy back on it.
+            def forget(closed: BrowserContext) -> None:
+                if self._contexts.get(profile) is closed:
+                    del self._contexts[profile]
+                    self._guarded.discard(profile)
+
+            context.on("close", forget)
             context.set_default_timeout(ACTION_TIMEOUT_MS)
             context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
-            # The persistent context opens with one blank page; it is nobody's screen.
+            # The browser opens with one blank page; it is nobody's screen.
             self._contexts[profile] = context
             await self._guard(profile, context)
             if self.started_at is None:
@@ -417,14 +421,11 @@ class Computer:
     async def stop(self) -> None:
         async with self._start_lock:
             self._screens.clear()
-            for context in self._contexts.values():
-                with contextlib.suppress(PlaywrightError):
-                    await context.close()
+            for context in list(self._contexts.values()):
+                await self.engine.close(context)
             self._contexts.clear()
             self._guarded.clear()
-            if self._pw is not None:
-                await self._pw.stop()
-                self._pw = None
+            await self.engine.stop()
             self.started_at = None
 
     async def reset(self) -> None:
@@ -453,9 +454,11 @@ class Computer:
             # The bot was shared or made private: its screen moves to the new profile.
             await self.close_screen(screen_id)
         context = await self._context_for(profile)
-        page = await context.new_page()
+        page = await self.engine.new_page(context)
         await page.goto(HOME_URL)
-        screen = Screen(screen_id=screen_id, page=page, profile=profile, label=label)
+        screen = Screen(
+            screen_id=screen_id, page=page, profile=profile, label=label, size=await _size(page)
+        )
         if self._download_path is not None:
             page.on("download", lambda d: asyncio.ensure_future(self._save_download(screen, d)))
         self._screens[screen_id] = screen
@@ -555,6 +558,16 @@ class Computer:
         if previous == "human" and controller == "bot":
             async with screen.lock:
                 await _release(screen)
+        elif controller == "human":
+            # On the desktop, the window the person is working in comes to the front.
+            await self.show(screen)
+
+    async def show(self, screen: Screen) -> None:
+        """Bring a screen's window to the front of the desktop, where a person looking at
+        the computer sees it. Every window keeps painting either way; this is only what
+        is on top."""
+        with contextlib.suppress(PlaywrightError):
+            await screen.page.bring_to_front()
 
     # --- demonstrations --------------------------------------------------------------
 
@@ -619,7 +632,7 @@ class Computer:
         nothing moves. Ends when the screen's page closes (a reset, or the screen was
         closed), and the watcher reconnects to the new one."""
         if screen.cast is None:
-            screen.cast = Screencast(screen.page)
+            screen.cast = Screencast(screen.page, screen.size)
         cast = screen.cast
         await cast.join()
         try:
@@ -804,7 +817,7 @@ class Computer:
         if kind == "down" and (_button(event) != "left" or _clicks(event) > 1):
             return None
         if kind in ("down", "click"):
-            x, y = _point(event)
+            x, y = _point(screen, event)
             return {"kind": "click", "target": await self._describe(screen, x, y, focused=False)}
         if kind == "keydown":
             key = str(event.get("key", ""))
@@ -877,7 +890,7 @@ async def _human_event(s: Screen, event: dict[str, Any]) -> None:
     page = s.page
     kind = event.get("kind")
     if kind in ("move", "down", "up", "wheel", "click"):
-        x, y = _point(event)
+        x, y = _point(s, event)
         if (x, y) != s.mouse:
             await page.mouse.move(x, y)
             s.mouse = (x, y)
@@ -946,15 +959,20 @@ async def _release(s: Screen) -> None:
     s.pace = None
 
 
-def _point(event: dict[str, Any]) -> tuple[float, float]:
+def _point(s: Screen, event: dict[str, Any]) -> tuple[float, float]:
     try:
         x, y = float(event["x"]), float(event["y"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ComputerError(f"{event.get('kind')} needs x and y") from exc
-    return (
-        min(max(x, 0.0), VIEWPORT["width"] - 1.0),
-        min(max(y, 0.0), VIEWPORT["height"] - 1.0),
-    )
+    return (min(max(x, 0.0), s.size[0] - 1.0), min(max(y, 0.0), s.size[1] - 1.0))
+
+
+async def _size(page: Page) -> tuple[int, int]:
+    """The viewport a page has: Playwright's fixed one, or the window's on a desktop."""
+    if page.viewport_size:
+        return page.viewport_size["width"], page.viewport_size["height"]
+    width, height = await page.evaluate("[innerWidth, innerHeight]")
+    return int(width), int(height)
 
 
 def _button(event: dict[str, Any]) -> Button:
@@ -1027,7 +1045,7 @@ async def _select(c: Computer, s: Screen, a: dict[str, Any]) -> None:
 
 async def _scroll(c: Computer, s: Screen, a: dict[str, Any]) -> None:
     direction = str(a.get("direction", "down"))
-    amount = float(a.get("amount", 0) or VIEWPORT["height"] * 0.8)
+    amount = float(a.get("amount", 0) or s.size[1] * 0.8)
     dy = -amount if direction == "up" else amount
     # A few wheel ticks rather than one jump, the way a hand scrolls.
     for _ in range(4):
