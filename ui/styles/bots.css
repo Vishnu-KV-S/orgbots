@@ -992,7 +992,8 @@ kbd {
   aspect-ratio: 1280 / 800;
 }
 
-.screen img {
+.screen img,
+.screen canvas {
   width: 100%;
   height: 100%;
   display: block;
@@ -1000,10 +1001,13 @@ kbd {
   user-select: none;
 }
 
+/* The stream has no pointer drawn in it: the person's own is the pointer, and on a
+   touch screen a drag is a drag on the bot's page, not a scroll of this one. */
 .screen.human {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-  cursor: crosshair;
+  cursor: default;
+  touch-action: none;
 }
 
 .screen-overlay {

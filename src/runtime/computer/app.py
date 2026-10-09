@@ -5,10 +5,11 @@ Two audiences and they get different verbs:
 - **Bots**, through the gateway tools: `observe`, `act`, and `fill` — the vault's
   sign-in values, which `browser.act@1` opens and sends here so no run holds them.
   Refused with 409 while a person holds the screen.
-- **People**, through the API proxy: `screenshot`, `control` and `input`. `input` is
-  refused unless the person holds the screen, so watching can never become driving by
-  accident. `recording` starts and stops a demonstration: the person's inputs on the
-  screen, written down as steps for a bot to learn a skill from.
+- **People**, through the API proxy: `stream` (the live screen) or `screenshot`,
+  `control`, and `inputs` (or one `input`). Input is refused unless the person holds the
+  screen, so watching can never become driving by accident. `recording` starts and stops
+  a demonstration: the person's inputs on the screen, written down as steps for a bot
+  to learn a skill from.
 
 The **terminal and workspace** (`runtime.computer.terminal`) are the third surface:
 `/terminal/run` runs a bot's command (sandboxed, or on this machine when the run says
@@ -32,16 +33,17 @@ import re
 import shutil
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, SecretStr
 
 from runtime.computer.browser import (
     ACTION_TYPES,
+    INPUT_BATCH_MAX,
     PROFILE,
     Computer,
     ComputerError,
@@ -95,8 +97,20 @@ class InputBody(BaseModel):
     y: float | None = None
     text: str | None = None
     key: str | None = None
+    button: str | None = None
+    clicks: int | None = None
+    dx: float | None = None
     dy: float | None = None
     url: str | None = None
+    t: float | None = None
+    """The person's clock when they made this input, in ms."""
+
+
+class InputsBody(BaseModel):
+    events: list[InputBody] = Field(min_length=1, max_length=INPUT_BATCH_MAX)
+
+
+BOUNDARY = "frame"
 
 
 def _view(
@@ -383,12 +397,35 @@ def create_app(
             },
         )
 
+    @app.get("/screens/{screen_id}/stream")
+    async def stream(
+        screen_id: str, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> StreamingResponse:
+        """The live screen as an MJPEG stream: an `<img>` can show it as it is, and the
+        UI reads it frame by frame. Each part says its length."""
+        screen = await computer.screen(screen_id, profile=profile)
+
+        async def parts() -> AsyncIterator[bytes]:
+            async with aclosing(computer.frames(screen)) as frames:
+                async for jpeg in frames:
+                    head = (
+                        f"--{BOUNDARY}\r\nContent-Type: image/jpeg\r\n"
+                        f"Content-Length: {len(jpeg)}\r\n\r\n"
+                    )
+                    yield head.encode() + jpeg + b"\r\n"
+
+        return StreamingResponse(
+            parts(),
+            media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}",
+            headers={"Cache-Control": "no-store", "X-Controller": screen.controller},
+        )
+
     @app.post("/screens/{screen_id}/control")
     async def control(
         screen_id: str, body: ControlBody, profile: str = Query(default="", pattern=PROFILE.pattern)
     ) -> dict[str, Any]:
         screen = await computer.screen(screen_id, profile=profile)
-        computer.set_controller(screen, body.controller)
+        await computer.set_controller(screen, body.controller)
         return {"screen_id": screen_id, "controller": screen.controller}
 
     @app.post("/screens/{screen_id}/input")
@@ -398,6 +435,23 @@ def create_app(
         screen = await computer.screen(screen_id, profile=profile)
         try:
             await computer.human_input(screen, body.model_dump(exclude_none=True))
+        except ComputerError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)[:300]) from exc
+        return {"ok": True, "url": screen.page.url}
+
+    @app.post("/screens/{screen_id}/inputs")
+    async def human_inputs(
+        screen_id: str,
+        body: InputsBody,
+        profile: str = Query(default="", pattern=PROFILE.pattern),
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, profile=profile)
+        try:
+            await computer.human_inputs(
+                screen, [event.model_dump(exclude_none=True) for event in body.events]
+            )
         except ComputerError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
@@ -420,7 +474,7 @@ def create_app(
             }
         steps = computer.stop_recording(screen)
         if body.hand_back:
-            computer.set_controller(screen, "bot")
+            await computer.set_controller(screen, "bot")
         return {"recording": False, "controller": screen.controller, "steps": steps}
 
     @app.get("/screens/{screen_id}/recording")

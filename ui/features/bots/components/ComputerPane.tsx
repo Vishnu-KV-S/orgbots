@@ -1,40 +1,67 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
   type Bot,
   type HumanInput,
+  type MouseButton,
   type Teaching,
   computerStatus,
   resetComputer,
-  screenshotUrl,
-  sendInput,
+  sendInputs,
   setController,
   startTeaching,
   stopTeaching,
+  streamUrl,
   teachingStatus,
 } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
+import { inputQueue, readFrames } from "./remoteScreen";
 import { WorkspacePane } from "./WorkspacePane";
 
 const VIEWPORT = { width: 1280, height: 800 };
-const FRAME_MS = 900;
+const BUTTONS: Record<number, MouseButton> = { 0: "left", 1: "middle", 2: "right" };
+const DOUBLE_CLICK_MS = 500;
+const PASTE_MAX = 20_000;
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-const SPECIAL_KEYS = new Set([
-  "Enter", "Tab", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft",
-  "ArrowRight", "Home", "End", "PageUp", "PageDown",
-]);
+/** The key to hold down on the bot's computer, or null for one that has none. */
+function remoteKey(e: React.KeyboardEvent): string | null {
+  if (e.nativeEvent.isComposing || ["Unidentified", "Process", "Dead"].includes(e.key)) {
+    return null;
+  }
+  // The bot's computer is Linux: ⌘A on a Mac means what Ctrl+A means there.
+  if (IS_MAC && e.key === "Meta") return "Control";
+  return e.key;
+}
+
+function isPaste(e: React.KeyboardEvent): boolean {
+  return ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") || (e.shiftKey && e.key === "Insert");
+}
+
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
 
 /**
  * The bot's screen, live. All bots share one cloud computer and each has its own
  * screen, so this is *this* bot's tab.
  *
  * Watching is passive. "Take control" hands the screen to the person — the
- * computer then refuses the bot's actions until control is returned — and only
- * then do clicks and keys on the image go through. That makes a login, a 2FA code
- * or a CAPTCHA something the person does themselves, in the bot's own browser,
- * with the bot's session.
+ * computer then refuses the bot's actions until control is returned — and from then
+ * on the screen is theirs the way a remote desktop is: the picture is a live
+ * stream, and the pointer's every movement, each press and release, the wheel and
+ * every key down and up go through as they happen, in order and at the pace they
+ * were made. Hover menus, drags, sliders, double and right clicks, shortcuts and
+ * pasting from the person's own clipboard all work, so a login, a 2FA code or a
+ * CAPTCHA is something the person does themselves, in the bot's own browser, with the
+ * bot's session.
  *
  * "Teach a task" is the same takeover, recorded: the person does the task while the
  * computer writes down each click, field and page (never a typed password), and Stop
@@ -70,17 +97,22 @@ export function ComputerPane({ bot }: { bot: Bot }) {
 }
 
 function Screen({ bot }: { bot: Bot }) {
-  const [frame, setFrame] = useState(0);
   const [loaded, setLoaded] = useState(false);
-  const [broken, setBroken] = useState(false);
+  /** Null while the stream is connecting; false once it has failed or been cut off. */
+  const [live, setLive] = useState<boolean | null>(null);
   const [controller, setCtl] = useState<"bot" | "human">("bot");
   const [url, setUrl] = useState("");
   const [editingUrl, setEditingUrl] = useState(false);
   const [typing, setTyping] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [reachable, setReachable] = useState<boolean | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screen = useRef<HTMLDivElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  /** Keys held down on the bot's computer, by the physical key that holds them. */
+  const keys = useRef(new Map<string, string>());
+  const buttons = useRef(new Map<number, { button: MouseButton; clicks: number }>());
+  const pointer = useRef({ x: 0, y: 0 });
+  const lastDown = useRef({ at: 0, x: 0, y: 0, button: -1, clicks: 0 });
   const human = controller === "human";
   const [teaching, setTeaching] = useState<Teaching | null>(null);
   const [goal, setGoal] = useState<string | null>(null);
@@ -153,66 +185,206 @@ function Screen({ bot }: { bot: Bot }) {
     return () => clearInterval(t);
   }, [refreshStatus]);
 
+  // The picture: one stream for as long as the pane is open, reconnecting after the
+  // computer restarts. A frame still being drawn is replaced, never queued behind.
   useEffect(() => {
+    const abort = new AbortController();
+    const ctx = canvas.current?.getContext("2d");
+    ctx?.clearRect(0, 0, VIEWPORT.width, VIEWPORT.height);
     setLoaded(false);
-    setBroken(false);
-    setFrame(Date.now());
+    setLive(null);
+    let streaming = false;
+    let drawing = false;
+    let next: Blob | null = null;
+
+    const draw = async (jpeg: Blob) => {
+      next = jpeg;
+      if (drawing) return;
+      drawing = true;
+      try {
+        while (next && !abort.signal.aborted) {
+          const frame = next;
+          next = null;
+          const bitmap = await createImageBitmap(frame);
+          ctx?.drawImage(bitmap, 0, 0, VIEWPORT.width, VIEWPORT.height);
+          bitmap.close();
+        }
+      } catch {
+        /* a frame that will not decode is skipped; the next one replaces it */
+      } finally {
+        drawing = false;
+      }
+    };
+
+    void (async () => {
+      let wait = 500;
+      while (!abort.signal.aborted) {
+        try {
+          await readFrames(streamUrl(bot.id), abort.signal, (jpeg) => {
+            if (!streaming) {
+              streaming = true;
+              wait = 500;
+              setLoaded(true);
+              setLive(true);
+            }
+            void draw(jpeg);
+          });
+        } catch {
+          /* unreachable or cut off: retried below */
+        }
+        if (abort.signal.aborted) return;
+        streaming = false;
+        setLive(false);
+        await sleep(wait, abort.signal);
+        wait = Math.min(wait * 2, 5000);
+      }
+    })();
+    return () => abort.abort();
   }, [bot.id]);
 
-  // The next frame is requested only after this one has loaded or failed, so a
-  // slow computer is never asked for frames faster than it can render them.
-  const next = useCallback((delay: number) => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setFrame(Date.now()), delay);
-  }, []);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
-
-  const input = async (event: HumanInput) => {
-    setError(null);
-    try {
-      const result = await sendInput(bot.id, event);
-      if (result.url) setUrl(result.url);
-      next(150);
-    } catch (cause) {
-      setError((cause as Error).message);
-    }
+  const editing = useRef(editingUrl);
+  useEffect(() => {
+    editing.current = editingUrl;
+  }, [editingUrl]);
+  const queue = useMemo(
+    () =>
+      inputQueue(
+        async (events) => {
+          const result = await sendInputs(bot.id, events);
+          if (result.url && !editing.current) setUrl(result.url);
+        },
+        (cause) => {
+          setError(cause.message);
+          void refreshStatus();
+        },
+      ),
+    // `refreshStatus` changes as the URL box is edited; the queue must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bot.id],
+  );
+  const input = (event: HumanInput) => {
+    if (error) setError(null);
+    queue.push(event);
   };
+
+  /** Let go of everything held, on this side and the computer's. */
+  const releaseAll = useCallback(() => {
+    for (const key of keys.current.values()) queue.push({ kind: "keyup", key });
+    for (const held of buttons.current.values()) {
+      queue.push({ kind: "up", ...pointer.current, ...held });
+    }
+    keys.current.clear();
+    buttons.current.clear();
+  }, [queue]);
 
   const toggleControl = async () => {
     setError(null);
     const target = human ? "bot" : "human";
+    if (target === "bot") {
+      // The computer lets go of anything still held when it gets the screen back.
+      queue.clear();
+      keys.current.clear();
+      buttons.current.clear();
+    }
     try {
       await setController(bot.id, target);
       setCtl(target);
-      if (target === "human") screen.current?.focus();
+      if (target === "human") screen.current?.focus({ preventScroll: true });
     } catch (cause) {
       setError((cause as Error).message);
     }
   };
 
-  const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!human) return;
-    const img = e.currentTarget.querySelector("img");
-    if (!img) return;
-    const rect = img.getBoundingClientRect();
+  /** Where on the bot's screen a point on ours is. */
+  const at = (e: { clientX: number; clientY: number }) => {
+    const rect = canvas.current?.getBoundingClientRect();
+    if (!rect || !rect.width) return pointer.current;
     const x = ((e.clientX - rect.left) / rect.width) * VIEWPORT.width;
     const y = ((e.clientY - rect.top) / rect.height) * VIEWPORT.height;
-    screen.current?.focus();
-    void input({ kind: "click", x: Math.round(x), y: Math.round(y) });
+    pointer.current = {
+      x: Math.round(Math.min(Math.max(x, 0), VIEWPORT.width - 1)),
+      y: Math.round(Math.min(Math.max(y, 0), VIEWPORT.height - 1)),
+    };
+    return pointer.current;
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const button = BUTTONS[e.button];
+    if (!human || !button) return;
+    e.preventDefault();
+    screen.current?.focus({ preventScroll: true });
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const p = at(e);
+    const last = lastDown.current;
+    const now = performance.now();
+    const again =
+      last.button === e.button &&
+      now - last.at < DOUBLE_CLICK_MS &&
+      Math.hypot(p.x - last.x, p.y - last.y) < 6;
+    const clicks = again ? Math.min(last.clicks + 1, 3) : 1;
+    lastDown.current = { at: now, ...p, button: e.button, clicks };
+    buttons.current.set(e.button, { button, clicks });
+    input({ kind: "down", ...p, button, clicks });
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const held = buttons.current.get(e.button);
+    if (!human || !held) return;
+    buttons.current.delete(e.button);
+    input({ kind: "up", ...at(e), ...held });
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!human || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (SPECIAL_KEYS.has(e.key)) {
-      e.preventDefault();
-      void input({ kind: "key", key: e.key });
-    } else if (e.key.length === 1) {
-      e.preventDefault();
-      void input({ kind: "type", text: e.key });
-    }
+    // A paste is left to the browser, whose paste event brings the person's clipboard.
+    if (!human || isPaste(e)) return;
+    e.preventDefault();
+    const key = remoteKey(e);
+    if (!key) return;
+    keys.current.set(e.code || key, key);
+    input({ kind: "keydown", key });
   };
+
+  const onKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!human) return;
+    const code = e.code || e.key;
+    const key = keys.current.get(code);
+    if (key === undefined) return;
+    e.preventDefault();
+    keys.current.delete(code);
+    if (IS_MAC && e.key === "Meta") {
+      // macOS sends no key-up for a key let go while ⌘ was down.
+      for (const other of keys.current.values()) input({ kind: "keyup", key: other });
+      keys.current.clear();
+    }
+    input({ kind: "keyup", key });
+  };
+
+  // Wheel and paste need listeners React does not give: the wheel one must be able to
+  // stop the pane itself scrolling, and a paste arrives at the document.
+  useEffect(() => {
+    const el = screen.current;
+    if (!el || !human) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const scale = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? VIEWPORT.height : 1;
+      queue.push({ kind: "wheel", ...at(e), dx: e.deltaX * scale, dy: e.deltaY * scale });
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      if (document.activeElement !== el) return;
+      const text = e.clipboardData?.getData("text/plain");
+      if (!text) return;
+      e.preventDefault();
+      queue.push({ kind: "paste", text: text.slice(0, PASTE_MAX) });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    document.addEventListener("paste", onPaste);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      document.removeEventListener("paste", onPaste);
+    };
+    // `at` reads refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [human, queue]);
 
   return (
     <div>
@@ -221,7 +393,7 @@ function Screen({ bot }: { bot: Bot }) {
           type="button"
           className="ibtn"
           disabled={!human}
-          onClick={() => void input({ kind: "back" })}
+          onClick={() => input({ kind: "back" })}
           aria-label="Back"
         >
           ←
@@ -230,7 +402,7 @@ function Screen({ bot }: { bot: Bot }) {
           type="button"
           className="ibtn"
           disabled={!human}
-          onClick={() => void input({ kind: "reload" })}
+          onClick={() => input({ kind: "reload" })}
           aria-label="Reload"
         >
           ↻
@@ -244,7 +416,7 @@ function Screen({ bot }: { bot: Bot }) {
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && url.trim()) {
-              void input({ kind: "navigate", url: url.trim() });
+              input({ kind: "navigate", url: url.trim() });
               (e.target as HTMLInputElement).blur();
             }
           }}
@@ -257,45 +429,53 @@ function Screen({ bot }: { bot: Bot }) {
         ref={screen}
         className={cx("screen", human && "human")}
         tabIndex={human ? 0 : -1}
-        onClick={onClick}
+        onPointerDown={onPointerDown}
+        onPointerMove={(e) => {
+          if (human) input({ kind: "move", ...at(e) });
+        }}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onMouseDown={(e) => {
+          // No text selection or focus change on this page: the press is the bot's.
+          if (human) e.preventDefault();
+        }}
+        onContextMenu={(e) => {
+          if (human) e.preventDefault();
+        }}
         onKeyDown={onKeyDown}
-        onWheel={(e) => {
-          if (human) void input({ kind: "scroll", dy: e.deltaY });
+        onKeyUp={onKeyUp}
+        onBlur={() => {
+          if (human) releaseAll();
         }}
         aria-label={human ? "Bot screen — you have control" : "Bot screen"}
       >
-        {reachable !== false && (
-          // eslint-disable-next-line @next/next/no-img-element -- a live JPEG stream
-          <img
-            src={screenshotUrl(bot.id, frame)}
-            alt={`${bot.name}'s screen`}
-            draggable={false}
-            onLoad={() => {
-              setLoaded(true);
-              setBroken(false);
-              next(FRAME_MS);
-            }}
-            onError={() => {
-              setBroken(true);
-              next(FRAME_MS * 3);
-            }}
-          />
-        )}
-        {(reachable === false || (broken && !loaded)) && (
+        <canvas
+          ref={canvas}
+          width={VIEWPORT.width}
+          height={VIEWPORT.height}
+          role="img"
+          aria-label={`${bot.name}'s screen`}
+        />
+        {(reachable === false || (live === false && !loaded)) && (
           <div className="screen-overlay">
             The cloud computer isn&apos;t running.
             <br />
             Start it with <code>python -m runtime.computer.main</code>
           </div>
         )}
-        {loaded && <span className="screen-badge">{human ? "You have control" : "Live"}</span>}
+        {loaded && (
+          <span className="screen-badge">
+            {!live ? "Reconnecting…" : human ? "You have control" : "Live"}
+          </span>
+        )}
       </div>
 
       {human ? (
         <>
           <p className="screen-help">
-            Click on the screen to interact; keystrokes go to the page while it&apos;s focused.
-            Paste or type longer text below. Hand control back when you&apos;re done.
+            Use the screen as you would your own: move, click, drag, scroll and type while it
+            has focus, and paste with your usual shortcut. For text from an input method, type
+            it below. Hand control back when you&apos;re done.
           </p>
           <div className="typebar">
             <input
@@ -306,7 +486,7 @@ function Screen({ bot }: { bot: Bot }) {
               onChange={(e) => setTyping(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && typing) {
-                  void input({ kind: "type", text: typing });
+                  input({ kind: "type", text: typing });
                   setTyping("");
                 }
               }}
@@ -316,13 +496,13 @@ function Screen({ bot }: { bot: Bot }) {
               className="pbtn"
               disabled={!typing}
               onClick={() => {
-                void input({ kind: "type", text: typing });
+                input({ kind: "type", text: typing });
                 setTyping("");
               }}
             >
               Type
             </button>
-            <button type="button" className="pbtn" onClick={() => void input({ kind: "key", key: "Enter" })}>
+            <button type="button" className="pbtn" onClick={() => input({ kind: "key", key: "Enter" })}>
               ⏎
             </button>
           </div>
@@ -412,10 +592,7 @@ function Screen({ bot }: { bot: Bot }) {
           className="pbtn"
           onClick={() => {
             if (window.confirm("Restart the cloud computer? Open pages close; sign-ins are kept.")) {
-              void resetComputer().then(
-                () => next(1500),
-                (cause: Error) => setError(cause.message),
-              );
+              void resetComputer().catch((cause: Error) => setError(cause.message));
             }
           }}
         >
