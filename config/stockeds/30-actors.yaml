@@ -1,0 +1,82 @@
+# Two seats, and the names are not free: `research@1` and `marketing_head@1` address
+# each other by the constants in `runtime.org.department`, so a company that wants the
+# shipped graphs reuses these seat names and changes everything around them.
+#
+# `content` and `analytics` are deliberately absent. Nothing here drafts a deliverable
+# and nothing computes a weekly metric, and an actor with no trigger and no task is a
+# row that only makes the org chart harder to read.
+
+# The whole company, effectively. Fires five times a day off `50-schedule.yaml`, each
+# time with a different brief, and ends with a `CompetitorReport@1` in the run output.
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: research
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    # ~5-8c is what one briefed run costs at these prices; 40 is the runaway guard,
+    # not the expectation. Five a day against it is $2/day worst case, which the
+    # department pool in `60-budget.yaml` cuts off well before a month of it.
+    maxCostCents: 40
+    maxDepth: 4
+    # Two `call_structured` attempts on the report plus the summarization call, with
+    # room for one retry. A third attempt is not a better report, it is the same
+    # schema failure at WORK-class prices.
+    maxLlmCalls: 6
+    maxToolCalls: 24
+    # Server-side search plus a 16k-token report runs to ~2 minutes. 900 is the
+    # margin for a slow provider, not the target.
+    maxWallClockS: 900.0
+  delegation: null
+  department: edtech-research
+  graph: research@1
+  handler: null
+  kind: llm_agent
+  memory: null
+  memoryProfile: null
+  modelProfiles:
+    summarization: ds-flash
+    work: ds-pro-search
+  reportsTo: marketing-head
+  role: ic
+  tools:
+  - web.fetch@1
+  # Held even though no `search-primary` credential is stored, and this is the one
+  # non-obvious line in the file. The model gateway offers DeepSeek's provider-side
+  # search *only* to an actor that already holds `web.search@1`, so revoking this
+  # grant to tidy up would silently take the evidence away from every report.
+  - web.search@1
+---
+# The manager seat. No trigger names it, so on the scheduled path it never runs; it
+# exists because `research@1` escalates a schema failure to `HEAD` by name, and an
+# escalation addressed to an actor that does not exist is a message dropped in
+# silence at exactly the moment somebody needs to read it.
+apiVersion: agent-platform/v1
+kind: Actor
+metadata:
+  name: marketing-head
+spec:
+  allowedModelCallSites: null
+  authority: null
+  ceilings:
+    maxCostCents: 40
+    maxDepth: 4
+    maxLlmCalls: 8
+    maxToolCalls: 4
+    maxWallClockS: 600.0
+  delegation: null
+  department: edtech-research
+  graph: marketing_head@1
+  handler: null
+  kind: llm_agent
+  memory: null
+  memoryProfile: null
+  modelProfiles:
+    coordination: ds-flash-work
+    evaluation: ds-flash-work
+    summarization: ds-flash
+  reportsTo: null
+  role: head
+  tools: []

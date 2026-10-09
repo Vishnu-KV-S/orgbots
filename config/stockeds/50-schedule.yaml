@@ -1,0 +1,227 @@
+# Five briefs a day, in Asia/Kolkata, on five different beats.
+#
+# Five triggers rather than one firing five times, because a single brief run five
+# times returns the same report five times: the model has no memory of 09:00 at 14:00
+# (M3 is off), so only the brief can make the slots differ. Each trigger carries its
+# own `subject`, `objective` and `acceptance_criteria`; `research@1`'s `load` node
+# turns that payload into the brief the WORK call is written against.
+#
+# `catchup: skip` throughout: a runtime that was down since yesterday files one report
+# when it comes back, not eleven. The fire key is `(trigger, occurrence)` and doubles
+# as the run's idempotency key, so two schedulers or a restart mid-minute still produce
+# one run per slot.
+#
+# **`CompetitorReport@1` requires at least two named organizations** (`competitors`,
+# `min_length=2`) and at least three sources, and every theme may only name an
+# organization the report already covers. That is why each objective below asks for
+# named companies, products or institutions by name rather than for "trends": a brief
+# that invites an abstract answer fails the schema, and a schema failure on the second
+# attempt fails the run and costs WORK-class money for nothing.
+#
+# Two criteria repeat verbatim in all five briefs, and both are here because a real
+# run failed on them rather than because they read well:
+#
+#   - **The naming rule.** On the first funding brief the model wrote a deal as one
+#     competitor — `upGrad / Unacademy (acquisition closed)` — and then named `upGrad`
+#     and `Unacademy` separately in its themes. `CompetitorReport`'s `_citations_resolve`
+#     rejects a theme naming an organization the report does not cover, so the report
+#     failed validation on its own two spellings of the same fact. A deal beat invites
+#     compound names constantly; saying "one organization, one entry, spelled once"
+#     costs a line and buys the retry back.
+#
+#   - **What a recommendation is for.** `research@1`'s system prompt is the M1
+#     marketing department's — it tells the model recommendations are "for a marketing
+#     team deciding what to say next week", and the first good report duly suggested
+#     building a social-proof asset. That prompt is shared with every company on this
+#     runtime and is not stockeds' to edit, so the brief redirects the field instead:
+#     the objective is the one part of the context this file controls.
+
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: edtech-funding-and-deals
+spec:
+  actor: research
+  catchup: skip
+  cron: 0 7 * * *
+  timezone: Asia/Kolkata
+  mode: work
+  input:
+    subject: ed-tech funding, acquisitions and shutdowns
+    title: 'Morning brief: ed-tech money'
+    objective: >-
+      Report the funding rounds, acquisitions, wind-downs and public-market moves in
+      education technology from the last 24-48 hours. Name the companies, the amounts
+      and the investors or acquirers. Say what each deal implies about where the
+      sector's money is going, and flag anything that contradicts last week.
+    acceptance_criteria:
+    - At least two named companies, each with the round or deal that put it in this brief.
+    - Amounts, stages and named investors or acquirers wherever they were disclosed; an
+      undisclosed amount is said to be undisclosed, never estimated.
+    - Every claim traceable to a source that was actually read.
+    - What could not be established goes in gaps rather than being smoothed over.
+    - >-
+        Each organization is its own entry under a plain name (upGrad, not
+        "upGrad / Unacademy (acquisition closed)"), and every theme names only
+        organizations spelled exactly as they appear in that list.
+    - >-
+        Recommendations are for someone deciding what to do about ed-tech this
+        week - what to watch, what to act on now, what to discount - and not
+        campaign or messaging ideas.
+    queries:
+    - ed-tech funding round announced this week
+    - education technology acquisition 2026
+    - edtech startup shutdown OR layoffs 2026
+---
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: edtech-ai-in-learning
+spec:
+  actor: research
+  catchup: skip
+  cron: 0 11 * * *
+  timezone: Asia/Kolkata
+  mode: work
+  input:
+    subject: AI in learning products - launches, models and tutoring
+    title: 'Late-morning brief: AI in learning'
+    objective: >-
+      Report what shipped in AI-powered learning in the last day or two: tutoring and
+      companion products, AI grading and assessment, curriculum generation, and the
+      model releases aimed at education. Name the vendor and the product, say what it
+      actually does that the previous version did not, and separate a shipped feature
+      from an announced one.
+    acceptance_criteria:
+    - At least two named vendors or products, with what each one shipped or announced.
+    - Shipped, in pilot, and announced are distinguished explicitly for every item.
+    - Pricing and availability where stated; where not stated, a gap rather than a guess.
+    - Every claim traceable to a source that was actually read.
+    - >-
+        Each organization is its own entry under a plain name (upGrad, not
+        "upGrad / Unacademy (acquisition closed)"), and every theme names only
+        organizations spelled exactly as they appear in that list.
+    - >-
+        Recommendations are for someone deciding what to do about ed-tech this
+        week - what to watch, what to act on now, what to discount - and not
+        campaign or messaging ideas.
+    queries:
+    - AI tutoring product launch education
+    - AI grading assessment tool schools 2026
+    - generative AI curriculum platform release
+---
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: edtech-policy-and-regulation
+spec:
+  actor: research
+  catchup: skip
+  cron: 0 14 * * *
+  timezone: Asia/Kolkata
+  mode: work
+  input:
+    subject: education technology policy, regulation and student data rules
+    title: 'Afternoon brief: policy and regulation'
+    objective: >-
+      Report movement in the rules that ed-tech has to live inside: AI-in-schools
+      guidance, student data and privacy enforcement, procurement and accreditation
+      changes, and national or state programmes with money attached. Name the ministry,
+      agency, district or regulator and the instrument, and say who has to do something
+      differently as a result.
+    acceptance_criteria:
+    - At least two named bodies, agencies, districts or vendors, each with the specific
+      rule, ruling or programme that put it in this brief.
+    - The jurisdiction and the date in force or proposed for each item.
+    - Draft, in consultation, and in force are distinguished; a proposal is never
+      reported as a rule.
+    - Every claim traceable to a source that was actually read.
+    - >-
+        Each organization is its own entry under a plain name (upGrad, not
+        "upGrad / Unacademy (acquisition closed)"), and every theme names only
+        organizations spelled exactly as they appear in that list.
+    - >-
+        Recommendations are for someone deciding what to do about ed-tech this
+        week - what to watch, what to act on now, what to discount - and not
+        campaign or messaging ideas.
+    queries:
+    - AI in schools policy guidance government
+    - student data privacy enforcement edtech
+    - education technology procurement regulation 2026
+---
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: edtech-market-and-adoption
+spec:
+  actor: research
+  catchup: skip
+  cron: 30 17 * * *
+  timezone: Asia/Kolkata
+  mode: work
+  input:
+    subject: ed-tech market data, adoption and competitive moves
+    title: 'Evening brief: market and adoption'
+    objective: >-
+      Report the numbers and the competitive moves: district, university and enterprise
+      adoption, renewals and churn, pricing changes, partnership and distribution deals,
+      earnings and usage data. Name the buyers as well as the sellers, and prefer a
+      disclosed figure to an analyst's projection - say which one you are quoting.
+    acceptance_criteria:
+    - At least two named companies, each with the adoption number, deal or pricing change
+      that put it in this brief.
+    - Every figure attributed to whoever published it, with disclosed figures separated
+      from projections and estimates.
+    - Named buyers or institutions wherever a deal has them.
+    - Every claim traceable to a source that was actually read.
+    - >-
+        Each organization is its own entry under a plain name (upGrad, not
+        "upGrad / Unacademy (acquisition closed)"), and every theme names only
+        organizations spelled exactly as they appear in that list.
+    - >-
+        Recommendations are for someone deciding what to do about ed-tech this
+        week - what to watch, what to act on now, what to discount - and not
+        campaign or messaging ideas.
+    queries:
+    - edtech adoption district university contract won
+    - education technology market data earnings 2026
+    - edtech pricing change partnership announced
+---
+apiVersion: agent-platform/v1
+kind: Trigger
+metadata:
+  name: edtech-pedagogy-and-workforce
+spec:
+  actor: research
+  catchup: skip
+  cron: 0 21 * * *
+  timezone: Asia/Kolkata
+  mode: work
+  input:
+    subject: learning science, higher education and workforce skills
+    title: 'Night brief: pedagogy and workforce'
+    objective: >-
+      Report what is changing in how people actually learn and get credentialled:
+      published learning-science and efficacy results, higher-education programme and
+      enrolment shifts, workforce reskilling and alternative credentials, and the
+      institutions or employers behind them. Give effect sizes and sample sizes where
+      a study reports them, and say plainly when a claimed result rests on a vendor's
+      own study.
+    acceptance_criteria:
+    - At least two named institutions, employers, publishers or programmes, each with
+      the finding or change that put it in this brief.
+    - Sample size, duration and who funded it stated for every study cited.
+    - Vendor-funded findings labelled as such.
+    - Every claim traceable to a source that was actually read.
+    - >-
+        Each organization is its own entry under a plain name (upGrad, not
+        "upGrad / Unacademy (acquisition closed)"), and every theme names only
+        organizations spelled exactly as they appear in that list.
+    - >-
+        Recommendations are for someone deciding what to do about ed-tech this
+        week - what to watch, what to act on now, what to discount - and not
+        campaign or messaging ideas.
+    queries:
+    - learning science efficacy study results education technology
+    - higher education enrollment program change 2026
+    - workforce reskilling alternative credentials employer
