@@ -467,11 +467,15 @@ async def test_a_busy_bot_keeps_its_firing_queued_until_it_waited_too_long(
     uow_factory: Any, organization_id: Any
 ) -> None:
     bot = await _bot(uow_factory, organization_id)
+    # Due a minute ago by the real clock: the queued firing is stamped with it, and how
+    # long it has waited is measured from that stamp.
+    now = dt.datetime.now(dt.UTC).replace(second=0, microsecond=0)
+    at = now - dt.timedelta(minutes=1)
     routine = await RoutineService(uow_factory).create(
-        bot, RoutineSpec(name="Daily", instruction="Report", cron="0 9 * * *")
+        bot,
+        RoutineSpec(name="Daily", instruction="Report", cron=f"{at.minute} {at.hour} * * *"),
     )
-    now = dt.datetime.now(dt.UTC).replace(hour=9, minute=1, second=0, microsecond=0)
-    await _make_due(uow_factory, routine.id, now - dt.timedelta(minutes=2))
+    await _make_due(uow_factory, routine.id, at - dt.timedelta(minutes=1))
     manager = FakeManager(bot, busy_reason="waiting for an approval")
     runner = RoutineRunner(uow_factory, manager)  # type: ignore[arg-type]
 

@@ -434,6 +434,9 @@ def _describe(action: dict[str, Any]) -> str:
         return f"scroll {action.get('direction') or 'down'}"
     if kind == "wait":
         return f"wait {action.get('seconds') or 1}s"
+    if kind == "upload":
+        names = ", ".join(str(p).rsplit("/", 1)[-1] for p in action.get("paths") or [])
+        return f"upload {names or 'a file'} into [{action.get('element')}]"
     if "element" in action:
         return f"{kind} [{action.get('element')}]"
     return str(kind)

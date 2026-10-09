@@ -202,6 +202,21 @@ image with `look` and `path`. Binary files cannot be edited as text, and their
 revisions, moves and restores keep the bytes. The Files pane uploads any type, shows
 images, opens PDFs and shows the text the bots read.
 
+**Uploading to websites.** A bot can give a website your files: an attachment or another
+team file, or a file in `/workspace`. This is how it posts a photo on Instagram or
+attaches a document to a form. The `upload` step names the page's file field or its
+upload button (such as *Select from computer*) and up to 10 files.
+
+- **How the file gets there.** The browser tool reads the bytes from the bot's own team
+  drive (`gateway/builtin/browser.py`); only the paths go in the tool's arguments. The
+  computer then sets the files on the field, or clicks the button and answers the file
+  chooser it opens (`Computer.upload`).
+- **Where files wait.** They sit in a per-screen folder outside every workspace until
+  the next upload, because some sites read the file again when you press Share.
+- **Approval.** An upload sends your file to a site, so it **asks first** by default.
+  *Always allow* files an `upload` rule for that site. Auto Review checks uploads too,
+  and none happens while you hold the screen.
+
 **Terminal.** Every bot has a shell on the computer, in `/workspace`, a folder all your
 bots share and browser downloads land in (`runtime/computer/terminal.py`). `run_command`
 runs in a **sandbox** (bubblewrap): system programs read-only, the workspace the only

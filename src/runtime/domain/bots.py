@@ -96,9 +96,14 @@ BROWSER_ACTIONS = frozenset(
         "forward",
         "reload",
         "wait",
+        "upload",
     }
 )
-"""Steps that become a `browser.act@1` call. Must match `runtime.computer.browser`."""
+"""Steps that become a `browser.act@1` call. Must match `runtime.computer.browser`, but
+for `upload`, which the browser tool sends to the computer's upload endpoint with the
+files' bytes (`gateway.builtin.browser`)."""
+
+MAX_UPLOAD_FILES = 10
 
 TURN_ENDING = frozenset({"reply", "ask_user"})
 
@@ -126,7 +131,7 @@ MAX_SEED_MEMORIES = 10
 """What a bot may hand a helper it creates, as the helper's first memories."""
 """Steps that hand the conversation back to the person."""
 
-ACTIONS_NEEDING_ELEMENT = frozenset({"click", "type", "select", "hover"})
+ACTIONS_NEEDING_ELEMENT = frozenset({"click", "type", "select", "hover", "upload"})
 
 StepAction = Literal[
     "navigate",
@@ -140,6 +145,7 @@ StepAction = Literal[
     "forward",
     "reload",
     "wait",
+    "upload",
     "observe",
     "remember",
     "reply",
@@ -242,7 +248,11 @@ class BotStep(BaseModel):
         "instead: it reports to your person and nothing comes back. APPS: use_connector "
         "calls a tool of an app your person connected (connector = its name, tool = the "
         "tool, args = the tool's arguments as an object); prefer it to the browser for "
-        "those apps."
+        "those apps. UPLOAD: upload gives a website files from your person — for a file "
+        "field or an upload button such as 'Select from computer' (element = that field or "
+        "button; path = the file: a path in your team drive, like an attachment's, or "
+        "/workspace/...; paths = several files at once). It sends your person's file to the "
+        "site, so they are asked first unless they allowed uploads there."
     )
     element: int | None = Field(
         default=None,
@@ -269,7 +279,13 @@ class BotStep(BaseModel):
         max_length=400,
         description="For file actions: a path in your team drive, e.g. "
         "/projects/acme/vendors.csv. For list_files, a folder (default /). For look: an "
-        "image file to look at instead of the screen.",
+        "image file to look at instead of the screen. For upload: the file to give the "
+        "website (a team drive path, or /workspace/...).",
+    )
+    paths: list[Annotated[str, Field(max_length=400)]] = Field(
+        default_factory=list,
+        max_length=MAX_UPLOAD_FILES,
+        description="For upload, several files at once (each like `path`).",
     )
     to: str | None = Field(
         default=None,
@@ -408,6 +424,11 @@ class BotStep(BaseModel):
             (self.path or "").strip() and (self.to or "").strip()
         ):
             raise ValueError("copy_file needs `path` (the source) and `to` (the destination)")
+        if self.action == "upload" and not ((self.path or "").strip() or self.paths):
+            raise ValueError(
+                "upload needs `path` — the file to give the site (a team drive path, e.g. an "
+                "attachment's, or /workspace/...) — or `paths` for several"
+            )
         if self.action in SKILL_ACTIONS and self.skill is None:
             raise ValueError(f"{self.action} needs `skill` — at least its name")
         if self.action == "use_connector" and not (
@@ -449,21 +470,25 @@ class BotStep(BaseModel):
                 out[name] = value
         if self.action == "type":
             out["submit"] = self.submit
+        if self.action == "upload":
+            files = [p.strip() for p in ([self.path] if self.path else []) + self.paths]
+            out["paths"] = [p for p in dict.fromkeys(files) if p][:MAX_UPLOAD_FILES]
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=10)
-"""Version 10 added `use_connector` (with `connector`, `tool` and `args`). Version 9 added
-`message_bot` (with `handoff`). Version 8 added the terminal (`run_command` with
-`timeout` and `local`, `copy_file`). Version 7 let `look` take a `path` (an image in the
-team drive). Version 6 added skills (`save_skill`, `use_skill`, with `skill`). Version 5
-added routines (`save_routine`, `delete_routine`, with `routine`). Version 4 added the
-team drive (`list_files` … `delete_file`, with `path`, `to`, `find` and `from_line`) and
-`look` (vision: a question about the screen). Version 3 added working memory (`plan` and
-`notes`, carried from step to step within a turn) and `sign_in` (the login vault).
-Version 2 added memory (remember kinds, forget, recall, diary) and the brief
-(update_brief, create_bot's brief and seed memories). Version 1 was never run against
-stored data, so it is not kept."""
+BOT_STEP = SCHEMAS.register(BotStep, version=11)
+"""Version 11 added `upload` (with `paths`): files from the team drive or /workspace, given
+to a website's file field. Version 10 added `use_connector` (with `connector`, `tool`
+and `args`). Version 9 added `message_bot` (with `handoff`). Version 8 added the
+terminal (`run_command` with `timeout` and `local`, `copy_file`). Version 7 let `look`
+take a `path` (an image in the team drive). Version 6 added skills (`save_skill`,
+`use_skill`, with `skill`). Version 5 added routines (`save_routine`, `delete_routine`,
+with `routine`). Version 4 added the team drive (`list_files` … `delete_file`, with
+`path`, `to`, `find` and `from_line`) and `look` (vision: a question about the screen).
+Version 3 added working memory (`plan` and `notes`, carried from step to step within a
+turn) and `sign_in` (the login vault). Version 2 added memory (remember kinds, forget,
+recall, diary) and the brief (update_brief, create_bot's brief and seed memories).
+Version 1 was never run against stored data, so it is not kept."""
 
 
 # --- appearance -------------------------------------------------------------------------
@@ -616,6 +641,10 @@ def needs_approval(
         if rule.decision == "allow" and rule.matches(step.action, host):
             return GateDecision(False, "allowed by your rule")
 
+    if step.action == "upload":
+        # Data leaves for a site: like sending, it waits for the person by default, and
+        # their "Always allow" for that site lets it go.
+        return GateDecision(True, f"this sends your file to {host or 'this page'}")
     if step.action == "type" and is_secret_field(element):
         return GateDecision(True, "typing into what looks like a password or secret field")
     if step.sensitive:

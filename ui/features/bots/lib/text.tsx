@@ -106,6 +106,10 @@ export function describeAction(action: BotAction | undefined): string {
       return "Reload the page";
     case "wait":
       return `Wait ${action.seconds ?? 1}s`;
+    case "upload":
+      return `Upload ${
+        (action.paths ?? []).map((p) => p.split("/").pop()).join(", ") || "a file"
+      } into ${target}`;
     case "remember":
       return action.bot ? `Teach ${action.bot}` : "Save to memory";
     case "forget":
@@ -183,6 +187,7 @@ export const ACTION_ICON: Record<string, string> = {
   forward: "→",
   reload: "↻",
   wait: "…",
+  upload: "⇪",
   remember: "✎",
   forget: "⌫",
   recall: "◷",

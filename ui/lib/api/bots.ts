@@ -159,6 +159,8 @@ export interface BotAction {
   /** File steps: the path in the team files; `to` is where a move put it. */
   path?: string;
   to?: string;
+  /** upload: the files given to the page (team drive or /workspace paths). */
+  paths?: string[];
   /** save_routine / delete_routine: the routine's name. */
   name?: string;
   /** run_command: on the person's own computer rather than the sandbox. */

@@ -251,7 +251,7 @@ async def test_a_bot_sees_its_persons_attachments_and_looks_at_an_image() -> Non
     gateway = FakePageGateway()
     out = await _invoke(_Node(_Ctx(), gateway, model, _Org(bots, files=drive)))
 
-    assert "(attached: /attachments/r.png (look at it with look, path))" in model.prompts[0]
+    assert "(attached: /attachments/r.png (look at it with look, path) — to give one to a website, upload it with its path)" in model.prompts[0]  # noqa: E501
     assert "The image is the file /attachments/r.png" in model.prompts[1]
     assert "Total: 42.00 EUR" in model.prompts[2]
     assert "is a text file, not an image" in model.prompts[3]

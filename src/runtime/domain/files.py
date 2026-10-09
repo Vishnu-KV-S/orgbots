@@ -590,7 +590,11 @@ def render_attachments(attached: Sequence[dict[str, Any]]) -> str:
         else:
             how = f"{kind} with no readable text"
         parts.append(f"{path} ({how})")
-    return "(attached: " + "; ".join(parts) + ")"
+    return (
+        "(attached: "
+        + "; ".join(parts)
+        + " — to give one to a website, upload it with its path)"
+    )
 
 
 FILE_LOOK_SYSTEM = """You look at an image for an agent and answer its question about it.
