@@ -151,3 +151,31 @@ async def test_the_container_runs_chrome_on_its_desktop() -> None:
         ).json()
         assert view["ok"], view
         await client.delete("/screens/engine-test")
+
+
+@needs_chrome
+async def test_opening_a_bots_computer_brings_its_window_to_the_front(tmp_path: Path) -> None:
+    assert CHROME is not None
+    from runtime.computer.app import create_app
+
+    app = create_app(
+        tmp_path / "profile",
+        workspace=tmp_path / "workspace",
+        engine=DesktopChrome(executable=CHROME, flags=("--headless=new",)),
+        desktop_url="http://127.0.0.1:6080/vnc.html",
+        desktop_size="1440x900",
+    )
+    computer = app.state.computer
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://computer"
+        ) as client:
+            shown = await client.post("/screens/bot-a/front")
+            assert shown.status_code == 200, shown.text
+            assert shown.json() == {"screen_id": "bot-a", "url": "about:blank"}
+            health = (await client.get("/healthz")).json()
+        assert health["desktop_size"] == "1440x900"
+        assert health["engine"] == "desktop"
+        assert [s.screen_id for s in computer.screens()] == ["bot-a"]
+    finally:
+        await computer.stop()

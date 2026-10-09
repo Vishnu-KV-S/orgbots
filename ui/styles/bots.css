@@ -1042,6 +1042,24 @@ a.pbtn {
   padding: 20px;
 }
 
+/* The computer's desktop (DesktopView): noVNC draws into this box, scaled to fit. */
+.screen.desktop {
+  background: #1e1e1e;
+}
+
+.desktop-view {
+  position: absolute;
+  inset: 0;
+}
+
+.screen.desktop.human {
+  cursor: auto;
+}
+
+.screen-bar .seg {
+  flex: none;
+}
+
 /* The empty-screen note lets clicks through to the page under it. */
 .screen-empty {
   pointer-events: none;

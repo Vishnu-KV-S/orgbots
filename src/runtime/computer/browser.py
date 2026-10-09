@@ -560,8 +560,14 @@ class Computer:
                 await _release(screen)
         elif controller == "human":
             # On the desktop, the window the person is working in comes to the front.
-            with contextlib.suppress(PlaywrightError):
-                await screen.page.bring_to_front()
+            await self.show(screen)
+
+    async def show(self, screen: Screen) -> None:
+        """Bring a screen's window to the front of the desktop, where a person looking at
+        the computer sees it. Every window keeps painting either way; this is only what
+        is on top."""
+        with contextlib.suppress(PlaywrightError):
+            await screen.page.bring_to_front()
 
     # --- demonstrations --------------------------------------------------------------
 

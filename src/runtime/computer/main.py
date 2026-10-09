@@ -40,6 +40,7 @@ def main() -> None:
             workspace=workspace,
             engine=engine_from_env(),
             desktop_url=os.environ.get("COMPUTER_DESKTOP_URL") or None,
+            desktop_size=os.environ.get("COMPUTER_SCREEN") or None,
             shell_socket=os.environ.get("COMPUTER_SHELL_SOCKET") or None,
         ),
         host=host,

@@ -14,15 +14,18 @@ import {
   type MouseButton,
   type Teaching,
   computerStatus,
+  desktopSocket,
   resetComputer,
   sendInputs,
   setController,
+  showScreen,
   startTeaching,
   stopTeaching,
   streamUrl,
   teachingStatus,
 } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
+import { type DesktopState, DesktopView } from "./DesktopView";
 import { inputQueue, readFrames } from "./remoteScreen";
 import { WorkspacePane } from "./WorkspacePane";
 
@@ -73,6 +76,13 @@ const sleep = (ms: number, signal: AbortSignal) =>
  * "Teach a task" is the same takeover, recorded: the person does the task while the
  * computer writes down each click, field and page (never a typed password), and Stop
  * hands the recording to the bot, which writes it up as a draft skill.
+ *
+ * On a computer with a desktop (`docker/computer`) the pane opens on the **Desktop**:
+ * the computer's own screen, with this bot's Chrome window brought to the front — the
+ * browser's tabs, address bar and menus, the way GrokBot shows a bot's computer.
+ * Taking control there hands the person the desktop's mouse and keyboard
+ * (`DesktopView`). **Page** is the view above — only this bot's page, streamed from
+ * the browser — which a recording uses, because it is where each input is written down.
  */
 export function ComputerPane({ bot }: { bot: Bot }) {
   const [view, setView] = useState<"screen" | "workspace">("screen");
@@ -116,6 +126,9 @@ function Screen({ bot }: { bot: Bot }) {
   const [error, setError] = useState<string | null>(null);
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [desktopUrl, setDesktopUrl] = useState<string | null>(null);
+  const [desktopSize, setDesktopSize] = useState<string | null>(null);
+  const [desktopState, setDesktopState] = useState<DesktopState>("connecting");
+  const [display, setDisplay] = useState<"desktop" | "page">("desktop");
   const screen = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState(DEFAULT_SIZE);
@@ -129,6 +142,7 @@ function Screen({ bot }: { bot: Bot }) {
   const [goal, setGoal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const recording = teaching?.recording ?? null;
+  const onDesktop = !!desktopUrl && display === "desktop" && !recording;
 
   const refreshTeaching = useCallback(async () => {
     try {
@@ -181,6 +195,7 @@ function Screen({ bot }: { bot: Bot }) {
       const status = await computerStatus();
       setReachable(status.reachable);
       setDesktopUrl(status.desktop_url ?? null);
+      setDesktopSize(status.desktop_size ?? null);
       const mine = status.screens?.find((s) => s.screen_id === bot.id);
       if (mine) {
         setCtl(mine.controller === "human" ? "human" : "bot");
@@ -201,6 +216,8 @@ function Screen({ bot }: { bot: Bot }) {
   // The picture: one stream for as long as the pane is open, reconnecting after the
   // computer restarts. A frame still being drawn is replaced, never queued behind.
   useEffect(() => {
+    // The desktop view shows the whole screen; the page is not streamed under it.
+    if (onDesktop) return;
     const abort = new AbortController();
     const surface = canvas.current;
     const ctx = surface?.getContext("2d");
@@ -261,7 +278,12 @@ function Screen({ bot }: { bot: Bot }) {
       }
     })();
     return () => abort.abort();
-  }, [bot.id]);
+  }, [bot.id, onDesktop]);
+
+  // Opening a bot's computer shows that bot's window on top.
+  useEffect(() => {
+    if (onDesktop) void showScreen(bot.id).catch(() => undefined);
+  }, [bot.id, onDesktop]);
 
   const editing = useRef(editingUrl);
   useEffect(() => {
@@ -413,102 +435,152 @@ function Screen({ bot }: { bot: Bot }) {
   return (
     <div>
       <div className="screen-bar">
-        <button
-          type="button"
-          className="ibtn"
-          disabled={!human}
-          onClick={() => input({ kind: "back" })}
-          aria-label="Back"
-        >
-          <ArrowLeftIcon />
-        </button>
-        <button
-          type="button"
-          className="ibtn"
-          disabled={!human}
-          onClick={() => input({ kind: "reload" })}
-          aria-label="Reload"
-        >
-          <ArrowPathIcon />
-        </button>
-        <input
-          className="urlbox"
-          value={url}
-          disabled={!human}
-          onFocus={() => setEditingUrl(true)}
-          onBlur={() => setEditingUrl(false)}
-          onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && url.trim()) {
-              input({ kind: "navigate", url: url.trim() });
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          aria-label="Address"
-          placeholder="about:blank"
-        />
+        {desktopUrl && !recording && (
+          <div className="seg" role="tablist" aria-label="View">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={display === "desktop"}
+              className={cx(display === "desktop" && "on")}
+              title="The computer's own screen, with this bot's Chrome window in front"
+              onClick={() => setDisplay("desktop")}
+            >
+              Desktop
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={display === "page"}
+              className={cx(display === "page" && "on")}
+              title="Only this bot's page"
+              onClick={() => setDisplay("page")}
+            >
+              Page
+            </button>
+          </div>
+        )}
+        {!onDesktop && (
+          <>
+            <button
+              type="button"
+              className="ibtn"
+              disabled={!human}
+              onClick={() => input({ kind: "back" })}
+              aria-label="Back"
+            >
+              <ArrowLeftIcon />
+            </button>
+            <button
+              type="button"
+              className="ibtn"
+              disabled={!human}
+              onClick={() => input({ kind: "reload" })}
+              aria-label="Reload"
+            >
+              <ArrowPathIcon />
+            </button>
+            <input
+              className="urlbox"
+              value={url}
+              disabled={!human}
+              onFocus={() => setEditingUrl(true)}
+              onBlur={() => setEditingUrl(false)}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && url.trim()) {
+                  input({ kind: "navigate", url: url.trim() });
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              aria-label="Address"
+              placeholder="about:blank"
+            />
+          </>
+        )}
       </div>
 
-      <div
-        ref={screen}
-        className={cx("screen", human && "human")}
-        style={{ aspectRatio: `${size.width} / ${size.height}` }}
-        tabIndex={human ? 0 : -1}
-        onPointerDown={onPointerDown}
-        onPointerMove={(e) => {
-          if (human) input({ kind: "move", ...at(e) });
-        }}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onMouseDown={(e) => {
-          // No text selection or focus change on this page: the press is the bot's.
-          if (human) e.preventDefault();
-        }}
-        onContextMenu={(e) => {
-          if (human) e.preventDefault();
-        }}
-        onKeyDown={onKeyDown}
-        onKeyUp={onKeyUp}
-        onBlur={() => {
-          if (human) releaseAll();
-        }}
-        aria-label={human ? "Bot screen — you have control" : "Bot screen"}
-      >
-        <canvas
-          ref={canvas}
-          width={DEFAULT_SIZE.width}
-          height={DEFAULT_SIZE.height}
-          role="img"
-          aria-label={`${bot.name}'s screen`}
-        />
-        {(reachable === false || (live === false && !loaded)) && (
-          <div className="screen-overlay">
-            The cloud computer isn&apos;t running.
-            <br />
-            Start it with <code>scripts/computer.sh up</code>
-          </div>
-        )}
-        {loaded && reachable !== false && (!pageUrl || pageUrl === "about:blank") && (
-          // A browser with nothing open is a white page; say so, rather than look broken.
-          <div className="screen-overlay screen-empty">
-            {human
-              ? "Nothing is open yet. Type an address in the bar above, then click and type on the page."
-              : `Nothing is open on ${bot.name}'s screen yet. Give it a task, or take control and type an address.`}
-          </div>
-        )}
-        {loaded && (
-          <span className="screen-badge">
-            {!live ? "Reconnecting…" : human ? "You have control" : "Live"}
-          </span>
-        )}
-      </div>
+      {onDesktop && desktopUrl ? (
+        <div
+          className={cx("screen", "desktop", human && "human")}
+          style={{ aspectRatio: (desktopSize ?? "1440x900").replace("x", " / ") }}
+        >
+          <DesktopView
+            socket={desktopSocket(desktopUrl)}
+            control={human}
+            label={`The computer's desktop, with ${bot.name}'s window in front`}
+            onState={setDesktopState}
+          />
+          {desktopState !== "live" && (
+            <div className="screen-overlay">
+              {desktopState === "lost" ? "Reconnecting to the desktop…" : "Connecting to the desktop…"}
+            </div>
+          )}
+          {desktopState === "live" && (
+            <span className="screen-badge">{human ? "You have control" : "Live desktop"}</span>
+          )}
+        </div>
+      ) : (
+        <div
+          ref={screen}
+          className={cx("screen", human && "human")}
+          style={{ aspectRatio: `${size.width} / ${size.height}` }}
+          tabIndex={human ? 0 : -1}
+          onPointerDown={onPointerDown}
+          onPointerMove={(e) => {
+            if (human) input({ kind: "move", ...at(e) });
+          }}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onMouseDown={(e) => {
+            // No text selection or focus change on this page: the press is the bot's.
+            if (human) e.preventDefault();
+          }}
+          onContextMenu={(e) => {
+            if (human) e.preventDefault();
+          }}
+          onKeyDown={onKeyDown}
+          onKeyUp={onKeyUp}
+          onBlur={() => {
+            if (human) releaseAll();
+          }}
+          aria-label={human ? "Bot screen — you have control" : "Bot screen"}
+        >
+          <canvas
+            ref={canvas}
+            width={DEFAULT_SIZE.width}
+            height={DEFAULT_SIZE.height}
+            role="img"
+            aria-label={`${bot.name}'s screen`}
+          />
+          {(reachable === false || (live === false && !loaded)) && (
+            <div className="screen-overlay">
+              The cloud computer isn&apos;t running.
+              <br />
+              Start it with <code>scripts/computer.sh up</code>
+            </div>
+          )}
+          {loaded && reachable !== false && (!pageUrl || pageUrl === "about:blank") && (
+            // A browser with nothing open is a white page; say so, rather than look broken.
+            <div className="screen-overlay screen-empty">
+              {human
+                ? "Nothing is open yet. Type an address in the bar above, then click and type on the page."
+                : `Nothing is open on ${bot.name}'s screen yet. Give it a task, or take control and type an address.`}
+            </div>
+          )}
+          {loaded && (
+            <span className="screen-badge">
+              {!live ? "Reconnecting…" : human ? "You have control" : "Live"}
+            </span>
+          )}
+        </div>
+      )}
 
       {human ? (
         <>
           <p className="screen-help">
-            Use the screen as you would your own: move, click, drag, scroll and type while it
-            has focus, and paste with your usual shortcut. For text from an input method, type
-            it below. Hand control back when you&apos;re done.
+            {onDesktop
+              ? `You're at the computer, with ${bot.name}'s Chrome window in front. Use it as your own — its address bar, tabs and menus all work; click into it first, and paste with your usual shortcut. For text from an input method, type it below. Hand control back when you're done.`
+              : "Use the screen as you would your own: move, click, drag, scroll and type while it has focus, and paste with your usual shortcut. For text from an input method, type it below. Hand control back when you're done."}
           </p>
           <div className="typebar">
             <input
@@ -548,8 +620,11 @@ function Screen({ bot }: { bot: Bot }) {
         </>
       ) : (
         <p className="screen-help">
-          Watching {bot.name}&apos;s screen. Take control to sign in, solve a CAPTCHA or finish
-          a step yourself — the bot pauses until you hand it back.
+          {onDesktop
+            ? `Watching the computer's desktop, with ${bot.name}'s Chrome window in front. `
+            : `Watching ${bot.name}'s screen. `}
+          Take control to sign in, solve a CAPTCHA or finish a step yourself — the bot pauses
+          until you hand it back.
         </p>
       )}
 

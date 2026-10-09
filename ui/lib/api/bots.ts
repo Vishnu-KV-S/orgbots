@@ -284,6 +284,8 @@ export interface ComputerStatus {
   engine?: "desktop" | "playwright";
   /** Where a person sees the computer's whole desktop (noVNC), when it has one. */
   desktop_url?: string | null;
+  /** That desktop's screen, `1440x900`. */
+  desktop_size?: string | null;
   screens?: {
     screen_id: string;
     label: string;
@@ -466,6 +468,16 @@ export const searchBots = (q: string, signal?: AbortSignal) =>
 /** A screenshot a run kept for the chat. Never changes, so no cache-buster. */
 export const savedScreenshotUrl = (id: string, screenshotId: string) =>
   `${BOTS_BASE}/${id}/screenshots/${screenshotId}`;
+
+/** Bring the bot's window to the front of the computer's desktop. */
+export const showScreen = (id: string) =>
+  request<{ screen_id: string; url: string }>(`${BOTS_BASE}/${id}/computer/front`, json("POST", {}));
+
+/** The desktop's VNC socket, beside its noVNC page (websockify serves both). */
+export function desktopSocket(desktopUrl: string): string {
+  const page = new URL(desktopUrl);
+  return `${page.protocol === "https:" ? "wss" : "ws"}://${page.host}/websockify`;
+}
 
 export const setController = (id: string, controller: "bot" | "human") =>
   request<unknown>(`${BOTS_BASE}/${id}/computer/control`, json("POST", { controller }));

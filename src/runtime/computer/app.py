@@ -188,11 +188,13 @@ def create_app(
     workspace: Path | None = None,
     engine: Engine | None = None,
     desktop_url: str | None = None,
+    desktop_size: str | None = None,
     shell_socket: str | None = None,
 ) -> FastAPI:
     """`engine` is where the browser comes from (`runtime.computer.engine`), Playwright's
     own Chromium when not given. `desktop_url` is where a person can see the computer's
-    whole desktop (the noVNC view in `docker/computer`), reported by `/healthz`.
+    whole desktop (the noVNC view in `docker/computer`), and `desktop_size` its screen
+    (`1440x900`), both reported by `/healthz`.
     `shell_socket` is the bots' shell (`runtime.computer.shell`): commands run there,
     apart from the browser, instead of on this machine."""
     base = workspace or profile_dir.parent / "workspace"
@@ -256,6 +258,7 @@ def create_app(
             "actions": sorted(ACTION_TYPES),
             **computer.engine.describe(),
             "desktop_url": desktop_url,
+            "desktop_size": desktop_size if desktop_url else None,
             "shell": "container" if shell is not None else "local",
         }
 
@@ -425,6 +428,16 @@ def create_app(
             media_type=f"multipart/x-mixed-replace; boundary={BOUNDARY}",
             headers={"Cache-Control": "no-store", "X-Controller": screen.controller},
         )
+
+    @app.post("/screens/{screen_id}/front")
+    async def front(
+        screen_id: str, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        """Bring the screen's window to the front of the desktop, for a person opening
+        the bot's computer."""
+        screen = await computer.screen(screen_id, profile=profile)
+        await computer.show(screen)
+        return {"screen_id": screen_id, "url": screen.page.url}
 
     @app.post("/screens/{screen_id}/control")
     async def control(
