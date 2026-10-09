@@ -1,5 +1,6 @@
 "use client";
 
+import { TrashIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -20,6 +21,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { type Appearance, Designer, appearanceFor } from "../avatar";
 import { canEdit, useMe } from "../lib/me";
 import { DECISION_LABEL, RULE_ACTIONS, ruleAction } from "../lib/rules";
+import { Avatar } from "./Avatar";
 import { BriefSection } from "./BriefEditor";
 import { MemorySection } from "./MemoryPane";
 import { RoutinesSection } from "./RoutinesPane";
@@ -175,7 +177,7 @@ function Team({ bot, bots, onSelect }: { bot: Bot; bots: Bot[]; onSelect: (id: s
         <div className="helper-list">
           {helpers.map((h) => (
             <button key={h.id} type="button" className="chipbtn" onClick={() => onSelect(h.id)}>
-              {h.avatar || "🤖"} {h.name}
+              <Avatar bot={h} size={18} /> {h.name}
               {h.working ? " · working" : ""}
             </button>
           ))}
@@ -356,7 +358,7 @@ function Rules({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
             disabled={remove.pending}
             onClick={() => void remove.run(r.id)}
           >
-            ✕
+            <TrashIcon />
           </button>
         </div>
       ))}
@@ -469,7 +471,7 @@ function SavedLogins({ bot }: { bot: Bot }) {
             disabled={remove.pending}
             onClick={() => void remove.run(e.id)}
           >
-            ✕
+            <TrashIcon />
           </button>
         </div>
       ))}

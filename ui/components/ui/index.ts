@@ -11,3 +11,4 @@ export { ApiUnreachable, Empty, ErrorNotice, Json, Loading } from "./Feedback";
 export { Field, Fields, KeyValue } from "./KeyValue";
 export { List, ListRow, type ListRowProps } from "./ListRow";
 export { Prose, Section } from "./Section";
+export { WaveformIcon } from "./WaveformIcon";

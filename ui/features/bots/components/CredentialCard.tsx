@@ -1,5 +1,6 @@
 "use client";
 
+import { LockClosedIcon } from "@heroicons/react/24/outline";
 import { type FormEvent, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -181,8 +182,8 @@ export function CredentialCard({
               </label>
             )}
             <div className="creds-note">
-              🔒 Goes straight into the browser from an encrypted vault. {botName} never sees
-              what you type.
+              <LockClosedIcon /> Goes straight into the browser from an encrypted vault.{" "}
+              {botName} never sees what you type.
             </div>
             {error && <ErrorNotice>{error}</ErrorNotice>}
             <div className="approval-actions">

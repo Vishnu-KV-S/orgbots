@@ -187,6 +187,9 @@ kbd {
   width: 24px;
   height: 24px;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .brow:hover .brow-menu,
@@ -442,9 +445,14 @@ kbd {
 .msg-actions button {
   border: none;
   background: transparent;
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-dim);
-  padding: 2px 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--r-sm);
 }
 
@@ -546,9 +554,9 @@ kbd {
 
 .stepline .ico {
   color: var(--text-faint);
-  text-align: center;
-  font-family: var(--mono);
-  font-size: 11px;
+  display: flex;
+  justify-content: center;
+  font-size: 13.5px;
   padding-top: 1px;
 }
 
@@ -831,6 +839,7 @@ kbd {
 .ibtn.send {
   background: var(--text);
   color: var(--bg);
+  border-radius: 50%;
 }
 
 .ibtn.send:disabled {
@@ -841,6 +850,7 @@ kbd {
 .ibtn.stop {
   background: var(--text);
   color: var(--bg);
+  border-radius: 50%;
 }
 
 .replying {
@@ -933,6 +943,9 @@ kbd {
 }
 
 .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: none;
   background: transparent;
   padding: 6px 12px;
@@ -1443,7 +1456,9 @@ kbd {
   flex: none;
   width: 16px;
   margin-right: -4px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-faint);
   font-size: 11px;
 }
@@ -1511,6 +1526,13 @@ kbd {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.helper-list .chipbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 6px;
 }
 
 .brow-hit {
@@ -1935,11 +1957,12 @@ button.frow:hover {
 }
 
 .frow .fico {
-  width: 14px;
+  width: 16px;
   flex: none;
+  display: inline-flex;
+  justify-content: center;
   color: var(--text-faint);
-  font-size: 11px;
-  text-align: center;
+  font-size: 13px;
 }
 
 .frow .fname {
@@ -2441,6 +2464,7 @@ button.frow:hover {
   color: var(--text-faint);
   cursor: pointer;
   padding: 0 2px;
+  display: inline-flex;
 }
 
 .attach-kind {
@@ -2563,8 +2587,11 @@ button.frow:hover {
 }
 
 .ws-ico {
-  width: 12px;
+  width: 16px;
+  flex: none;
+  display: inline-flex;
   color: var(--text-faint);
+  font-size: 13px;
 }
 
 .ws-shell {

@@ -1,6 +1,23 @@
 "use client";
 
+import {
+  AcademicCapIcon,
+  ArrowUturnLeftIcon,
+  BeakerIcon,
+  BoltIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  HandThumbDownIcon,
+  HandThumbUpIcon,
+  MicrophoneIcon,
+  SpeakerWaveIcon,
+  Square2StackIcon,
+  StopCircleIcon,
+} from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState } from "react";
+import { WaveformIcon } from "@/components/ui";
 import {
   type Attachment,
   type Bot,
@@ -71,13 +88,13 @@ function WorkBlock({
   return (
     <div className="work">
       <button type="button" className="work-head" onClick={() => setOpen((o) => !o)}>
-        {live ? <span className="spinner" /> : <span>✓</span>}
+        {live ? <span className="spinner" /> : <CheckIcon />}
         <span>
           {live ? describeAction(latest.payload.action) || "Working" : "Worked"} · {steps.length}{" "}
           step{steps.length === 1 ? "" : "s"}
           {failures > 0 && ` · ${failures} retried`}
         </span>
-        <span className="chev">{expanded ? "▾" : "▸"}</span>
+        <span className="chev">{expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}</span>
       </button>
       {expanded && (
         <div className="steps">
@@ -87,9 +104,12 @@ function WorkBlock({
               s.payload.ok && OPENS_FILE.has(action?.type ?? "")
                 ? (action?.to ?? action?.path)
                 : undefined;
+            const Icon = ACTION_ICON[action?.type ?? ""] ?? ChevronRightIcon;
             return (
               <div key={s.id} className="stepline">
-                <span className="ico">{ACTION_ICON[action?.type ?? ""] ?? "•"}</span>
+                <span className="ico">
+                  <Icon />
+                </span>
                 <div>
                   <div className="what">
                     {file ? (
@@ -188,7 +208,8 @@ function VoiceMemo({ text }: { text: string }) {
   return (
     <button
       type="button"
-      aria-label={playing ? "Stop voice memo" : "Play voice memo"}
+      title={playing ? "Stop reading" : "Read aloud"}
+      aria-label={playing ? "Stop reading" : "Read aloud"}
       onClick={() => {
         if (playing) {
           stopSpeaking();
@@ -200,7 +221,26 @@ function VoiceMemo({ text }: { text: string }) {
         void speak(text).then(() => setPlaying(false));
       }}
     >
-      {playing ? "■ Stop" : "▶ Play"}
+      {playing ? <StopCircleIcon /> : <SpeakerWaveIcon />}
+    </button>
+  );
+}
+
+/** Copies a message, and shows a tick for a moment so the click visibly landed. */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      title={copied ? "Copied" : "Copy"}
+      aria-label={copied ? "Copied" : "Copy"}
+      onClick={() => {
+        void navigator.clipboard?.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? <CheckIcon /> : <Square2StackIcon />}
     </button>
   );
 }
@@ -313,8 +353,7 @@ export function MessageList({
           if (m.payload.pending_id || m.payload.credential_request_id) return null;
           return (
             <div key={m.id} className={m.payload.voice_call ? "sysline callcard" : "sysline"}>
-              {m.payload.voice_call ? "📞 " : ""}
-              {m.content}
+              {m.payload.voice_call && <WaveformIcon />} {m.content}
               {m.payload.screenshot_id && (
                 <Screenshot botId={bot.id} screenshotId={m.payload.screenshot_id} />
               )}
@@ -340,8 +379,16 @@ export function MessageList({
               {isUser && m.payload.from && m.payload.from.member_id !== me?.id && (
                 <div className="msg-from">{m.payload.from.name}</div>
               )}
-              {m.payload.demonstration && <div className="from-bot">🎓 Demonstration</div>}
-              {isUser && m.payload.voice && <div className="from-bot">🎙 Said in a voice chat</div>}
+              {m.payload.demonstration && (
+                <div className="from-bot">
+                  <AcademicCapIcon /> Demonstration
+                </div>
+              )}
+              {isUser && m.payload.voice && (
+                <div className="from-bot">
+                  <MicrophoneIcon /> Said in a voice chat
+                </div>
+              )}
               {!isUser && m.payload.group_id && (
                 <div className="gm-author">
                   Posted in a group
@@ -352,16 +399,27 @@ export function MessageList({
               )}
               {m.payload.routine && (
                 <div className="from-bot">
+                  {m.payload.trigger === "event" ? (
+                    <BoltIcon />
+                  ) : m.payload.trigger === "test" ? (
+                    <BeakerIcon />
+                  ) : (
+                    <ClockIcon />
+                  )}{" "}
                   {m.payload.trigger === "test"
-                    ? "⏰ Test run"
+                    ? "Test run"
                     : m.payload.trigger === "event"
-                      ? "⚡ Event"
-                      : "⏰ Routine"}{" "}
+                      ? "Event"
+                      : "Routine"}{" "}
                   · {m.payload.routine}
                 </div>
               )}
               <div className="bubble" style={{ maxWidth: "100%" }}>
-                {quoted && <div className="quote">↪ {quoted.content}</div>}
+                {quoted && (
+                  <div className="quote">
+                    <ArrowUturnLeftIcon /> {quoted.content}
+                  </div>
+                )}
                 {isUser ? (
                   m.payload.demonstration ? (
                     <Demonstration message={m} />
@@ -396,21 +454,29 @@ export function MessageList({
               )}
             </div>
             <div className="msg-actions">
-              <button type="button" onClick={() => onReply(m)}>
-                Reply
+              <button type="button" onClick={() => onReply(m)} title="Reply" aria-label="Reply">
+                <ArrowUturnLeftIcon />
               </button>
-              <button type="button" onClick={() => void navigator.clipboard?.writeText(m.content)}>
-                Copy
-              </button>
+              <CopyButton text={m.content} />
               {!isUser && (
                 <>
+                  <button
+                    type="button"
+                    onClick={() => void react(m, "👍")}
+                    title="Good response"
+                    aria-label="Good response"
+                  >
+                    <HandThumbUpIcon />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void react(m, "👎")}
+                    title="Bad response"
+                    aria-label="Bad response"
+                  >
+                    <HandThumbDownIcon />
+                  </button>
                   <VoiceMemo text={m.content} />
-                  <button type="button" onClick={() => void react(m, "👍")} aria-label="Good">
-                    👍
-                  </button>
-                  <button type="button" onClick={() => void react(m, "👎")} aria-label="Bad">
-                    👎
-                  </button>
                 </>
               )}
             </div>

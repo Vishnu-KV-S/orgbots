@@ -1,5 +1,19 @@
 "use client";
 
+import {
+  BuildingOffice2Icon,
+  Cog6ToothIcon,
+  MagnifyingGlassIcon,
+  PencilSquareIcon,
+  PlusIcon,
+  UserGroupIcon,
+} from "@heroicons/react/24/outline";
+import {
+  ArrowTurnDownRightIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  StarIcon,
+} from "@heroicons/react/16/solid";
 import Link from "next/link";
 import { useState } from "react";
 import type { Bot, ComputerStatus, Group, Me } from "@/lib/api/bots";
@@ -85,11 +99,11 @@ function BotRow({
             onToggle?.();
           }}
         >
-          {collapsed ? "▸" : "▾"}
+          {collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}
         </button>
       ) : depth > 0 ? (
         <span className="twisty-space" aria-hidden>
-          ↳
+          <ArrowTurnDownRightIcon />
         </span>
       ) : null}
       <button
@@ -107,7 +121,7 @@ function BotRow({
             {bot.name}
             {bot.pinned && (
               <span className="pin" title="Pinned">
-                ●
+                <StarIcon />
               </span>
             )}
             {bot.visibility === "team" && bot.owner_member_id && depth === 0 && (
@@ -278,10 +292,11 @@ export function Sidebar({
         </div>
         <span style={{ flex: 1 }} />
         <button type="button" className="pbtn" onClick={onNew} title="Create a new bot">
-          + New
+          <PencilSquareIcon /> New
         </button>
       </div>
       <button type="button" className="bside-search" onClick={onSearch}>
+        <MagnifyingGlassIcon />
         Search bots and messages
         <kbd>⌘K</kbd>
       </button>
@@ -321,7 +336,7 @@ export function Sidebar({
             aria-label="New group"
             disabled={(bots?.length ?? 0) < 2}
           >
-            +
+            <PlusIcon />
           </button>
         </div>
         {(groups ?? []).map((g) => (
@@ -344,7 +359,7 @@ export function Sidebar({
 
       <div className="bside-foot">
         <button type="button" className="bside-link" onClick={onSettings}>
-          ⚙ Settings
+          <Cog6ToothIcon /> Settings
           <span
             className={cx("status-dot", computer?.reachable ? "ok" : computer ? "bad" : undefined)}
             title={
@@ -354,12 +369,12 @@ export function Sidebar({
         </button>
         {me && (
           <button type="button" className="bside-link" onClick={onTeam}>
-            👥 Team
+            <UserGroupIcon /> Team
           </button>
         )}
         {(!me || me.role !== "member") && (
           <Link href="/companies" className="bside-link">
-            ▦ Companies console
+            <BuildingOffice2Icon /> Companies console
           </Link>
         )}
         {me && (

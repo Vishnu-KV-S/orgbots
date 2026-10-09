@@ -1,3 +1,4 @@
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 
 /**
@@ -9,7 +10,7 @@ export function TopBar({ children }: { children?: React.ReactNode }) {
   return (
     <header className="topbar">
       <Link href="/" className="crumb back-to-bots" title="Back to your bots">
-        ← Bots
+        <ArrowLeftIcon /> Bots
       </Link>
       <Link href="/companies" className="brand">
         <span className="dot" />

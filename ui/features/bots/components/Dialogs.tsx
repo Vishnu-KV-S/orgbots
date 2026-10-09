@@ -1,5 +1,6 @@
 "use client";
 
+import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -46,7 +47,7 @@ export function Modal({
         <div className="dialog-head">
           <h2>{title}</h2>
           <button type="button" className="ibtn" onClick={onClose} aria-label="Close">
-            ✕
+            <XMarkIcon />
           </button>
         </div>
         {children}

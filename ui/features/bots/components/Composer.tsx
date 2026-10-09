@@ -1,6 +1,15 @@
 "use client";
 
+import {
+  ArrowUturnLeftIcon,
+  MicrophoneIcon,
+  PlusIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
+import { XMarkIcon as XMarkMicroIcon } from "@heroicons/react/16/solid";
+import { ArrowUpIcon, StopIcon } from "@heroicons/react/20/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { WaveformIcon } from "@/components/ui";
 import {
   type Attachment,
   type Bot,
@@ -259,14 +268,14 @@ export function Composer({
         )}
         {replyTo && (
           <div className="replying">
-            ↪ <span>Replying to: {replyTo.content}</span>
+            <ArrowUturnLeftIcon /> <span>Replying to: {replyTo.content}</span>
             <button
               type="button"
               className="ibtn"
               onClick={onCancelReply}
               aria-label="Cancel reply"
             >
-              ✕
+              <XMarkIcon />
             </button>
           </div>
         )}
@@ -286,7 +295,7 @@ export function Composer({
                   aria-label={`Remove ${a.name}`}
                   onClick={() => setAttached((list) => list.filter((x) => x.id !== a.id))}
                 >
-                  ✕
+                  <XMarkMicroIcon />
                 </button>
               </span>
             ))}
@@ -362,7 +371,7 @@ export function Composer({
             title="Attach files (or paste an image, or drop files here)"
             aria-label="Attach files"
           >
-            📎
+            <PlusIcon />
           </button>
           {canDictate && (
             <button
@@ -372,7 +381,7 @@ export function Composer({
               title={listening ? "Stop dictation (Ctrl+D)" : "Dictate (Ctrl+D)"}
               aria-label="Dictate"
             >
-              🎙
+              <MicrophoneIcon />
             </button>
           )}
           {onVoice && canDictate && !draft.trim() && attached.length === 0 && (
@@ -383,7 +392,7 @@ export function Composer({
               title="Start a voice chat"
               aria-label="Start a voice chat"
             >
-              📞
+              <WaveformIcon />
             </button>
           )}
           {working && (
@@ -394,7 +403,7 @@ export function Composer({
               title="Stop now"
               aria-label="Stop now"
             >
-              ■
+              <StopIcon />
             </button>
           )}
           <button
@@ -405,7 +414,7 @@ export function Composer({
             title="Send"
             aria-label="Send"
           >
-            ↑
+            <ArrowUpIcon />
           </button>
         </div>
       </div>

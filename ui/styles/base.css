@@ -34,6 +34,17 @@ button {
   background: rgba(255, 255, 255, 0.16);
 }
 
+/* Icons are Heroicons, drawn in the text colour. An SVG from the set carries no
+   size of its own, so it takes one here, from the font-size of whatever holds it:
+   a touch larger than the text, and centred on the capitals when it sits inline
+   beside a word. */
+[data-slot="icon"] {
+  width: 1.15em;
+  height: 1.15em;
+  flex: none;
+  vertical-align: -0.2em;
+}
+
 /* One focus ring for the whole app. Keyboard only — a click on a toggle or a
    list row should not leave an outline sitting on it. */
 :focus-visible {

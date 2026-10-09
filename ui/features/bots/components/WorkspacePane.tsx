@@ -1,5 +1,6 @@
 "use client";
 
+import { DocumentIcon, FolderIcon, LinkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -96,7 +97,9 @@ export function WorkspacePane({ botId }: { botId?: string } = {}) {
         {listing.data?.entries.map((e) =>
           e.folder ? (
             <button key={e.path} type="button" className="ws-row" onClick={() => setPath(e.path)}>
-              <span className="ws-ico">▸</span>
+              <span className="ws-ico">
+                <FolderIcon />
+              </span>
               <span className="grow">{e.name}/</span>
             </button>
           ) : (
@@ -106,7 +109,7 @@ export function WorkspacePane({ botId }: { botId?: string } = {}) {
               href={workspaceFileUrl(e.path, botId)}
               download={e.name}
             >
-              <span className="ws-ico">{e.link ? "↪" : "·"}</span>
+              <span className="ws-ico">{e.link ? <LinkIcon /> : <DocumentIcon />}</span>
               <span className="grow">{e.name}</span>
               <span className="muted">{e.link ? "link" : bytes(e.bytes)}</span>
             </a>

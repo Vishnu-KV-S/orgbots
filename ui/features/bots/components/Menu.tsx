@@ -1,5 +1,6 @@
 "use client";
 
+import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 import { cx } from "@/lib/cx";
 
@@ -9,7 +10,7 @@ export interface MenuItem {
   danger?: boolean;
 }
 
-/** A small "⋯" dropdown. Closes on outside click and Escape. */
+/** A small "…" dropdown. Closes on outside click and Escape. */
 export function Menu({ items, label = "More" }: { items: MenuItem[]; label?: string }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLSpanElement>(null);
@@ -41,7 +42,7 @@ export function Menu({ items, label = "More" }: { items: MenuItem[]; label?: str
           setOpen((o) => !o);
         }}
       >
-        ⋯
+        <EllipsisHorizontalIcon />
       </button>
       {open && (
         <div

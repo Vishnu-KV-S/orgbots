@@ -1,5 +1,6 @@
 "use client";
 
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -48,7 +49,7 @@ export function AppsPane() {
         </button>
         <span style={{ flex: 1 }} />
         <button type="button" className="pbtn" onClick={() => setView("add")}>
-          + By address
+          <PlusIcon /> By address
         </button>
       </div>
       {view === "market" ? (

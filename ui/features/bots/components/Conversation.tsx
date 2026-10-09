@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  ArrowLeftIcon,
+  ComputerDesktopIcon,
+  FolderIcon,
+  InformationCircleIcon,
+  SparklesIcon,
+  Squares2X2Icon,
+} from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
 import {
@@ -130,7 +138,7 @@ export function Conversation({
     <section className="convo" aria-label={`Conversation with ${bot.name}`}>
       <header className="convo-head">
         <button type="button" className="ibtn mobile-only" onClick={onBack} aria-label="Back">
-          ←
+          <ArrowLeftIcon />
         </button>
         <Avatar bot={bot} mood={mood} size={52} live />
         <div className="convo-title">
@@ -143,7 +151,7 @@ export function Conversation({
           onClick={() => onPane(pane === "computer" ? null : "computer")}
           title="Watch or take control of this bot's screen"
         >
-          🖥 <span className="tab-label">Computer</span>
+          <ComputerDesktopIcon /> <span className="tab-label">Computer</span>
         </button>
         <button
           type="button"
@@ -151,7 +159,7 @@ export function Conversation({
           onClick={() => onPane(pane === "files" ? null : "files")}
           title="The files this bot's team shares"
         >
-          📁 <span className="tab-label">Files</span>
+          <FolderIcon /> <span className="tab-label">Files</span>
         </button>
         <button
           type="button"
@@ -159,7 +167,7 @@ export function Conversation({
           onClick={() => onPane(pane === "skills" ? null : "skills")}
           title="How-tos every bot can follow"
         >
-          ✦ <span className="tab-label">Skills</span>
+          <SparklesIcon /> <span className="tab-label">Skills</span>
         </button>
         <button
           type="button"
@@ -167,7 +175,7 @@ export function Conversation({
           onClick={() => onPane(pane === "apps" ? null : "apps")}
           title="Apps every bot can call directly"
         >
-          ⧉ <span className="tab-label">Apps</span>
+          <Squares2X2Icon /> <span className="tab-label">Apps</span>
         </button>
         <button
           type="button"
@@ -175,7 +183,7 @@ export function Conversation({
           onClick={() => onPane(pane === "details" ? null : "details")}
           title="Who this bot is, its routines, memory and rules"
         >
-          ⓘ <span className="tab-label">Details</span>
+          <InformationCircleIcon /> <span className="tab-label">Details</span>
         </button>
       </header>
 

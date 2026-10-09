@@ -1,5 +1,6 @@
 "use client";
 
+import { PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type Bot,
@@ -357,7 +358,7 @@ export function BotsScreen() {
                   ))}
                 </div>
                 <button type="button" className="pbtn primary" onClick={() => setDialog("new")}>
-                  + Create a bot
+                  <PlusIcon /> Create a bot
                 </button>
               </div>
             )}
@@ -422,7 +423,7 @@ export function BotsScreen() {
                 onClick={() => setPane(null)}
                 aria-label="Close pane"
               >
-                ✕
+                <XMarkIcon />
               </button>
             </div>
             <div className="bpane-body">

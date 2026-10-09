@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowLeftIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Empty, IconButton } from "@/components/ui";
 import type { GraphNode, RunDetail, TaskSummary } from "@/lib/types";
@@ -57,7 +58,7 @@ export function Inspector({
         title={<span className="mono-title">{run.id}</span>}
         action={
           <IconButton label="Back to node" onClick={() => setRun(null)}>
-            ←
+            <ArrowLeftIcon />
           </IconButton>
         }
       >
@@ -74,7 +75,7 @@ export function Inspector({
       title={node.label}
       action={
         <IconButton label="Close" onClick={onClose}>
-          ×
+          <XMarkIcon />
         </IconButton>
       }
     >
