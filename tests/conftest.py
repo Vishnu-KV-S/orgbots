@@ -41,9 +41,11 @@ _TRUNCATE_ORDER = [
     "delegations",
     # Bots (037): conversations, rules and pending actions are test state, and all
     # three reference `bots`, so they come first. Routines (043) too: firings, then
-    # the routines they belong to.
+    # the routines they belong to. Skills and recordings (044) are test state too.
     "bot_routine_runs",
     "bot_routines",
+    "bot_recordings",
+    "bot_skills",
     "bot_brief_revisions",
     "bot_memories",
     "bot_pending_actions",

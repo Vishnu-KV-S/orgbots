@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Bot, BotMessage } from "@/lib/api/bots";
+import { type Bot, type BotMessage, listSkills } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
+import { useResource } from "@/lib/hooks/useResource";
 import { QUICK_PROMPTS } from "../lib/templates";
 import { Avatar } from "./Avatar";
 
@@ -32,7 +33,9 @@ function speechRecognition(): (new () => SpeechRecognitionLike) | null {
 /**
  * Where a task is given. Enter sends, Shift+Enter is a new line.
  *
- * `/` opens the prompt menu, `@` mentions another bot, the microphone dictates
+ * `/` opens the prompt menu — quick prompts, then the organization's skills (a skill
+ * named as `/name` in a message is loaded into the bot's prompt) — `@` mentions another
+ * bot, the microphone dictates
  * (where the browser has speech recognition), and while the bot is working the
  * send button becomes Stop — a new message also redirects a working bot, which is
  * the runtime's "turn" mechanism on the other side.
@@ -66,6 +69,7 @@ export function Composer({
   const [listening, setListening] = useState(false);
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const canDictate = speechRecognition() !== null;
+  const skills = useResource(listSkills, { intervalMs: 30_000 });
 
   useEffect(() => {
     ref.current?.focus();
@@ -89,7 +93,7 @@ export function Composer({
     if (!popup) return [];
     const q = popup.query.toLowerCase();
     if (popup.kind === "slash") {
-      return QUICK_PROMPTS.filter((p) => p.cmd.startsWith(q)).map((p) => ({
+      const prompts = QUICK_PROMPTS.filter((p) => p.cmd.startsWith(q)).map((p) => ({
         key: p.cmd,
         label: `/${p.cmd}`,
         hint: p.hint,
@@ -98,6 +102,19 @@ export function Composer({
           setPopup(null);
         },
       }));
+      const library = (skills.data?.skills ?? [])
+        .filter((k) => k.name.includes(q) || k.title.toLowerCase().includes(q))
+        .slice(0, 8)
+        .map((k) => ({
+          key: `skill:${k.id}`,
+          label: `/${k.name}`,
+          hint: `${k.status === "draft" ? "Draft skill · " : "Skill · "}${k.title || k.when}`,
+          apply: () => {
+            onDraft(`/${k.name} `);
+            setPopup(null);
+          },
+        }));
+      return [...prompts, ...library];
     }
     return bots
       .filter((b) => b.id !== bot.id && b.name.toLowerCase().includes(q))
@@ -114,7 +131,7 @@ export function Composer({
           setPopup(null);
         },
       }));
-  }, [popup, bots, bot.id, draft, onDraft]);
+  }, [popup, bots, bot.id, draft, onDraft, skills.data]);
 
   const update = (value: string, caret: number) => {
     onDraft(value);

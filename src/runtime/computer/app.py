@@ -7,7 +7,8 @@ Two audiences and they get different verbs:
   Refused with 409 while a person holds the screen.
 - **People**, through the API proxy: `screenshot`, `control` and `input`. `input` is
   refused unless the person holds the screen, so watching can never become driving by
-  accident.
+  accident. `recording` starts and stops a demonstration: the person's inputs on the
+  screen, written down as steps for a bot to learn a skill from.
 
 Binds to loopback by default. Like `/v1/control`, it has no authentication — anything
 that can reach it can drive a browser that may be signed in to real accounts.
@@ -16,6 +17,7 @@ that can reach it can drive a browser that may be signed in to real accounts.
 from __future__ import annotations
 
 import base64
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -62,6 +64,12 @@ class FillBody(BaseModel):
 
 class ControlBody(BaseModel):
     controller: str = Field(pattern="^(bot|human)$")
+
+
+class RecordingBody(BaseModel):
+    action: str = Field(pattern="^(start|stop)$")
+    hand_back: bool = True
+    """On stop: give the screen back to the bot."""
 
 
 class InputBody(BaseModel):
@@ -207,6 +215,35 @@ def create_app(profile_dir: Path, *, headless: bool = True) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=422, detail=str(exc)[:300]) from exc
         return {"ok": True, "url": screen.page.url}
+
+    @app.post("/screens/{screen_id}/recording")
+    async def recording(screen_id: str, body: RecordingBody) -> dict[str, Any]:
+        screen = await computer.screen(screen_id)
+        if body.action == "start":
+            started = await computer.start_recording(screen)
+            return {
+                "recording": True,
+                "controller": screen.controller,
+                "started_at": started.started_at,
+            }
+        steps = computer.stop_recording(screen)
+        if body.hand_back:
+            computer.set_controller(screen, "bot")
+        return {"recording": False, "controller": screen.controller, "steps": steps}
+
+    @app.get("/screens/{screen_id}/recording")
+    async def recording_status(screen_id: str) -> dict[str, Any]:
+        screen = await computer.screen(screen_id)
+        current = screen.recording
+        if current is None:
+            return {"recording": False}
+        return {
+            "recording": True,
+            "steps": len(current.steps),
+            "elapsed": round(time.time() - current.started_at, 1),
+            "full": current.expired(),
+            "last": current.steps[-1] if current.steps else None,
+        }
 
     @app.delete("/screens/{screen_id}")
     async def close(screen_id: str) -> dict[str, Any]:

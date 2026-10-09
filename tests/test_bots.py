@@ -380,11 +380,25 @@ class NoRoutines:
         return []
 
 
+class NoSkills:
+    """An organization with an empty skills library (`tests/test_bot_skills.py` has one)."""
+
+    async def index(self, organization_id: Any) -> list[Any]:
+        return []
+
+    async def mentioned_in(self, organization_id: Any, text: str) -> list[Any]:
+        return []
+
+    async def used(self, skills: list[Any]) -> None:
+        return None
+
+
 @dataclass
 class _Org:
     bots: FakeBots
     files: Any = field(default_factory=EmptyDrive)
     routines: Any = field(default_factory=NoRoutines)
+    skills: Any = field(default_factory=NoSkills)
 
 
 @dataclass

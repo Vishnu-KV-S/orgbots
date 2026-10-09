@@ -178,6 +178,20 @@ or Slack can reach (a tunnel, say) so the URL shown is the right one. The worker
 routines (`RUNTIME_BOT_ROUTINES_ENABLED`, on by default) alongside the dispatcher. They
 need no `RUNTIME_SCHEDULER_ENABLED`, which only drives the department's crons.
 
+**Skills.** Your organization keeps one shared library of how-tos that every bot can
+follow (`runtime/domain/skills.py`, migration 044). A skill has when to use it, what it
+needs, the steps, how to check the result, what to hand back and what needs your
+approval. Type `/name` in a message (the composer's `/` menu lists them) and that skill's
+full text rides in the bot's prompt. A bot also sees the ready skills and loads one with
+`use_skill` when a task matches. Skills come from four places: you write them in the
+**Skills** pane, install them from the **Marketplace** (packaged with the runtime, never
+fetched), a bot saves one when you ask it to keep a process (`save_skill`, only on your
+own turn), or you **teach** one. *Teach a task* in the Computer pane hands you the bot's
+screen and records what you do: clicks with the element's label, typing (password, code
+and card boxes recorded as `•••`), keys, scrolls and pages, up to 10 minutes. *Stop*
+gives the screen back and sends the bot the recording, and it writes it up as a
+**draft**. No bot is offered a draft until you read it and mark it ready.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
@@ -189,9 +203,8 @@ rings when it asks one, and more — preview each in the designer. All of them a
 drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs one
 context, not one per bot.
 
-Not yet built (the next phases): skills and teach-by-demonstration, plugins/connectors,
-group chats with several bots, binary file attachments (team files are text), voice
-chat, team bots.
+Not yet built (the next phases): plugins/connectors, group chats with several bots,
+binary file attachments (team files are text), voice chat, team bots.
 
 ---
 

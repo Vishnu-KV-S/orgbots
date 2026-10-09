@@ -296,6 +296,25 @@ async def test_a_routines_message_is_labelled_as_the_routine_in_the_prompt() -> 
     )
 
 
+async def test_a_routines_turn_is_told_which_routine_it_is_for() -> None:
+    """A superseded, unanswered routine message must not be taken up by a later firing."""
+    bot = _Bot(id=uuid.uuid4())
+    bots = FakeBots(bot)
+    await bots.record(bot.id, run_id="r0", step=0, kind="a", role="user",
+                      content="TEST RUN of this routine. Check vendors.",
+                      payload={"routine": "Vendor check"})
+    await bots.record(bot.id, run_id="r1", step=0, kind="b", role="user",
+                      content="Reply with pong.", payload={"routine": "Ping"})
+    model = ScriptedModel([DONE])
+    await _invoke(
+        _Node(_Ctx(), FakePageGateway(), model, _Org(bots)),
+        routine_id="x", routine="Ping", trigger="schedule",
+    )
+    assert "started by the routine \u201cPing\u201d: do exactly what its message" in (
+        model.prompts[0]
+    )
+
+
 async def test_drafts_only_parks_a_send_even_where_the_person_always_allows_it() -> None:
     bot = _Bot(id=uuid.uuid4())
     allow_all = (BotRule("*", "", "allow"),)
@@ -511,6 +530,7 @@ async def test_a_routines_turn_is_a_labelled_message_and_a_run_at_routine_priori
     assert spec is not None
     given = spec.spec["input"]
     assert given["drafts_only"] is True and given["routine_id"] == str(routine.id)
+    assert given["routine"] == "Digest"
     (said,) = [m for m in messages if m.role == "user"]
     assert said.payload["routine"] == "Digest" and said.content.startswith("TEST RUN")
     assert "Deliver: /digests/today.md" in said.content

@@ -46,6 +46,7 @@ from runtime.persistence.repositories.ratelimits import RateLimitRepository
 from runtime.persistence.repositories.routines import RoutineRepository
 from runtime.persistence.repositories.runs import RunRepository
 from runtime.persistence.repositories.sessions import SessionRepository
+from runtime.persistence.repositories.skills import SkillRepository
 from runtime.persistence.repositories.spec import SpecRepository
 from runtime.persistence.repositories.tasks import EvaluationRepository, TaskRepository
 from runtime.persistence.repositories.triggers import TriggerRepository
@@ -126,6 +127,8 @@ class UnitOfWork:
         # in one transaction, so a runner that dies between them leaves nothing claimed
         # twice and nothing lost.
         self.routines = RoutineRepository(session)
+        # The skills library and demonstrations (migration 044).
+        self.skills = SkillRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

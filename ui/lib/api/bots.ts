@@ -195,6 +195,11 @@ export interface BotMessage {
     file_id?: string;
     version?: number;
     chars?: number;
+    /** A demonstration's message (role "user"): the goal, and how many steps. */
+    demonstration?: string;
+    recording_id?: string;
+    steps?: number;
+    teach?: "started" | "cancelled";
     /** A message a routine sent (role "user"), and save_routine's result. */
     routine?: string;
     routine_id?: string;
@@ -579,3 +584,117 @@ export const testRoutine = (id: string, routineId: string) =>
 
 export const listRoutineRuns = (id: string, routineId: string, signal?: AbortSignal) =>
   request<{ runs: RoutineRun[] }>(`${routinesOf(id)}/${routineId}/runs`, { signal });
+
+// --- skills ---------------------------------------------------------------------------
+
+export const SKILLS_BASE = "/rt/v1/skills";
+export const MARKETPLACE_BASE = "/rt/v1/marketplace";
+
+export interface SkillFields {
+  title: string;
+  /** When to use it. */
+  when: string;
+  inputs: string;
+  steps: string[];
+  checks: string;
+  output: string;
+  approvals: string;
+}
+
+export interface Skill extends SkillFields {
+  id: string;
+  /** Called as `/name` in a message. */
+  name: string;
+  /** A draft is not offered to bots until a person marks it ready. */
+  status: "draft" | "ready";
+  source: "person" | "bot" | "demonstration" | "marketplace";
+  source_bot_id: string | null;
+  recording_id: string | null;
+  version: number;
+  updated_by_kind: "person" | "bot";
+  updated_by_name: string;
+  use_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketSkill extends SkillFields {
+  key: string;
+  name: string;
+  category: string;
+  blurb: string;
+  installed: boolean;
+}
+
+export const EMPTY_SKILL: SkillFields = {
+  title: "",
+  when: "",
+  inputs: "",
+  steps: [],
+  checks: "",
+  output: "",
+  approvals: "",
+};
+
+export const listSkills = (signal?: AbortSignal) =>
+  request<{ skills: Skill[] }>(SKILLS_BASE, { signal });
+
+export const createSkill = (fields: SkillFields & { name?: string; status?: Skill["status"] }) =>
+  request<Skill>(SKILLS_BASE, json("POST", fields));
+
+export const updateSkill = (
+  id: string,
+  fields: Partial<SkillFields> & { name?: string; status?: Skill["status"] },
+) => request<Skill>(`${SKILLS_BASE}/${id}`, json("PATCH", fields));
+
+export const deleteSkill = (id: string) =>
+  request<{ deleted: string }>(`${SKILLS_BASE}/${id}`, { method: "DELETE" });
+
+export const listMarketplace = (signal?: AbortSignal) =>
+  request<{ skills: MarketSkill[] }>(MARKETPLACE_BASE, { signal });
+
+export const installSkill = (key: string) =>
+  request<Skill>(`${MARKETPLACE_BASE}/skills/${key}`, json("POST", {}));
+
+export interface RecordedStep {
+  kind: string;
+  url?: string;
+  text?: string;
+  key?: string;
+  target?: { label?: string; role?: string; tag?: string; secret?: boolean } | null;
+}
+
+export interface Teaching {
+  recording: {
+    id: string;
+    goal: string;
+    status: string;
+    steps: RecordedStep[];
+    started_at: string;
+  } | null;
+  computer?: {
+    recording: boolean;
+    steps?: number;
+    elapsed?: number;
+    full?: boolean;
+    last?: RecordedStep | null;
+  };
+}
+
+/** The demonstration in progress on this bot's screen, if any. */
+export const teachingStatus = (botId: string, signal?: AbortSignal) =>
+  request<Teaching>(`${BOTS_BASE}/${botId}/teach`, { signal });
+
+/** Hand the screen to the person and start recording what they do. */
+export const startTeaching = (botId: string, goal: string) =>
+  request<{ recording_id: string }>(`${BOTS_BASE}/${botId}/teach`, json("POST", { goal }));
+
+/** Stop recording and give the screen back. Unless cancelled, the bot gets the recording
+ * and writes it up as a draft skill. */
+export const stopTeaching = (botId: string, cancel = false) =>
+  request<{ status: "stopped" | "cancelled"; steps: number; run_id?: string | null }>(
+    `${BOTS_BASE}/${botId}/teach/stop`,
+    json("POST", { cancel }),
+  );
+

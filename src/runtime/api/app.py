@@ -45,6 +45,8 @@ from runtime.api.schemas import (
     StartRunBody,
     StartRunResponse,
 )
+from runtime.api.skills import marketplace_router, teach_router
+from runtime.api.skills import router as skills_router
 from runtime.domain.ids import OrganizationId, RunId, SessionId
 from runtime.domain.specs import StartRunRequest
 from runtime.events.stream import RedisStreams
@@ -127,6 +129,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # from outside, and authenticated by its token and the sender's signature).
     app.include_router(routines_router)
     app.include_router(hooks_router)
+    # Skills: the organization's library, the packaged ones, and teaching by
+    # demonstration (`/v1/bots/{id}/teach`), which drives the computer's recorder.
+    app.include_router(skills_router)
+    app.include_router(marketplace_router)
+    app.include_router(teach_router)
 
     def uow_factory(request: Request) -> UnitOfWorkFactory:
         factory: UnitOfWorkFactory = request.app.state.uow
