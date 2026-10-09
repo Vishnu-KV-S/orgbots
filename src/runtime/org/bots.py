@@ -159,6 +159,11 @@ def bot_actor_spec(actor_name: str) -> ActorSpec:
     )
 
 
+KEEP_SCREENSHOTS = 100
+"""Screenshots kept per bot for the chat. At tens of kilobytes each, a few megabytes a
+bot; a message whose picture has aged out says so rather than breaking."""
+
+
 class HelperRefusedError(Exception):
     """A helper the limits do not allow. The message is shown to the bot."""
 
@@ -392,6 +397,36 @@ class BotService:
             )
         return True
 
+    async def save_screenshot(
+        self,
+        bot_id: uuid.UUID,
+        *,
+        run_id: Any,
+        step: int,
+        kind: str,
+        data: bytes,
+        page_url: str = "",
+    ) -> uuid.UUID:
+        """Keep a picture of the bot's screen for the chat. Returns its id, which a
+        message carries as `screenshot_id`.
+
+        Idempotent per `(run, step, kind)`, and bounded: past `KEEP_SCREENSHOTS` per bot
+        the oldest go. The image is the computer's masked `bot_screenshot` — the same
+        one a vision model would see — never the person's unmasked view.
+        """
+        sid = uuid.uuid5(uuid.NAMESPACE_URL, f"botshot:{run_id}:{step}:{kind}")
+        async with self._uow.transaction() as uow:
+            await uow.screenshots.add(
+                sid,
+                bot_id,
+                run_id=uuid.UUID(str(run_id)),
+                kind=kind,
+                page_url=page_url,
+                data=data,
+            )
+            await uow.screenshots.prune(bot_id, keep=KEEP_SCREENSHOTS)
+        return sid
+
     async def claim_run(self, bot_id: uuid.UUID, run_id: Any) -> None:
         """Make this run the bot's current one. A chunk the dispatcher started is not
         one `BotManager` started, and the chat's "working" reads `last_run_id`."""
@@ -599,11 +634,14 @@ class BotService:
         display: dict[str, Any],
         reason: str,
         thought: str,
+        screenshot_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Park an action for a person to decide, and say so in the conversation.
 
         `action` is what will be executed and stays in `bot_pending_actions`;
-        `display` is what the card shows, with any secret masked."""
+        `display` is what the card shows, with any secret masked; `screenshot_id` is
+        the screen the action would happen on, so the person decides on the page and
+        not on the bot's account of it."""
         pid = pending_id(run_id, step)
         async with self._uow.transaction() as uow:
             await uow.bots.add_pending(
@@ -614,7 +652,12 @@ class BotService:
                 bot_id,
                 role="approval",
                 content=thought,
-                payload={"pending_id": str(pid), "action": display, "reason": reason},
+                payload={
+                    "pending_id": str(pid),
+                    "action": display,
+                    "reason": reason,
+                    **({"screenshot_id": str(screenshot_id)} if screenshot_id else {}),
+                },
                 run_id=uuid.UUID(str(run_id)),
             )
             await uow.bots.set_flags(bot_id, needs_attention=True, unread=True)
@@ -785,6 +828,7 @@ class BotService:
         retry: bool,
         reason: str,
         working: dict[str, Any] | None = None,
+        screenshot_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Put a credential card in the conversation. Idempotent per `(run, step)`.
 
@@ -823,6 +867,7 @@ class BotService:
                     "saved": [{"id": str(o.id), "label": o.label} for o in saved],
                     "retry": retry,
                     "reason": reason,
+                    **({"screenshot_id": str(screenshot_id)} if screenshot_id else {}),
                 },
                 run_id=uuid.UUID(str(run_id)),
             )

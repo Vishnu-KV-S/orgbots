@@ -39,6 +39,7 @@ from runtime.domain.schemas import SCHEMAS
 from runtime.domain.vision import BOT_LOOK, LOOK_SYSTEM, LookResult, look_prompt
 from runtime.gateway.models import ImageInput, ModelRequest
 from runtime.gateway.tools import ToolCall
+from runtime.graphs.bot_agent.shots import keep
 from runtime.graphs.common.state import whole
 from runtime.graphs.common.structured import _as_object
 
@@ -82,6 +83,9 @@ async def look(
 
     if not page.get("ok", True) or not shot:
         return await failed(str(page.get("error") or "the computer returned no screenshot"))
+    # The same picture goes to the chat, so the person sees what the bot asked about.
+    sid = await keep(node, bot, shot, n=n, kind="look", page_url=str(page.get("url", "")))
+    pictured = {"screenshot_id": str(sid)} if sid else {}
 
     schema = SCHEMAS.get(BOT_LOOK)
     try:
@@ -112,14 +116,14 @@ async def look(
             "look",
             "activity",
             thought,
-            {"action": action, "ok": True, "note": "The screen shows a CAPTCHA."},
+            {"action": action, "ok": True, "note": "The screen shows a CAPTCHA.", **pictured},
         )
         await say(
             "captcha",
             "system",
             "This page wants a CAPTCHA, which I don't solve. Take control of my screen "
             "(🖥 Computer), complete it, hand the screen back and tell me to continue.",
-            {"captcha": True},
+            {"captcha": True, **pictured},
         )
         await node.org.bots.end_turn(bot.id, needs_attention=True)
         return end({"status": "human_needed", "steps": n, "reason": "captcha"})
@@ -129,7 +133,13 @@ async def look(
         "look",
         "activity",
         thought,
-        {"action": action, "ok": True, "note": result.answer, "elements": result.elements},
+        {
+            "action": action,
+            "ok": True,
+            "note": result.answer,
+            "elements": result.elements,
+            **pictured,
+        },
     )
     answers.append(f"You looked at the screen and asked: {question[:200]}\n{result.answer}{where}")
     steps.append(line(n, f"looked at the screen: {question[:100]}"))

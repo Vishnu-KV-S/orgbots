@@ -5,6 +5,7 @@ import { ErrorNotice } from "@/components/ui";
 import { useAction } from "@/lib/hooks/useAction";
 import { cx } from "@/lib/cx";
 import { describeAction } from "../lib/text";
+import { Screenshot } from "./Screenshot";
 
 const DECIDED: Record<string, string> = {
   once: "Allowed once",
@@ -76,6 +77,13 @@ export function ApprovalCard({
           </>
         )}
       </dl>
+      {message.payload.screenshot_id && (
+        <Screenshot
+          botId={botId}
+          screenshotId={message.payload.screenshot_id}
+          caption="The page this action would happen on"
+        />
+      )}
       {message.payload.reason && <div className="reason">Why asking: {message.payload.reason}</div>}
       {message.content && <div className="reason">Bot: {message.content}</div>}
       {act.error && <ErrorNotice>{act.error}</ErrorNotice>}

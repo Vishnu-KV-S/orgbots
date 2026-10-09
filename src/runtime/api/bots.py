@@ -1121,6 +1121,25 @@ def _relay(response: httpx.Response | None) -> dict[str, Any]:
     return dict(body)
 
 
+@router.get("/{bot_id}/screenshots/{screenshot_id}")
+async def saved_screenshot(bot_id: UUID, screenshot_id: UUID, request: Request) -> Response:
+    """A picture the bot's run kept for the chat (masked, like everything a bot sees).
+
+    Not the live screen — that is `/computer/screenshot`. This one never changes, so it
+    may be cached; it is scoped to the bot, so an id from another bot's chat is a 404.
+    """
+    await _bot_or_404(request, bot_id)
+    async with _uow(request)() as uow:
+        shot = await uow.screenshots.get(bot_id, screenshot_id)
+    if shot is None:
+        raise HTTPException(status_code=404, detail="that screenshot is no longer kept")
+    return Response(
+        content=shot.data,
+        media_type=shot.media_type,
+        headers={"Cache-Control": "private, max-age=604800, immutable"},
+    )
+
+
 @router.get("/{bot_id}/computer/screenshot")
 async def screenshot(bot_id: UUID, request: Request, quality: int = 60) -> Response:
     bot = await _bot_or_404(request, bot_id)

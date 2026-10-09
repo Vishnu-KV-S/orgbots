@@ -204,6 +204,8 @@ export interface BotMessage {
     fields?: CredentialField[];
     saved?: { id: string; label: string }[] | boolean;
     retry?: boolean;
+    /** A picture of the bot's screen kept with this message (masked). */
+    screenshot_id?: string;
     /** File steps: the file and the version the step left it at. */
     file_id?: string;
     version?: number;
@@ -459,6 +461,10 @@ export const searchBots = (q: string, signal?: AbortSignal) =>
 
 export const screenshotUrl = (id: string, nonce: number) =>
   `${BOTS_BASE}/${id}/computer/screenshot?quality=60&t=${nonce}`;
+
+/** A screenshot a run kept for the chat. Never changes, so no cache-buster. */
+export const savedScreenshotUrl = (id: string, screenshotId: string) =>
+  `${BOTS_BASE}/${id}/screenshots/${screenshotId}`;
 
 export const setController = (id: string, controller: "bot" | "human") =>
   request<unknown>(`${BOTS_BASE}/${id}/computer/control`, json("POST", { controller }));
