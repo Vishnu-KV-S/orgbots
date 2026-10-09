@@ -16,6 +16,7 @@ import {
   teachingStatus,
 } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
+import { WorkspacePane } from "./WorkspacePane";
 
 const VIEWPORT = { width: 1280, height: 800 };
 const FRAME_MS = 900;
@@ -40,6 +41,35 @@ const SPECIAL_KEYS = new Set([
  * hands the recording to the bot, which writes it up as a draft skill.
  */
 export function ComputerPane({ bot }: { bot: Bot }) {
+  const [view, setView] = useState<"screen" | "workspace">("screen");
+  return (
+    <div>
+      <div className="seg" role="tablist" aria-label="Computer">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "screen"}
+          className={cx("seg-btn", view === "screen" && "on")}
+          onClick={() => setView("screen")}
+        >
+          Screen
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "workspace"}
+          className={cx("seg-btn", view === "workspace" && "on")}
+          onClick={() => setView("workspace")}
+        >
+          Workspace &amp; terminal
+        </button>
+      </div>
+      {view === "screen" ? <Screen bot={bot} /> : <WorkspacePane />}
+    </div>
+  );
+}
+
+function Screen({ bot }: { bot: Bot }) {
   const [frame, setFrame] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [broken, setBroken] = useState(false);

@@ -393,7 +393,7 @@ class VaultPatch(BaseModel):
 class RuleBody(BaseModel):
     action_type: str = Field(min_length=1, max_length=32)
     host: str = Field(default="", max_length=253)
-    decision: Literal["ask", "allow"]
+    decision: Literal["ask", "allow", "deny"]
 
 
 class ReadBody(BaseModel):

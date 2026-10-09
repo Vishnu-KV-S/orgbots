@@ -36,6 +36,7 @@ import os
 import random
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -131,6 +132,11 @@ class Screen:
     last_active: float = field(default_factory=time.time)
     label: str = ""
     recording: Recording | None = None
+    downloads: list[dict[str, Any]] = field(default_factory=list)
+    downloading: int = 0
+    """Files this screen's page downloaded into the workspace, newest last. A download
+    not yet `seen` is reported with the next observation, so the bot learns where it
+    went."""
 
 
 @dataclass
@@ -170,9 +176,18 @@ class Recording:
 
 
 class Computer:
-    def __init__(self, profile_dir: Path, *, headless: bool = True) -> None:
+    def __init__(
+        self,
+        profile_dir: Path,
+        *,
+        headless: bool = True,
+        download_path: Callable[[str], Path] | None = None,
+        shown: Callable[[Path], str] | None = None,
+    ) -> None:
         self._profile_dir = profile_dir
         self._headless = headless
+        self._download_path = download_path
+        self._shown = shown or str
         self._pw: Playwright | None = None
         self._context: BrowserContext | None = None
         self._browser: Browser | None = None
@@ -192,6 +207,7 @@ class Computer:
                 "headless": self._headless,
                 "viewport": VIEWPORT,
                 "args": ["--no-first-run", "--no-default-browser-check"],
+                "accept_downloads": self._download_path is not None,
             }
             executable = os.environ.get("COMPUTER_CHROMIUM_PATH")
             if executable:
@@ -236,8 +252,42 @@ class Computer:
         page = await self._context.new_page()
         await page.goto(HOME_URL)
         screen = Screen(screen_id=screen_id, page=page, label=label)
+        if self._download_path is not None:
+            page.on("download", lambda d: asyncio.ensure_future(self._save_download(screen, d)))
         self._screens[screen_id] = screen
         return screen
+
+    async def _save_download(self, screen: Screen, download: Any) -> None:
+        """Keep a download in the workspace, under its own name (numbered if taken)."""
+        assert self._download_path is not None
+        screen.downloading += 1
+        entry: dict[str, Any] = {"name": str(download.suggested_filename), "seen": False}
+        try:
+            target = self._download_path(download.suggested_filename or "download")
+            await download.save_as(str(target))
+            entry.update(
+                name=target.name,
+                path=self._shown(target),
+                bytes=target.stat().st_size,
+                url=str(download.url).split("?", 1)[0][:300],
+            )
+        except Exception as exc:  # a failed download is reported, not raised into Playwright
+            entry["error"] = str(exc)[:200]
+        finally:
+            entry["at"] = time.time()
+            screen.downloads.append(entry)
+            del screen.downloads[:-20]
+            screen.downloading -= 1
+
+    def unseen_downloads(self, screen: Screen, *, consume: bool = True) -> list[dict[str, Any]]:
+        """Downloads the bot has not been told about. Only an observation consumes them:
+        the bot's next decision is made from an observation, never from an act's result,
+        so a download reported only by an act would never reach it."""
+        fresh = [d for d in screen.downloads if not d.get("seen")]
+        if consume:
+            for d in fresh:
+                d["seen"] = True
+        return fresh
 
     def screens(self) -> list[Screen]:
         return [s for s in self._screens.values() if not s.page.is_closed()]
@@ -495,6 +545,10 @@ async def _navigate(c: Computer, s: Screen, a: dict[str, Any]) -> None:
     except PlaywrightTimeout as exc:
         raise ComputerError(f"{url} did not load within {NAV_TIMEOUT_MS // 1000}s") from exc
     except PlaywrightError as exc:
+        if "Download is starting" in exc.message:
+            # The address is a file, not a page: the browser downloads it (into the
+            # workspace, reported with the next observation) and stays where it was.
+            return
         raise ComputerError(f"could not open {url}: {exc.message.splitlines()[0]}") from exc
 
 

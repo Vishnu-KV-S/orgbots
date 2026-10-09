@@ -162,6 +162,8 @@ StepAction = Literal[
     "delete_routine",
     "save_skill",
     "use_skill",
+    "run_command",
+    "copy_file",
 ]
 
 
@@ -226,7 +228,12 @@ class BotStep(BaseModel):
         "use_skill loads a skill so you can follow it (skill = its name). save_skill "
         "saves a procedure to the library when your person asks you to keep one, or "
         "after they show you a task (skill = name, title, when, inputs, steps, checks, "
-        "output, approvals); an existing name changes that skill."
+        "output, approvals); an existing name changes that skill. TERMINAL: run_command "
+        "runs a shell command (text = the command, timeout = seconds, up to 300) in your "
+        "sandboxed /workspace, which all your person's bots share and browser downloads "
+        "land in; local = true runs it on your person's own machine instead, which they "
+        "approve first. copy_file copies a file between /workspace and your team drive "
+        "(path = the source, to = the destination; one of them starts with /workspace)."
     )
     element: int | None = Field(
         default=None,
@@ -258,7 +265,8 @@ class BotStep(BaseModel):
     to: str | None = Field(
         default=None,
         max_length=400,
-        description="For move_file: the new path, or a folder ending in / to move it into.",
+        description="For move_file: the new path, or a folder ending in / to move it into. "
+        "For copy_file: where the copy goes (a folder ending in / keeps the name).",
     )
     find: str | None = Field(
         default=None,
@@ -316,6 +324,14 @@ class BotStep(BaseModel):
     option: str | None = Field(default=None, description="For select: the option's label.")
     direction: Literal["up", "down"] | None = Field(default=None, description="For scroll.")
     seconds: float | None = Field(default=None, ge=0, le=10, description="For wait.")
+    timeout: int | None = Field(
+        default=None, ge=1, le=300, description="For run_command: seconds before it is stopped."
+    )
+    local: bool = Field(
+        default=False,
+        description="For run_command: run on your person's own machine instead of the "
+        "sandbox. Only when the sandbox cannot do it; they approve each one.",
+    )
     submit: bool = Field(default=False, description="For type: press Enter afterwards.")
     sensitive: bool = Field(
         default=False,
@@ -362,6 +378,12 @@ class BotStep(BaseModel):
             raise ValueError("move_file needs `to` — the new path, or a folder ending in /")
         if self.action in ROUTINE_ACTIONS and self.routine is None:
             raise ValueError(f"{self.action} needs `routine` — at least its name")
+        if self.action == "run_command" and not (self.text or "").strip():
+            raise ValueError("run_command needs `text` — the command to run")
+        if self.action == "copy_file" and not (
+            (self.path or "").strip() and (self.to or "").strip()
+        ):
+            raise ValueError("copy_file needs `path` (the source) and `to` (the destination)")
         if self.action in SKILL_ACTIONS and self.skill is None:
             raise ValueError(f"{self.action} needs `skill` — at least its name")
         if self.action in ("create_bot", "ask_bot"):
@@ -397,8 +419,9 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=7)
-"""Version 7 let `look` take a `path` (an image in the team drive). Version 6 added skills
+BOT_STEP = SCHEMAS.register(BotStep, version=8)
+"""Version 8 added the terminal (`run_command` with `timeout` and `local`, `copy_file`).
+Version 7 let `look` take a `path` (an image in the team drive). Version 6 added skills
 (`save_skill`, `use_skill`, with `skill`). Version 5 added routines (`save_routine`,
 `delete_routine`, with `routine`). Version 4 added the team drive (`list_files` …
 `delete_file`, with `path`, `to`, `find` and `from_line`) and `look` (vision: a question
@@ -431,7 +454,7 @@ class BotAppearance(BaseModel):
 # --- the approval gate -----------------------------------------------------------------
 
 
-Decision = Literal["ask", "allow"]
+Decision = Literal["ask", "allow", "deny"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,6 +478,8 @@ class BotRule:
 class GateDecision:
     ask: bool
     reason: str
+    deny: bool = False
+    """A "never allow" rule: the step is refused, not parked."""
 
 
 _SECRET_FIELD = re.compile(r"pass(word)?|secret|token|otp|2fa|cvv|cvc|card.?number|pin\b", re.I)
@@ -492,15 +517,43 @@ def needs_approval(
     element: dict[str, object] | None,
     rules: tuple[BotRule, ...],
 ) -> GateDecision:
-    """Should this step wait for a person?
+    """Should this step wait for a person — or not happen at all?
 
-    Order: an `ask` rule → ask. An `allow` rule → go (it is the person's standing
-    "Always allow"). Otherwise the defaults: typing into a secret-looking field asks,
-    and a step the model itself flagged `sensitive` asks. Everything else goes.
+    Order: a `deny` rule → refused. An `ask` rule → ask. An `allow` rule → go (it is
+    the person's standing "Always allow"). Otherwise the defaults: typing into a
+    secret-looking field asks, a command on the person's own machine asks, and a step
+    the model itself flagged `sensitive` asks. Everything else goes.
+
+    A command is judged as `run_command` (the sandbox) or `run_local` (the person's
+    machine) — two rule kinds, because "always allow in the sandbox" must never be read
+    as "always allow on my laptop".
     """
+    if step.action == "run_command":
+        kind = "run_local" if step.local else "run_command"
+        for decision, reason in (("deny", "never"), ("ask", "ask before"), ("allow", "")):
+            for rule in rules:
+                if rule.decision == decision and rule.matches(kind, ""):
+                    if decision == "allow":
+                        return GateDecision(False, "allowed by your rule")
+                    where = "on your machine" if step.local else "in the sandbox"
+                    return GateDecision(
+                        decision == "ask",
+                        f"your rule: {reason} running commands {where}",
+                        deny=decision == "deny",
+                    )
+        if step.local:
+            return GateDecision(True, "the command runs on your own machine, not the sandbox")
+        if step.sensitive:
+            return GateDecision(True, "the bot marked this command as having real consequences")
+        return GateDecision(False, "routine")
     if not step.is_browser_action:
         return GateDecision(False, "not a browser action")
     host = host_of(step.url or "") if step.action == "navigate" else host_of(page_url)
+
+    for rule in rules:
+        if rule.decision == "deny" and rule.matches(step.action, host):
+            where = f" on {rule.host}" if rule.host else ""
+            return GateDecision(False, f"your rule: never {rule.action_type}{where}", deny=True)
 
     for rule in rules:
         if rule.decision == "ask" and rule.matches(step.action, host):

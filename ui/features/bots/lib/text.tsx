@@ -146,6 +146,12 @@ export function describeAction(action: BotAction | undefined): string {
       return `Move ${action.path ?? "a file"} to ${action.to ?? ""}`;
     case "delete_file":
       return `Delete ${action.path ?? "a file"}`;
+    case "run_command":
+      return `Run a command ${action.local ? "on your computer" : "in the sandbox"}: ${
+        action.text ?? ""
+      }`;
+    case "copy_file":
+      return `Copy ${action.path ?? "a file"} to ${action.to ?? ""}`;
     case "save_skill":
       return `Save skill /${action.name ?? ""}`;
     case "use_skill":
@@ -189,6 +195,8 @@ export const ACTION_ICON: Record<string, string> = {
   edit_file: "✐",
   move_file: "⇢",
   delete_file: "✕",
+  run_command: "❯",
+  copy_file: "⧉",
   save_skill: "✦",
   use_skill: "✦",
   save_routine: "⏰",

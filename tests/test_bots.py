@@ -45,6 +45,7 @@ from runtime.gateway.models import ModelResponse
 from runtime.graphs.registry import GRAPH_KEY, get_graph
 from runtime.org.bots import (
     BROWSER_TOOLS,
+    TERMINAL_TOOLS,
     BriefChange,
     BriefLockedError,
     Remembered,
@@ -106,7 +107,8 @@ def test_actor_spec_is_narrow() -> None:
     name = actor_name_for("Sales Scout!", "3f9a")
     assert name == "bot-sales-scout-3f9a"
     spec = bot_actor_spec(name)
-    assert spec.allowed_tools == BROWSER_TOOLS
+    # The browser's two tools and the terminal's three, and nothing else.
+    assert spec.allowed_tools == BROWSER_TOOLS | TERMINAL_TOOLS
     assert spec.graph_ref == "bot_agent@1"
     assert all(p.provider == "deepseek" for p in spec.model_profiles.profiles.values())
 

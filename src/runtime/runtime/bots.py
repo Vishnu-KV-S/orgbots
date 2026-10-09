@@ -364,7 +364,9 @@ class BotManager:
             if not won:
                 raise PendingNotFoundError(f"{pending_id} was already decided")
             if decision == "always":
-                action_type = str(pending.action.get("type", "*"))
+                # A command names its own rule kind — the sandbox's or the person's
+                # machine's, two different permissions — and no host.
+                action_type = str(pending.action.get("rule") or pending.action.get("type", "*"))
                 host = str(
                     pending.action.get("host") or host_of(str(pending.action.get("page_url", "")))
                 )

@@ -48,6 +48,7 @@ from runtime.api.schemas import (
 )
 from runtime.api.skills import marketplace_router, teach_router
 from runtime.api.skills import router as skills_router
+from runtime.api.workspace import router as workspace_router
 from runtime.domain.ids import OrganizationId, RunId, SessionId
 from runtime.domain.specs import StartRunRequest
 from runtime.events.stream import RedisStreams
@@ -127,6 +128,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(bots_vault_router)
     # Bytes into a team's drive (attachments, uploads) and back out (`/raw`).
     app.include_router(attachments_router)
+    # The computer's shared /workspace and the person's sandboxed shell.
+    app.include_router(workspace_router)
     # Routines: a bot's own (`/v1/bots/{id}/routines`, behind the UI's proxy), and the
     # webhook that starts an event routine (`/v1/hooks`, which is not — it is called
     # from outside, and authenticated by its token and the sender's signature).

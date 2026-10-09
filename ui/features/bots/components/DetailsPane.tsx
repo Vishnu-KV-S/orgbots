@@ -28,7 +28,11 @@ const RULE_ACTIONS = [
   ["select", "choosing an option"],
   ["press", "pressing a key"],
   ["sign_in", "signing in with a saved login"],
+  ["run_command", "running commands in the sandbox"],
+  ["run_local", "running commands on this computer"],
 ] as const;
+
+const DECISION_LABEL = { ask: "Ask first", allow: "Allow", deny: "Never" } as const;
 
 /**
  * Who this bot is and what it may do without asking.
@@ -253,15 +257,13 @@ function Rules({ bot }: { bot: Bot }) {
       <h3>Approvals</h3>
       <p className="screen-help" style={{ marginTop: 0 }}>
         By default {bot.name} asks before anything it judges consequential (orders, sending,
-        posting, deleting). Passwords and codes never go through it: they go through the secure
-        sign-in form. Add rules to change that. When rules conflict, <strong>ask first</strong>{" "}
-        wins.
+        posting, deleting) and before every command on this computer. Passwords and codes never
+        go through it: they go through the secure sign-in form. Add rules to change that.{" "}
+        <strong>Never</strong> beats <strong>ask first</strong>, which beats allow.
       </p>
       {rules.data?.rules.map((r) => (
         <div key={r.id} className="rule">
-          <span className={`decision ${r.decision}`}>
-            {r.decision === "ask" ? "Ask first" : "Allow"}
-          </span>
+          <span className={`decision ${r.decision}`}>{DECISION_LABEL[r.decision]}</span>
           <span className="grow">
             {RULE_ACTIONS.find(([k]) => k === r.action_type)?.[1] ?? r.action_type}
             {r.host ? (
@@ -294,12 +296,13 @@ function Rules({ bot }: { bot: Bot }) {
               onChange={(e) =>
                 setDraft({
                   ...draft,
-                  decision: e.target.value as "ask" | "allow",
+                  decision: e.target.value as BotRule["decision"],
                 })
               }
             >
               <option value="ask">Ask first</option>
               <option value="allow">Allow automatically</option>
+              <option value="deny">Never allow</option>
             </select>
           </label>
           <label>

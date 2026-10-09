@@ -10,12 +10,18 @@ Two audiences and they get different verbs:
   accident. `recording` starts and stops a demonstration: the person's inputs on the
   screen, written down as steps for a bot to learn a skill from.
 
+The **terminal and workspace** (`runtime.computer.terminal`) are the third surface:
+`/terminal/run` runs a bot's command (sandboxed, or on this machine when the run says
+`local` — the bot's approval gate decided that before the call left the gateway), and
+`/workspace` lists, reads and writes the shared directory that browser downloads land in.
+
 Binds to loopback by default. Like `/v1/control`, it has no authentication — anything
 that can reach it can drive a browser that may be signed in to real accounts.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 from collections.abc import AsyncIterator
@@ -33,6 +39,7 @@ from runtime.computer.browser import (
     HumanInControlError,
 )
 from runtime.computer.snapshot import render
+from runtime.computer.terminal import DEFAULT_TIMEOUT_S, Terminal, TerminalError
 
 
 class ActBody(BaseModel):
@@ -82,19 +89,55 @@ class InputBody(BaseModel):
     url: str | None = None
 
 
-def _view(screen: Any, snap: dict[str, Any]) -> dict[str, Any]:
+def _view(
+    screen: Any, snap: dict[str, Any], downloads: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    rendered = render(snap)
+    if downloads:
+        lines = []
+        for d in downloads:
+            if d.get("error"):
+                lines.append(f"- {d.get('name')}: the download failed ({d['error']})")
+            else:
+                lines.append(f"- saved {d['path']} ({int(d.get('bytes', 0)):,} bytes)")
+        rendered += (
+            "\n\nDOWNLOADED (into the shared workspace; copy_file one into your team drive "
+            "to read it):\n" + "\n".join(lines)
+        )
     return {
         "screen_id": screen.screen_id,
         "controller": screen.controller,
         "url": snap.get("url", ""),
         "title": snap.get("title", ""),
         "snapshot": snap,
-        "rendered": render(snap),
+        "rendered": rendered,
+        "downloads": downloads or [],
     }
 
 
-def create_app(profile_dir: Path, *, headless: bool = True) -> FastAPI:
-    computer = Computer(profile_dir, headless=headless)
+class TerminalBody(BaseModel):
+    screen_id: str = Field(min_length=1, max_length=64)
+    command: str = Field(min_length=1, max_length=20_000)
+    timeout_s: float = Field(default=DEFAULT_TIMEOUT_S, ge=1, le=300)
+    local: bool = False
+
+
+class WorkspaceWrite(BaseModel):
+    path: str = Field(min_length=1, max_length=400)
+    data: str = Field(repr=False)
+    """Base64."""
+
+
+def create_app(
+    profile_dir: Path, *, headless: bool = True, workspace: Path | None = None
+) -> FastAPI:
+    terminal = Terminal(workspace or profile_dir.parent / "workspace")
+    computer = Computer(
+        profile_dir,
+        headless=headless,
+        download_path=terminal.free_download_path,
+        shown=terminal.shown,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -106,6 +149,7 @@ def create_app(profile_dir: Path, *, headless: bool = True) -> FastAPI:
 
     app = FastAPI(title="agent-org computer", lifespan=lifespan)
     app.state.computer = computer
+    app.state.terminal = terminal
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
@@ -139,7 +183,7 @@ def create_app(profile_dir: Path, *, headless: bool = True) -> FastAPI:
             snap = await computer.observe(screen)
         except ComputerError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        view = _view(screen, snap)
+        view = _view(screen, snap, computer.unseen_downloads(screen))
         if body.screenshot:
             image = await computer.bot_screenshot(screen)
             view["screenshot"] = base64.b64encode(image).decode("ascii")
@@ -160,7 +204,17 @@ def create_app(profile_dir: Path, *, headless: bool = True) -> FastAPI:
             except ComputerError:
                 snap = {}
             return {**_view(screen, snap), "ok": False, "error": str(exc)}
-        return {**_view(screen, snap), "ok": True, "error": None}
+        # A click that starts a download returns before the file is saved. Waiting for
+        # it (a bounded while) means the bot hears where it went with this result.
+        for _ in range(40):
+            if not screen.downloading:
+                break
+            await asyncio.sleep(0.25)
+        return {
+            **_view(screen, snap, computer.unseen_downloads(screen, consume=False)),
+            "ok": True,
+            "error": None,
+        }
 
     @app.post("/screens/{screen_id}/fill")
     async def fill(screen_id: str, body: FillBody) -> dict[str, Any]:
@@ -244,6 +298,49 @@ def create_app(profile_dir: Path, *, headless: bool = True) -> FastAPI:
             "full": current.expired(),
             "last": current.steps[-1] if current.steps else None,
         }
+
+    # --- the terminal and the workspace --------------------------------------------------
+
+    @app.post("/terminal/run")
+    async def terminal_run(body: TerminalBody) -> dict[str, Any]:
+        try:
+            ran = await terminal.run(
+                body.screen_id, body.command, timeout_s=body.timeout_s, local=body.local
+            )
+        except TerminalError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"ok": True, **ran.as_dict()}
+
+    @app.get("/workspace")
+    async def workspace_listing(path: str = "/workspace") -> dict[str, Any]:
+        try:
+            return {
+                "path": terminal.shown(terminal.resolve(path)),
+                "entries": terminal.listing(path),
+            }
+        except TerminalError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/workspace/file")
+    async def workspace_read(path: str) -> Response:
+        try:
+            found, data = terminal.read(path)
+        except TerminalError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(
+            content=data,
+            media_type="application/octet-stream",
+            headers={"X-Path": terminal.shown(found), "Cache-Control": "no-store"},
+        )
+
+    @app.post("/workspace/file")
+    async def workspace_write(body: WorkspaceWrite) -> dict[str, Any]:
+        try:
+            data = base64.b64decode(body.data, validate=True)
+            written = terminal.write(body.path, data)
+        except (TerminalError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc).splitlines()[0]) from exc
+        return {"path": terminal.shown(written), "bytes": len(data)}
 
     @app.delete("/screens/{screen_id}")
     async def close(screen_id: str) -> dict[str, Any]:

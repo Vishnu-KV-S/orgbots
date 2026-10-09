@@ -202,6 +202,21 @@ image with `look` and `path`. Binary files cannot be edited as text, and their
 revisions, moves and restores keep the bytes. The Files pane uploads any type, shows
 images, opens PDFs and shows the text the bots read.
 
+**Terminal.** Every bot has a shell on the computer, in `/workspace`, a folder all your
+bots share and browser downloads land in (`runtime/computer/terminal.py`). `run_command`
+runs in a **sandbox** (bubblewrap): system programs read-only, the workspace the only
+writable folder besides a private `/tmp`, no home directory, browser profile or `.env`,
+an empty environment, the network on (`COMPUTER_SANDBOX_NETWORK=off` turns it off), and
+a timeout and an output cap. When the command ends, its whole process group is killed.
+With `local`, a command runs **on your own machine** instead: by default the bot asks
+every time, *Always allow* files a `run_local` rule (separate from the sandbox's
+`run_command`), and `COMPUTER_LOCAL_COMMANDS=off` turns it off for everyone. Rules now
+have a third answer, **Never allow** (migration 046), which beats *ask first*, which
+beats *allow*, for commands and clicks alike. `copy_file` moves files between
+`/workspace` and the team drive (a downloaded PDF copied in is read like an
+attachment). The Computer pane's *Workspace & terminal* tab browses, downloads and
+uploads, and runs your own sandboxed commands. Needs `bwrap` on the computer's machine.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a

@@ -20,6 +20,7 @@ from runtime.gateway.builtin import (
     browser,
     fixture_sideeffect,
     publish_external,
+    terminal,
     web_fetch,
     web_search,
 )
@@ -40,6 +41,7 @@ def build_registry(
     web_search.register(registry, resolved)
     publish_external.register(registry, resolved)
     browser.register(registry, resolved, uow_factory)
+    terminal.register(registry, resolved)
     return registry
 
 
@@ -84,6 +86,7 @@ __all__ = [
     "default_action_floors",
     "fixture_sideeffect",
     "publish_external",
+    "terminal",
     "web_fetch",
     "web_search",
 ]
