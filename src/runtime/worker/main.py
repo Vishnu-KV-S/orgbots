@@ -67,6 +67,7 @@ import runtime.graphs.echo_agent
 import runtime.handlers  # noqa: F401  registers hasher@1 and analytics@1
 from runtime.events.relay import OutboxRelay
 from runtime.events.stream import RedisStreams
+from runtime.gateway.push import PushSender
 from runtime.graphs.checkpointer import checkpointer
 
 # Imported for the side effect as much as the symbol: the module registers
@@ -81,6 +82,7 @@ from runtime.persistence.engine import dispose_engines
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.runtime.bots import BotManager
 from runtime.runtime.dispatcher import Dispatcher
+from runtime.runtime.notifier import Notifier
 from runtime.runtime.routines import RoutineRunner
 from runtime.runtime.run_service import RunService
 from runtime.runtime.scheduler import Scheduler
@@ -118,6 +120,7 @@ async def run() -> None:
     dispatcher: Dispatcher | None = None
     routines: RoutineRunner | None = None
     wakes: WakeRunner | None = None
+    notifier: Notifier | None = None
     if settings.conductor_enabled:
         service = RunService(uow, settings=settings)
         if settings.scheduler_enabled:
@@ -128,6 +131,8 @@ async def run() -> None:
         # Bots' messages to each other and group hand-offs: a delivery starts when its
         # bot is free. Not a clock — every wake is something a person or a bot sent.
         wakes = WakeRunner(uow, BotManager(uow, service))
+        # Pushes to the person's devices when a bot needs them (the outbox → Web Push).
+        notifier = Notifier(uow, PushSender(uow, settings))
 
     async with checkpointer(settings) as saver:
         worker = Worker(uow, streams, settings=settings, checkpointer=saver)
@@ -172,6 +177,8 @@ async def run() -> None:
                 routines.stop()
             if wakes is not None:
                 wakes.stop()
+            if notifier is not None:
+                notifier.stop()
             if memory_worker is not None:
                 memory_worker.stop()
 
@@ -205,6 +212,8 @@ async def run() -> None:
             tasks.append(asyncio.create_task(routines.run_forever(), name="routines"))
         if wakes is not None:
             tasks.append(asyncio.create_task(wakes.run_forever(), name="wakes"))
+        if notifier is not None:
+            tasks.append(asyncio.create_task(notifier.run_forever(), name="notifier"))
         if memory_worker is not None:
             tasks.append(asyncio.create_task(memory_worker.run_forever(), name="memory"))
         await stopping.wait()

@@ -167,6 +167,7 @@ class FakeBots:
         self.memory: dict[uuid.UUID, list[Memory]] = {}
         self.episodes: list[str] = []
         self.brief_edits: list[tuple[str, str, str, str]] = []
+        self.notified: list[tuple[str, str, str]] = []
 
     async def get(self, bot_id: uuid.UUID) -> _Bot:
         return self._who(bot_id)
@@ -288,6 +289,9 @@ class FakeBots:
 
     async def end_turn(self, bot_id: uuid.UUID, *, needs_attention: bool = False) -> None:
         self.turns_ended += 1
+
+    async def notify(self, bot, kind, body, *, run_id, step, url=""):  # type: ignore[no-untyped-def]
+        self.notified.append((kind, body, url))
 
     def said(self, role: str) -> list[_Message]:
         return [m for m in self.log.values() if m.role == role]

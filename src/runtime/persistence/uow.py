@@ -44,6 +44,7 @@ from runtime.persistence.repositories.memory import (
 )
 from runtime.persistence.repositories.org import GoalRepository, MetricsRepository
 from runtime.persistence.repositories.outbox import OutboxRepository
+from runtime.persistence.repositories.push import PushRepository
 from runtime.persistence.repositories.ratelimits import RateLimitRepository
 from runtime.persistence.repositories.routines import RoutineRepository
 from runtime.persistence.repositories.runs import RunRepository
@@ -136,6 +137,9 @@ class UnitOfWork:
         self.groups = GroupRepository(session)
         # Connectors — MCP servers an organization connected (migration 049).
         self.connectors = ConnectorRepository(session)
+        # Push notifications (migration 050): a bot's line in its conversation and the
+        # notification that tells the person about it are one transaction.
+        self.push = PushRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

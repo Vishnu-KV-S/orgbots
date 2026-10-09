@@ -266,6 +266,21 @@ allow* files a rule for that app), *never* refuses it, and Auto Review checks it
 app is shared by the organization's bots. OAuth-only servers aren't supported yet; the
 runtime uses tokens.
 
+**The app and push notifications.** The UI is an installable app: a web app manifest
+(`ui/app/manifest.ts`), icons and a service worker (`ui/public/sw.js`). Install it from
+the browser's menu on a phone or a desktop to get its own window and icon. In Settings,
+*Push to this device* subscribes that browser to **Web Push**. When a bot replies,
+asks, wants an approval or needs you to sign in, it writes a notification
+(`bot_notifications`, migration 050) in the same transaction as the conversation line.
+The worker's notifier (`runtime/runtime/notifier.py`) then pushes it to every subscribed
+device, and tapping it opens that bot. The VAPID key is made on first use and sealed by
+the credential cipher, so pushes need `RUNTIME_CREDENTIAL_KEYS`. Set
+`RUNTIME_PUSH_CONTACT` to a `mailto:` address push services can reach. Pushes are
+encrypted to each device, so the browser's push service (Google's, Mozilla's, Apple's)
+never sees what a bot said. A device the push service has forgotten is unsubscribed,
+and a notification more than 12 hours old is dropped rather than sent late. The layout
+works at phone width: the header shows icons only, and side-by-side form fields stack.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a

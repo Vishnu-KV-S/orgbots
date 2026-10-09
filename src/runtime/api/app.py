@@ -40,6 +40,7 @@ from runtime.api.errors import http_errors
 from runtime.api.groups import reactions_router
 from runtime.api.groups import router as groups_router
 from runtime.api.observe import router as observe_router
+from runtime.api.push import router as push_router
 from runtime.api.routines import hooks_router
 from runtime.api.routines import router as routines_router
 from runtime.api.schemas import (
@@ -140,6 +141,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Connectors: MCP servers the organization connected, and the marketplace's.
     app.include_router(connectors_router)
     app.include_router(connectors_market_router)
+    # Push notifications to the person's devices.
+    app.include_router(push_router)
     # Routines: a bot's own (`/v1/bots/{id}/routines`, behind the UI's proxy), and the
     # webhook that starts an event routine (`/v1/hooks`, which is not — it is called
     # from outside, and authenticated by its token and the sender's signature).

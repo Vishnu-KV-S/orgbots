@@ -2135,13 +2135,16 @@ button.frow:hover {
   background: var(--bg-panel);
 }
 
+/* A form's side-by-side fields stack on a phone — the brief, the profile, the rules and
+   a routine's schedule alike. */
 @media (max-width: 520px) {
-  .routine-form .form-row {
+  .form-row {
     flex-wrap: wrap;
   }
 
-  .routine-form .form-row > * {
+  .form-row > * {
     flex: 1 1 100%;
+    min-width: 0;
   }
 }
 
@@ -2327,6 +2330,33 @@ button.frow:hover {
   }
 }
 
+/* A phone fits five icon tabs beside the bot, not five labelled ones. */
+@media (max-width: 640px) {
+  .convo-head {
+    gap: 4px;
+    padding: 10px 10px;
+  }
+
+  .convo-head .tab-label {
+    display: none;
+  }
+
+  .convo-head .tab {
+    padding: 6px 7px;
+  }
+
+  .convo-title {
+    min-width: 0;
+  }
+
+  .convo-title h2,
+  .convo-title p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 /* --- attachments ----------------------------------------------------------------------- */
 
 .composer.dropping {
@@ -2445,30 +2475,8 @@ button.frow:hover {
   color: var(--text-dim);
 }
 
-.seg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
+.subtabs {
   margin-bottom: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--bg-panel);
-}
-
-.seg-btn {
-  border: none;
-  background: transparent;
-  padding: 4px 10px;
-  border-radius: var(--r-sm);
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-
-.seg-btn.on {
-  background: var(--bg-active);
-  color: var(--text);
 }
 
 .ws-crumbs {
