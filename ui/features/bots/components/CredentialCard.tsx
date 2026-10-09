@@ -54,6 +54,7 @@ export function CredentialCard({
   live,
   decision,
   onDone,
+  shared = false,
 }: {
   botId: string;
   botName: string;
@@ -61,6 +62,8 @@ export function CredentialCard({
   live: boolean;
   decision: { kind: string; saved: boolean } | null;
   onDone: () => void;
+  /** A team bot: a saved login is its own, used whoever talks to it. */
+  shared?: boolean;
 }) {
   const p = message.payload;
   const requestId = p.credential_request_id ?? "";
@@ -167,8 +170,10 @@ export function CredentialCard({
             })}
             {keepable && (
               <label className="creds-keep">
-                <input type="checkbox" name="__save" defaultChecked disabled={busy} />
-                Save to the vault for next time
+                <input type="checkbox" name="__save" defaultChecked={!shared} disabled={busy} />
+                {shared
+                  ? `Save it as ${botName}'s login — used for everyone on your team who talks to it`
+                  : "Save to the vault for next time"}
               </label>
             )}
             <div className="creds-note">

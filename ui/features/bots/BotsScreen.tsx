@@ -10,6 +10,9 @@ import {
   listBots,
   listGroups,
   markRead,
+  type Me,
+  authMe,
+  signOut,
   updateBot,
 } from "@/lib/api/bots";
 import { ApiUnreachable } from "@/components/ui";
@@ -33,6 +36,8 @@ import {
   notificationsEnabled,
 } from "./components/Dialogs";
 import { Sidebar, type BotCommands } from "./components/Sidebar";
+import { TeamDialog } from "./components/TeamDialog";
+import { MeContext } from "./lib/me";
 import { registerServiceWorker } from "./lib/push";
 import { TEMPLATES } from "./lib/templates";
 
@@ -40,7 +45,7 @@ const LIST_MS = 2500;
 
 const LINEUP_MOODS: Mood[] = ["idle", "browsing", "happy", "thinking", "typing"];
 
-type Dialog = "new" | "palette" | "settings" | "group" | "template" | null;
+type Dialog = "new" | "palette" | "settings" | "group" | "template" | "team" | null;
 
 /**
  * The bots workspace: sidebar → conversation → computer / details.
@@ -153,6 +158,23 @@ export function BotsScreen() {
     void registerServiceWorker();
   }, []);
 
+  // Who is signed in, when the runtime has members. A browser without a session goes
+  // to sign in, and comes back here after.
+  const [me, setMe] = useState<Me | null>(null);
+  useEffect(() => {
+    authMe().then(
+      ({ mode, member }) => {
+        if (mode === "members" && !member) {
+          const back = window.location.pathname + window.location.search;
+          window.location.replace(`/signin?return_to=${encodeURIComponent(back)}`);
+          return;
+        }
+        setMe(member);
+      },
+      () => undefined,
+    );
+  }, []);
+
   // --- ⌘K -----------------------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -247,7 +269,7 @@ export function BotsScreen() {
     select(bot.id);
   };
 
-  return (
+  const screen = (
     <BotStage>
       <div className={cx("bots", selected && pane && "with-pane", showList && "show-list")}>
         <Sidebar
@@ -264,6 +286,11 @@ export function BotsScreen() {
           selectedGroupId={groupId}
           onSelectGroup={selectGroup}
           onNewGroup={() => setDialog("group")}
+          me={me}
+          onTeam={() => setDialog("team")}
+          onSignOut={() => {
+            void signOut().finally(() => window.location.replace("/signin"));
+          }}
         />
 
         {group ? (
@@ -485,6 +512,7 @@ export function BotsScreen() {
         {dialog === "settings" && (
           <SettingsDialog onClose={() => setDialog(null)} computer={computer.data} />
         )}
+        {dialog === "team" && me && <TeamDialog me={me} onClose={() => setDialog(null)} />}
 
         {toast && (
           <div className="toast" role="status">
@@ -505,4 +533,5 @@ export function BotsScreen() {
       </div>
     </BotStage>
   );
+  return <MeContext.Provider value={me}>{screen}</MeContext.Provider>;
 }

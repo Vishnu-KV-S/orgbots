@@ -19,7 +19,7 @@ _BOT_COLUMNS = """
     id, organization_id, actor_name, name, label, description, avatar, brief, brief_locked,
     brief_rev, pinned, hidden, unread, needs_attention, stop_requested, turn, last_run_id,
     duplicated_from, parent_bot_id, team_id, created_by, appearance, created_at, updated_at,
-    auto_review
+    auto_review, owner_member_id, visibility
 """
 
 EDITABLE = frozenset(
@@ -70,6 +70,11 @@ class BotRow:
     updated_at: datetime
     auto_review: bool = False
     """A second model checks this bot's risky steps (migration 048, `domain.review`)."""
+    owner_member_id: uuid.UUID | None = None
+    """The member whose bot this is (migration 052); None for a bot nobody owns, which
+    is everyone's. A helper has its team's owner."""
+    visibility: str = "private"
+    """`private` to its owner, or shared with the `team` — the same for a whole team."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +208,8 @@ def _bot(row: Any) -> BotRow:
         created_at=row.created_at,
         updated_at=row.updated_at,
         auto_review=bool(row.auto_review),
+        owner_member_id=row.owner_member_id,
+        visibility=row.visibility,
     )
 
 
@@ -254,17 +261,24 @@ class BotRepository:
         parent_bot_id: uuid.UUID | None = None,
         created_by: str = "person",
         appearance: dict[str, Any] | None = None,
+        owner_member_id: uuid.UUID | None = None,
     ) -> None:
         await self._s.execute(
             text(
                 """
                 INSERT INTO bots (id, organization_id, actor_name, name, label, description,
                                   avatar, duplicated_from, parent_bot_id, created_by,
-                                  appearance, team_id)
+                                  appearance, team_id, owner_member_id, visibility)
                 VALUES (:id, :org, :actor, :name, :label, :description,
                         :avatar, :dup, :parent, :created_by, CAST(:appearance AS jsonb),
-                        -- A helper joins its parent's team; anyone else starts one.
-                        COALESCE((SELECT p.team_id FROM bots p WHERE p.id = :parent), :id))
+                        -- A helper joins its parent's team, and is its team's: the same
+                        -- owner, the same visibility. Anyone else starts a team.
+                        COALESCE((SELECT p.team_id FROM bots p WHERE p.id = :parent), :id),
+                        CASE WHEN CAST(:parent AS uuid) IS NULL THEN CAST(:owner AS uuid)
+                             ELSE (SELECT p.owner_member_id FROM bots p WHERE p.id = :parent)
+                        END,
+                        COALESCE((SELECT p.visibility FROM bots p WHERE p.id = :parent),
+                                 'private'))
                 ON CONFLICT (id) DO NOTHING
                 """
             ),
@@ -280,7 +294,50 @@ class BotRepository:
                 "parent": parent_bot_id,
                 "created_by": created_by,
                 "appearance": json.dumps(appearance or {}),
+                "owner": owner_member_id,
             },
+        )
+
+    async def for_run(self, run_id: uuid.UUID) -> BotRow | None:
+        """The bot a run belongs to — the bot whose actor the run is — or None for a run
+        that is not a bot's."""
+        cols = ", ".join("b." + c.strip() for c in _BOT_COLUMNS.split(","))
+        row = (
+            await self._s.execute(
+                text(
+                    f"""
+                    SELECT {cols} FROM runs r
+                      JOIN actors a ON a.id = r.actor_id
+                      JOIN bots b ON b.organization_id = r.organization_id
+                                 AND b.actor_name = a.name AND b.deleted_at IS NULL
+                     WHERE r.id = :run
+                    """
+                ),
+                {"run": run_id},
+            )
+        ).one_or_none()
+        return None if row is None else _bot(row)
+
+    async def last_speaker(self, bot_id: uuid.UUID) -> uuid.UUID | None:
+        """The member who last wrote to this bot, if members wrote to it at all."""
+        raw = await self._s.scalar(
+            text(
+                "SELECT payload->'from'->>'member_id' FROM bot_messages "
+                "WHERE bot_id = :b AND role = 'user' ORDER BY seq DESC LIMIT 1"
+            ),
+            {"b": bot_id},
+        )
+        return uuid.UUID(raw) if raw else None
+
+    async def set_visibility(self, team_id: uuid.UUID, visibility: str) -> None:
+        """Share a team of bots with everyone, or take it back — the whole team at once,
+        so a team bot's helpers are never private to someone."""
+        await self._s.execute(
+            text(
+                "UPDATE bots SET visibility = :v, updated_at = now() "
+                "WHERE team_id = :team AND deleted_at IS NULL"
+            ),
+            {"v": visibility, "team": team_id},
         )
 
     async def get(self, bot_id: uuid.UUID) -> BotRow | None:

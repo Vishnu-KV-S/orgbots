@@ -15,6 +15,11 @@ The **terminal and workspace** (`runtime.computer.terminal`) are the third surfa
 `local` — the bot's approval gate decided that before the call left the gateway), and
 `/workspace` lists, reads and writes the shared directory that browser downloads land in.
 
+Every screen, terminal and workspace call names a **profile** (`?profile=`, `""` by
+default): the browser profile a screen runs in, and the workspace its commands and
+downloads use. The runtime decides it from the bot (`domain.members.computer_profile`);
+a profile that is not `""`, `m-<hex>` or `t-<hex>` is refused before it becomes a path.
+
 Binds to loopback by default. Like `/v1/control`, it has no authentication — anything
 that can reach it can drive a browser that may be signed in to real accounts.
 """
@@ -29,14 +34,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel, Field, SecretStr
 
 from runtime.computer.browser import (
     ACTION_TYPES,
+    PROFILE,
     Computer,
     ComputerError,
     HumanInControlError,
+    check_profile,
 )
 from runtime.computer.snapshot import render
 from runtime.computer.terminal import DEFAULT_TIMEOUT_S, Terminal, TerminalError
@@ -120,6 +127,7 @@ class TerminalBody(BaseModel):
     command: str = Field(min_length=1, max_length=20_000)
     timeout_s: float = Field(default=DEFAULT_TIMEOUT_S, ge=1, le=300)
     local: bool = False
+    profile: str = Field(default="", pattern=PROFILE.pattern)
 
 
 class WorkspaceWrite(BaseModel):
@@ -131,12 +139,28 @@ class WorkspaceWrite(BaseModel):
 def create_app(
     profile_dir: Path, *, headless: bool = True, workspace: Path | None = None
 ) -> FastAPI:
-    terminal = Terminal(workspace or profile_dir.parent / "workspace")
+    base = workspace or profile_dir.parent / "workspace"
+    terminals: dict[str, Terminal] = {}
+
+    def terminal_for(profile: str) -> Terminal:
+        """A profile's workspace: the base for `""`, a sibling directory for any other —
+        never inside the base, where the default profile's bots could read it."""
+        try:
+            check_profile(profile)
+        except ComputerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        found = terminals.get(profile)
+        if found is None:
+            root = base if not profile else base.with_name(f"{base.name}-{profile}")
+            found = terminals[profile] = Terminal(root)
+        return found
+
+    terminal = terminal_for("")
     computer = Computer(
         profile_dir,
         headless=headless,
-        download_path=terminal.free_download_path,
-        shown=terminal.shown,
+        download_path=lambda name, profile: terminal_for(profile).free_download_path(name),
+        shown=lambda path, profile: terminal_for(profile).shown(path),
     )
 
     @asynccontextmanager
@@ -150,6 +174,7 @@ def create_app(
     app = FastAPI(title="agent-org computer", lifespan=lifespan)
     app.state.computer = computer
     app.state.terminal = terminal
+    app.state.terminal_for = terminal_for
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
@@ -166,6 +191,7 @@ def create_app(
             "screens": [
                 {
                     "screen_id": s.screen_id,
+                    "profile": s.profile,
                     "label": s.label,
                     "controller": s.controller,
                     "url": s.page.url,
@@ -177,8 +203,10 @@ def create_app(
         }
 
     @app.post("/screens/{screen_id}/observe")
-    async def observe(screen_id: str, body: ObserveBody) -> dict[str, Any]:
-        screen = await computer.screen(screen_id, label=body.label)
+    async def observe(
+        screen_id: str, body: ObserveBody, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, label=body.label, profile=profile)
         try:
             snap = await computer.observe(screen)
         except ComputerError as exc:
@@ -190,8 +218,10 @@ def create_app(
         return view
 
     @app.post("/screens/{screen_id}/act")
-    async def act(screen_id: str, body: ActBody) -> dict[str, Any]:
-        screen = await computer.screen(screen_id, label=body.label)
+    async def act(
+        screen_id: str, body: ActBody, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, label=body.label, profile=profile)
         try:
             snap = await computer.act(screen, body.action)
         except HumanInControlError as exc:
@@ -217,8 +247,10 @@ def create_app(
         }
 
     @app.post("/screens/{screen_id}/fill")
-    async def fill(screen_id: str, body: FillBody) -> dict[str, Any]:
-        screen = await computer.screen(screen_id, label=body.label)
+    async def fill(
+        screen_id: str, body: FillBody, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, label=body.label, profile=profile)
         fields = [
             {"elements": f.elements, "value": f.value.get_secret_value(), "password": f.password}
             for f in body.fields
@@ -240,8 +272,10 @@ def create_app(
         return {**_view(screen, snap), "ok": True, "error": None}
 
     @app.get("/screens/{screen_id}/screenshot")
-    async def screenshot(screen_id: str, quality: int = 70) -> Response:
-        screen = await computer.screen(screen_id)
+    async def screenshot(
+        screen_id: str, quality: int = 70, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> Response:
+        screen = await computer.screen(screen_id, profile=profile)
         image = await computer.screenshot(screen, quality=max(20, min(95, quality)))
         return Response(
             content=image,
@@ -254,14 +288,18 @@ def create_app(
         )
 
     @app.post("/screens/{screen_id}/control")
-    async def control(screen_id: str, body: ControlBody) -> dict[str, Any]:
-        screen = await computer.screen(screen_id)
+    async def control(
+        screen_id: str, body: ControlBody, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, profile=profile)
         computer.set_controller(screen, body.controller)
         return {"screen_id": screen_id, "controller": screen.controller}
 
     @app.post("/screens/{screen_id}/input")
-    async def human_input(screen_id: str, body: InputBody) -> dict[str, Any]:
-        screen = await computer.screen(screen_id)
+    async def human_input(
+        screen_id: str, body: InputBody, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, profile=profile)
         try:
             await computer.human_input(screen, body.model_dump(exclude_none=True))
         except ComputerError as exc:
@@ -271,8 +309,12 @@ def create_app(
         return {"ok": True, "url": screen.page.url}
 
     @app.post("/screens/{screen_id}/recording")
-    async def recording(screen_id: str, body: RecordingBody) -> dict[str, Any]:
-        screen = await computer.screen(screen_id)
+    async def recording(
+        screen_id: str,
+        body: RecordingBody,
+        profile: str = Query(default="", pattern=PROFILE.pattern),
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, profile=profile)
         if body.action == "start":
             started = await computer.start_recording(screen)
             return {
@@ -286,8 +328,10 @@ def create_app(
         return {"recording": False, "controller": screen.controller, "steps": steps}
 
     @app.get("/screens/{screen_id}/recording")
-    async def recording_status(screen_id: str) -> dict[str, Any]:
-        screen = await computer.screen(screen_id)
+    async def recording_status(
+        screen_id: str, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        screen = await computer.screen(screen_id, profile=profile)
         current = screen.recording
         if current is None:
             return {"recording": False}
@@ -304,7 +348,7 @@ def create_app(
     @app.post("/terminal/run")
     async def terminal_run(body: TerminalBody) -> dict[str, Any]:
         try:
-            ran = await terminal.run(
+            ran = await terminal_for(body.profile).run(
                 body.screen_id, body.command, timeout_s=body.timeout_s, local=body.local
             )
         except TerminalError as exc:
@@ -312,7 +356,10 @@ def create_app(
         return {"ok": True, **ran.as_dict()}
 
     @app.get("/workspace")
-    async def workspace_listing(path: str = "/workspace") -> dict[str, Any]:
+    async def workspace_listing(
+        path: str = "/workspace", profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        terminal = terminal_for(profile)
         try:
             return {
                 "path": terminal.shown(terminal.resolve(path)),
@@ -322,7 +369,10 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/workspace/file")
-    async def workspace_read(path: str) -> Response:
+    async def workspace_read(
+        path: str, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> Response:
+        terminal = terminal_for(profile)
         try:
             found, data = terminal.read(path)
         except TerminalError as exc:
@@ -334,7 +384,10 @@ def create_app(
         )
 
     @app.post("/workspace/file")
-    async def workspace_write(body: WorkspaceWrite) -> dict[str, Any]:
+    async def workspace_write(
+        body: WorkspaceWrite, profile: str = Query(default="", pattern=PROFILE.pattern)
+    ) -> dict[str, Any]:
+        terminal = terminal_for(profile)
         try:
             data = base64.b64decode(body.data, validate=True)
             written = terminal.write(body.path, data)

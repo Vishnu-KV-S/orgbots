@@ -424,7 +424,7 @@ async def test_teaching_records_hands_back_and_sends_the_bot_the_recording(
         {"kind": "type", "target": {"label": "Password", "secret": True}, "text": "•••"},
     ]
 
-    async def computer(request, method, path, *, json=None, quiet=False, timeout_s=30.0):  # type: ignore[no-untyped-def]
+    async def computer(request, method, path, *, json=None, quiet=False, timeout_s=30.0, profile=None):  # type: ignore[no-untyped-def]  # noqa: E501
         calls.append((method, path, json))
         if method == "POST" and json and json.get("action") == "stop":
             return httpx.Response(200, json={"recording": False, "steps": recorded})

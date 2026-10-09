@@ -30,6 +30,7 @@ class NotificationRow:
     body: str
     url: str
     created_at: dt.datetime
+    member_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,21 +48,30 @@ class PushRepository:
     # --- subscriptions -------------------------------------------------------------------
 
     async def subscribe(
-        self, organization_id: uuid.UUID, endpoint: str, p256dh: str, auth: str, user_agent: str
+        self,
+        organization_id: uuid.UUID,
+        endpoint: str,
+        p256dh: str,
+        auth: str,
+        user_agent: str,
+        member_id: uuid.UUID | None = None,
     ) -> None:
+        """A device subscribing again (another member signed in on it) becomes theirs."""
         await self._s.execute(
             text(
                 """
                 INSERT INTO push_subscriptions (id, organization_id, endpoint, p256dh, auth,
-                                                user_agent)
-                VALUES (:id, :org, :endpoint, :p256dh, :auth, :ua)
+                                                user_agent, member_id)
+                VALUES (:id, :org, :endpoint, :p256dh, :auth, :ua, :member)
                 ON CONFLICT (endpoint) DO UPDATE
                    SET organization_id = EXCLUDED.organization_id, p256dh = EXCLUDED.p256dh,
-                       auth = EXCLUDED.auth, user_agent = EXCLUDED.user_agent, failures = 0
+                       auth = EXCLUDED.auth, user_agent = EXCLUDED.user_agent, failures = 0,
+                       member_id = EXCLUDED.member_id
                 """
             ),
             {
                 "id": uuid.uuid4(),
+                "member": member_id,
                 "org": organization_id,
                 "endpoint": endpoint,
                 "p256dh": p256dh,
@@ -76,14 +86,18 @@ class PushRepository:
             {"org": organization_id, "e": endpoint},
         )
 
-    async def subscriptions(self, organization_id: uuid.UUID) -> list[SubscriptionRow]:
+    async def subscriptions(
+        self, organization_id: uuid.UUID, member_id: uuid.UUID | None = None
+    ) -> list[SubscriptionRow]:
+        """The organization's devices — or, with `member_id`, only that member's."""
         rows = (
             await self._s.execute(
                 text(
                     "SELECT id, organization_id, endpoint, p256dh, auth, failures "
-                    "FROM push_subscriptions WHERE organization_id = :org"
+                    "FROM push_subscriptions WHERE organization_id = :org "
+                    "AND (CAST(:member AS uuid) IS NULL OR member_id = :member)"
                 ),
-                {"org": organization_id},
+                {"org": organization_id, "member": member_id},
             )
         ).all()
         return [
@@ -118,18 +132,23 @@ class PushRepository:
         title: str,
         body: str,
         url: str,
+        member_id: uuid.UUID | None = None,
     ) -> None:
+        """`member_id` is whose devices hear it; None is every device in the organization
+        (a runtime without members)."""
         await self._s.execute(
             text(
                 """
-                INSERT INTO bot_notifications (id, organization_id, bot_id, kind, title, body, url)
-                VALUES (:id, :org, :bot, :kind, :title, :body, :url)
+                INSERT INTO bot_notifications (id, organization_id, bot_id, kind, title, body,
+                                               url, member_id)
+                VALUES (:id, :org, :bot, :kind, :title, :body, :url, :member)
                 ON CONFLICT (id) DO NOTHING
                 """
             ),
             {
                 "id": notification_id,
                 "org": organization_id,
+                "member": member_id,
                 "bot": bot_id,
                 "kind": kind,
                 "title": title[:120],
@@ -142,8 +161,9 @@ class PushRepository:
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT id, organization_id, bot_id, kind, title, body, url, created_at "
-                    "FROM bot_notifications WHERE sent_at IS NULL ORDER BY created_at LIMIT :n"
+                    "SELECT id, organization_id, bot_id, kind, title, body, url, created_at, "
+                    "member_id FROM bot_notifications WHERE sent_at IS NULL "
+                    "ORDER BY created_at LIMIT :n"
                 ),
                 {"n": limit},
             )

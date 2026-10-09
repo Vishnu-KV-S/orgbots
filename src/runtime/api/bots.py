@@ -36,6 +36,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from runtime.api.errors import http_errors
+from runtime.api.identity import current_member
 from runtime.domain.bot_memory import MEMORY_CHARS, BotBrief, MemoryKind, memory_handle
 from runtime.domain.bots import BotAppearance
 from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
@@ -55,6 +56,7 @@ from runtime.domain.files import (
     team_of,
 )
 from runtime.domain.ids import OrganizationId, RunId
+from runtime.domain.members import can_edit, can_see, computer_profile
 from runtime.gateway.vault import Vault, VaultUnavailableError
 from runtime.org.files import Change, TeamDrive
 from runtime.persistence.repositories.bots import (
@@ -124,13 +126,19 @@ def _vault(request: Request) -> Vault:
 
 
 async def _organization(request: Request) -> OrganizationId:
-    """The header if given, else the personal organization — created on first use."""
-    raw = request.headers.get(ORG_HEADER)
+    """The signed-in member's organization; without members, the header if given, else
+    the personal organization — created on first use. A member's request never chooses
+    its organization: the header is ignored."""
+    member = await current_member(request)
     settings = _settings(request)
-    try:
-        org = OrganizationId(UUID(raw or settings.bots_organization_id))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"{ORG_HEADER} must be a UUID") from exc
+    if member is not None:
+        org = OrganizationId(member.organization_id)
+    else:
+        raw = request.headers.get(ORG_HEADER)
+        try:
+            org = OrganizationId(UUID(raw or settings.bots_organization_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"{ORG_HEADER} must be a UUID") from exc
     ready: set[str] = getattr(request.app.state, "bot_orgs_ready", set())
     if str(org) not in ready:
         await _manager(request).ensure_organization(org, settings.bots_organization_name)
@@ -140,10 +148,17 @@ async def _organization(request: Request) -> OrganizationId:
 
 
 async def _bot_or_404(request: Request, bot_id: UUID) -> BotRow:
+    """The bot, if it is in the caller's organization and theirs to see. Another
+    organization's bot, or a teammate's private one, is a 404 — not a 403 that would
+    confirm it exists."""
     try:
-        return await _manager(request).get(bot_id)
+        bot = await _manager(request).get(bot_id)
     except BotNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"no bot {bot_id}") from exc
+    org = await _organization(request)
+    if bot.organization_id != org or not can_see(await current_member(request), bot):
+        raise HTTPException(status_code=404, detail=f"no bot {bot_id}")
+    return bot
 
 
 # --- views ----------------------------------------------------------------------------
@@ -197,6 +212,8 @@ def _bot_view(
         "created_by": bot.created_by,
         "appearance": bot.appearance,
         "auto_review": bot.auto_review,
+        "owner_member_id": str(bot.owner_member_id) if bot.owner_member_id else None,
+        "visibility": bot.visibility,
         "created_at": bot.created_at.isoformat(),
         "updated_at": bot.updated_at.isoformat(),
         "last_message": _message_view(last) if last else None,
@@ -328,6 +345,8 @@ class UpdateBody(BaseModel):
     hidden: bool | None = None
     appearance: BotAppearance | None = None
     auto_review: bool | None = None
+    visibility: Literal["private", "team"] | None = None
+    """Share the bot (and its helpers) with every member, or make it private again."""
 
 
 class MemoryBody(BaseModel):
@@ -425,9 +444,10 @@ class InputBody(BaseModel):
 @router.get("")
 async def list_bots(request: Request) -> dict[str, Any]:
     org = await _organization(request)
+    member = await current_member(request)
     uow_factory = _uow(request)
     async with uow_factory() as uow:
-        bots = await uow.bots.list_for(org)
+        bots = [b for b in await uow.bots.list_for(org) if can_see(member, b)]
         last = await uow.bots.last_message_per_bot(org)
         counts = await uow.bots.memory_counts(org)
         statuses: dict[uuid.UUID, str] = {}
@@ -456,15 +476,23 @@ async def create_bot(body: CreateBody, request: Request) -> dict[str, Any]:
     with http_errors():
         fields = body.model_dump(exclude={"appearance", "brief"})
         appearance = body.appearance.model_dump() if body.appearance else None
-        bot = await _manager(request).create(org, **fields, brief=body.brief, appearance=appearance)
+        member = await current_member(request)
+        bot = await _manager(request).create(
+            org,
+            **fields,
+            brief=body.brief,
+            appearance=appearance,
+            owner_member_id=member.id if member else None,
+        )
     return _bot_view(bot)
 
 
 @router.get("/search")
 async def search(request: Request, q: str = Query(min_length=1, max_length=200)) -> dict[str, Any]:
     org = await _organization(request)
+    member = await current_member(request)
     async with _uow(request)() as uow:
-        bots = {b.id: b for b in await uow.bots.list_for(org)}
+        bots = {b.id: b for b in await uow.bots.list_for(org) if can_see(member, b)}
         hits = await uow.bots.search(org, q)
     needle = q.lower()
     matching_bots = [
@@ -492,8 +520,15 @@ async def update_bot(bot_id: UUID, body: UpdateBody, request: Request) -> dict[s
     `set_brief`, so a person's edit is a revision like any bot's."""
     await _bot_or_404(request, bot_id)
     manager = _manager(request)
-    fields = body.model_dump(exclude_none=True, exclude={"brief", "brief_locked", "brief_reason"})
+    fields = body.model_dump(
+        exclude_none=True, exclude={"brief", "brief_locked", "brief_reason", "visibility"}
+    )
     bot = await manager.update(bot_id, fields)
+    if body.visibility is not None:
+        try:
+            bot = await manager.share(bot_id, body.visibility)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.brief is not None or body.brief_locked is not None:
         bot = await manager.set_brief(
             bot_id,
@@ -575,8 +610,11 @@ async def clear_memories(bot_id: UUID, request: Request) -> dict[str, Any]:
 @router.post("/{bot_id}/duplicate", status_code=status.HTTP_201_CREATED)
 async def duplicate_bot(bot_id: UUID, request: Request) -> dict[str, Any]:
     await _bot_or_404(request, bot_id)
+    member = await current_member(request)
     with http_errors():
-        bot = await _manager(request).duplicate(bot_id)
+        bot = await _manager(request).duplicate(
+            bot_id, owner_member_id=member.id if member else None
+        )
     return _bot_view(bot)
 
 
@@ -650,17 +688,24 @@ async def send(bot_id: UUID, body: MessageBody, request: Request) -> dict[str, A
             }
         )
     payload: dict[str, Any] = {}
+    run_input: dict[str, Any] = {}
     if attached:
         payload["attachments"] = attached
     if body.voice:
         payload["voice"] = True
+        run_input["voice"] = True
+    member = await current_member(request)
+    if member is not None:
+        # Who said it: shown on a team bot's messages, and whose devices hear the answer.
+        payload["from"] = {"member_id": str(member.id), "name": member.shown}
+        run_input["member_id"] = str(member.id)
     with http_errors():
         sent = await _manager(request).send(
             bot_id,
             body.text.strip(),
             reply_to=body.reply_to,
             payload=payload or None,
-            run_input={"voice": True} if body.voice else None,
+            run_input=run_input or None,
         )
     return {
         "message_id": str(sent.message_id),
@@ -698,7 +743,14 @@ async def voice_call(bot_id: UUID, body: VoiceCallBody, request: Request) -> dic
 async def decide(
     bot_id: UUID, pending_id: UUID, body: DecisionBody, request: Request
 ) -> dict[str, Any]:
-    await _bot_or_404(request, bot_id)
+    bot = await _bot_or_404(request, bot_id)
+    if body.decision == "always" and not can_edit(await current_member(request), bot):
+        # "Always" writes an allow rule — a change to what the bot is, for everyone who
+        # uses it.
+        raise HTTPException(
+            status_code=403,
+            detail=f"{bot.name} is shared with you: allow it once, or ask its owner to add a rule",
+        )
     try:
         with http_errors():
             sent = await _manager(request).decide(bot_id, pending_id, body.decision)
@@ -760,17 +812,43 @@ async def cancel_credentials(bot_id: UUID, request_id: UUID, request: Request) -
     }
 
 
-@vault_router.get("")
-async def saved_logins(request: Request) -> dict[str, Any]:
+async def _vault_profile(request: Request, bot_id: UUID | None, *, editing: bool) -> str:
+    """Whose saved logins: a bot's profile (`?bot_id=`, someone who can see it; changing
+    a team bot's needs its owner or an admin), else the caller's own."""
+    member = await current_member(request)
+    if bot_id is not None:
+        bot = await _bot_or_404(request, bot_id)
+        if editing and not can_edit(member, bot):
+            raise HTTPException(
+                status_code=403, detail=f"only {bot.name}'s owner or an admin can change these"
+            )
+        return computer_profile(bot)
+    return f"m-{member.id.hex}" if member is not None else ""
+
+
+async def _own_entry(request: Request, entry_id: UUID, profile: str) -> None:
     org = await _organization(request)
     async with _uow(request)() as uow:
-        rows = await uow.vault.saved(org)
+        row = await uow.vault.get_entry(entry_id)
+    if row is None or row.organization_id != org or row.profile != profile:
+        raise HTTPException(status_code=404, detail=f"no saved login {entry_id}")
+
+
+@vault_router.get("")
+async def saved_logins(request: Request, bot_id: UUID | None = None) -> dict[str, Any]:
+    org = await _organization(request)
+    profile = await _vault_profile(request, bot_id, editing=False)
+    async with _uow(request)() as uow:
+        rows = await uow.vault.saved(org, profile)
     return {"entries": [_entry_view(e) for e in rows]}
 
 
 @vault_router.patch("/{entry_id}")
-async def edit_saved_login(entry_id: UUID, body: VaultPatch, request: Request) -> dict[str, Any]:
+async def edit_saved_login(
+    entry_id: UUID, body: VaultPatch, request: Request, bot_id: UUID | None = None
+) -> dict[str, Any]:
     org = await _organization(request)
+    await _own_entry(request, entry_id, await _vault_profile(request, bot_id, editing=True))
     async with _uow(request).transaction() as uow:
         found = await uow.vault.set_auto_use(org, entry_id, body.auto_use)
     if not found:
@@ -779,8 +857,11 @@ async def edit_saved_login(entry_id: UUID, body: VaultPatch, request: Request) -
 
 
 @vault_router.delete("/{entry_id}")
-async def delete_saved_login(entry_id: UUID, request: Request) -> dict[str, Any]:
+async def delete_saved_login(
+    entry_id: UUID, request: Request, bot_id: UUID | None = None
+) -> dict[str, Any]:
     org = await _organization(request)
+    await _own_entry(request, entry_id, await _vault_profile(request, bot_id, editing=True))
     async with _uow(request).transaction() as uow:
         found = await uow.vault.delete_entry(org, entry_id)
     if not found:
@@ -979,11 +1060,15 @@ async def _computer_call(
     json: dict[str, Any] | None = None,
     quiet: bool = False,
     timeout_s: float = 30.0,
+    profile: str | None = None,
 ) -> httpx.Response | None:
+    """`profile` is the bot's browser profile (`domain.members.computer_profile`), for a
+    call about a screen or a workspace."""
     base = _settings(request).computer_url.rstrip("/")
+    params = {"profile": profile} if profile is not None else None
     try:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
-            return await client.request(method, f"{base}{path}", json=json)
+            return await client.request(method, f"{base}{path}", json=json, params=params)
     except httpx.TransportError as exc:
         if quiet:
             return None
@@ -1008,9 +1093,12 @@ def _relay(response: httpx.Response | None) -> dict[str, Any]:
 
 @router.get("/{bot_id}/computer/screenshot")
 async def screenshot(bot_id: UUID, request: Request, quality: int = 60) -> Response:
-    await _bot_or_404(request, bot_id)
+    bot = await _bot_or_404(request, bot_id)
     response = await _computer_call(
-        request, "GET", f"/screens/{bot_id}/screenshot?quality={quality}"
+        request,
+        "GET",
+        f"/screens/{bot_id}/screenshot?quality={quality}",
+        profile=computer_profile(bot),
     )
     if response is None or response.status_code >= 400:
         raise HTTPException(status_code=503, detail="no screenshot available")
@@ -1030,7 +1118,11 @@ async def control(bot_id: UUID, body: ControlBody, request: Request) -> dict[str
     bot = await _bot_or_404(request, bot_id)
     result = _relay(
         await _computer_call(
-            request, "POST", f"/screens/{bot_id}/control", json={"controller": body.controller}
+            request,
+            "POST",
+            f"/screens/{bot_id}/control",
+            json={"controller": body.controller},
+            profile=computer_profile(bot),
         )
     )
     async with _uow(request).transaction() as uow:
@@ -1050,13 +1142,14 @@ async def control(bot_id: UUID, body: ControlBody, request: Request) -> dict[str
 
 @router.post("/{bot_id}/computer/input")
 async def human_input(bot_id: UUID, body: InputBody, request: Request) -> dict[str, Any]:
-    await _bot_or_404(request, bot_id)
+    bot = await _bot_or_404(request, bot_id)
     return _relay(
         await _computer_call(
             request,
             "POST",
             f"/screens/{bot_id}/input",
             json=body.model_dump(exclude_none=True),
+            profile=computer_profile(bot),
         )
     )
 
@@ -1067,14 +1160,28 @@ async def computer_status(request: Request) -> dict[str, Any]:
     screens = await _computer_call(request, "GET", "/screens", quiet=True, timeout_s=3.0)
     if health is None:
         return {"reachable": False, "url": _settings(request).computer_url}
+    listed = screens.json().get("screens", []) if screens is not None else []
+    member = await current_member(request)
+    if member is not None:
+        # A screen shows where a bot is; only the bots this member can see.
+        org = await _organization(request)
+        async with _uow(request)() as uow:
+            mine = {str(b.id) for b in await uow.bots.list_for(org) if can_see(member, b)}
+        listed = [s for s in listed if str(s.get("screen_id")) in mine]
     return {
         "reachable": True,
         "url": _settings(request).computer_url,
         **health.json(),
-        "screens": (screens.json().get("screens", []) if screens is not None else []),
+        "screens": listed,
     }
 
 
 @computer_router.post("/reset")
 async def computer_reset(request: Request) -> dict[str, Any]:
+    member = await current_member(request)
+    if member is not None and not member.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="recovering the computer restarts everyone's browser; ask an admin",
+        )
     return _relay(await _computer_call(request, "POST", "/reset", timeout_s=60.0))

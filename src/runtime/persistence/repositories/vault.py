@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 _ENTRY_COLUMNS = """
     id, organization_id, host, kind, bot_id, label, kinds, key_id, nonce, ciphertext,
-    auto_use, use_count, last_used_at, expires_at, created_at, updated_at
+    auto_use, use_count, last_used_at, expires_at, created_at, updated_at, profile
 """
 
 _REQUEST_COLUMNS = """
@@ -45,6 +45,9 @@ class VaultEntryRow:
     expires_at: dt.datetime | None
     created_at: dt.datetime
     updated_at: dt.datetime
+    profile: str = ""
+    """The browser profile whose saved login this is (migration 052): a member's, a
+    team bot's, or `""` without members. A bot only ever fills from its own."""
 
     def __repr__(self) -> str:
         return f"VaultEntryRow(id={self.id}, host={self.host!r}, kind={self.kind!r})"
@@ -85,6 +88,7 @@ def _entry(r: Any) -> VaultEntryRow:
         expires_at=r.expires_at,
         created_at=r.created_at,
         updated_at=r.updated_at,
+        profile=r.profile,
     )
 
 
@@ -126,18 +130,21 @@ class VaultRepository:
         nonce: bytes,
         ciphertext: bytes,
         expires_at: dt.datetime | None,
+        profile: str = "",
     ) -> None:
         await self._s.execute(
             text(
                 """
                 INSERT INTO vault_entries (id, organization_id, host, kind, bot_id, label,
-                                           kinds, key_id, nonce, ciphertext, expires_at)
+                                           kinds, key_id, nonce, ciphertext, expires_at,
+                                           profile)
                 VALUES (:id, :org, :host, :kind, :bot, :label, :kinds, :key_id, :nonce,
-                        :ct, :exp)
+                        :ct, :exp, :profile)
                 """
             ),
             {
                 "id": entry_id,
+                "profile": profile,
                 "org": organization_id,
                 "host": host,
                 "kind": kind,
@@ -192,37 +199,38 @@ class VaultRepository:
         return None if row is None else _entry(row)
 
     async def options(
-        self, organization_id: uuid.UUID, host: str, bot_id: uuid.UUID
+        self, organization_id: uuid.UUID, host: str, bot_id: uuid.UUID, profile: str = ""
     ) -> list[VaultEntryRow]:
-        """What could fill a form on `host` for this bot: the organization's saved
-        logins for the site, and this bot's unexpired one-time values. Newest first —
-        the login a person saved last is the one they meant."""
+        """What could fill a form on `host` for this bot: its profile's saved logins for
+        the site, and this bot's unexpired one-time values. Newest first — the login a
+        person saved last is the one they meant."""
         rows = (
             await self._s.execute(
                 text(
                     f"""
                     SELECT {_ENTRY_COLUMNS} FROM vault_entries
                      WHERE organization_id = :org AND host = :host
-                       AND (kind = 'saved' OR (bot_id = :bot AND expires_at > now()))
+                       AND ((kind = 'saved' AND profile = :profile)
+                            OR (bot_id = :bot AND expires_at > now()))
                      ORDER BY updated_at DESC
                     """
                 ),
-                {"org": organization_id, "host": host, "bot": bot_id},
+                {"org": organization_id, "host": host, "bot": bot_id, "profile": profile},
             )
         ).all()
         return [_entry(r) for r in rows]
 
-    async def saved(self, organization_id: uuid.UUID) -> list[VaultEntryRow]:
+    async def saved(self, organization_id: uuid.UUID, profile: str = "") -> list[VaultEntryRow]:
         rows = (
             await self._s.execute(
                 text(
                     f"""
                     SELECT {_ENTRY_COLUMNS} FROM vault_entries
-                     WHERE organization_id = :org AND kind = 'saved'
+                     WHERE organization_id = :org AND kind = 'saved' AND profile = :profile
                      ORDER BY host, updated_at DESC
                     """
                 ),
-                {"org": organization_id},
+                {"org": organization_id, "profile": profile},
             )
         ).all()
         return [_entry(r) for r in rows]

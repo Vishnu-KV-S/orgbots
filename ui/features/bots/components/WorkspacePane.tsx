@@ -25,15 +25,18 @@ function bytes(n: number): string {
  * This shell is always the sandbox. A bot runs a command on this machine only with your
  * approval, in its conversation; there is no button for it here.
  */
-export function WorkspacePane() {
+export function WorkspacePane({ botId }: { botId?: string } = {}) {
   const [path, setPath] = useState("/workspace");
-  const fetcher = useCallback((signal: AbortSignal) => listWorkspace(path, signal), [path]);
+  const fetcher = useCallback(
+    (signal: AbortSignal) => listWorkspace(path, signal, botId),
+    [path, botId],
+  );
   const listing = useResource(fetcher, { intervalMs: 5000 });
   const [command, setCommand] = useState("");
   const [history, setHistory] = useState<{ command: string; result: CommandResult }[]>([]);
   const picker = useRef<HTMLInputElement>(null);
 
-  const run = useAction((cmd: string) => runSandboxCommand(cmd), {
+  const run = useAction((cmd: string) => runSandboxCommand(cmd, 60, botId), {
     onDone: (result) => {
       setHistory((h) => [...h.slice(-19), { command, result }]);
       setCommand("");
@@ -42,7 +45,7 @@ export function WorkspacePane() {
   });
   const upload = useAction(
     async (files: File[]) => {
-      for (const f of files) await uploadToWorkspace(path, f);
+      for (const f of files) await uploadToWorkspace(path, f, botId);
       return files.length;
     },
     { onDone: listing.refresh },
@@ -97,7 +100,12 @@ export function WorkspacePane() {
               <span className="grow">{e.name}/</span>
             </button>
           ) : (
-            <a key={e.path} className="ws-row" href={workspaceFileUrl(e.path)} download={e.name}>
+            <a
+              key={e.path}
+              className="ws-row"
+              href={workspaceFileUrl(e.path, botId)}
+              download={e.name}
+            >
               <span className="ws-ico">{e.link ? "↪" : "·"}</span>
               <span className="grow">{e.name}</span>
               <span className="muted">{e.link ? "link" : bytes(e.bytes)}</span>

@@ -13,11 +13,12 @@ import { type NextRequest } from "next/server";
  *
  *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*,
  *                                /v1/vault*, /v1/skills*, /v1/marketplace*, /v1/groups*,
- *                                /v1/connectors*, /v1/push*, /v1/templates*,
- *                                /healthz
+ *                                /v1/connectors*, /v1/push*, /v1/templates*, /v1/auth*,
+ *                                /v1/members*, /healthz
  *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer*, /v1/vault*,
  *                                /v1/skills*, /v1/marketplace*, /v1/groups*,
- *                                /v1/connectors*, /v1/push*, /v1/templates* only
+ *                                /v1/connectors*, /v1/push*, /v1/templates*, /v1/auth*,
+ *                                /v1/members* only
  *
  * `/v1/observe` stays GET-only because it is read-only *by construction* — every
  * statement in `runtime/api/observe.py` is a SELECT — and a proxy that forwarded a
@@ -45,6 +46,13 @@ import { type NextRequest } from "next/server";
  * from it carries a value. A credential card's answer is a POST under `/v1/bots`,
  * and like every body it passes through here as text, unparsed and unlogged.
  *
+ * **Signing in.** With members (`RUNTIME_AUTH_MODE=members`) the runtime knows who is
+ * calling from the session cookie, so the cookie is forwarded — only it, not every
+ * cookie the browser holds for this origin — and a response's `Set-Cookie` and
+ * redirect come back untouched (single sign-on's callback is a redirect that sets the
+ * session). A write whose `Origin` is another site is refused here: the cookie is
+ * SameSite=Lax, and this is the second lock on the same door.
+ *
  * A method that is not one of the five is unroutable: Next only calls the
  * handlers a route file exports.
  */
@@ -61,7 +69,10 @@ const BOTS = [
   "v1/connectors",
   "v1/push",
   "v1/templates",
+  "v1/auth",
+  "v1/members",
 ];
+const SESSION_COOKIE = "aor_session";
 const READABLE = ["v1/observe/", "v1/control/", "healthz", ...BOTS];
 const WRITABLE = ["v1/control/", ...BOTS];
 
@@ -83,6 +94,11 @@ async function forward(request: NextRequest, target: string, allowed: string[]) 
   if (!permitted) {
     return refuse(target, request.method);
   }
+  const origin = request.headers.get("origin");
+  if (request.method !== "GET" && origin && origin !== request.nextUrl.origin) {
+    return Response.json({ detail: "refused: a write from another site" }, { status: 403 });
+  }
+  const session = request.cookies.get(SESSION_COOKIE)?.value;
 
   const url = `${UPSTREAM}/${target}${request.nextUrl.search}`;
   // The body is read as text and passed through rather than parsed: this proxy has
@@ -100,6 +116,8 @@ async function forward(request: NextRequest, target: string, allowed: string[]) 
         ...(request.headers.get("x-organization-id")
           ? { "x-organization-id": request.headers.get("x-organization-id") as string }
           : {}),
+        ...(session ? { cookie: `${SESSION_COOKIE}=${session}` } : {}),
+        "user-agent": request.headers.get("user-agent") ?? "",
         ...(hasBody
           ? { "content-type": request.headers.get("content-type") ?? "application/json" }
           : {}),
@@ -107,6 +125,7 @@ async function forward(request: NextRequest, target: string, allowed: string[]) 
       body,
       signal: request.signal,
       cache: "no-store",
+      redirect: "manual",
     });
   } catch (error) {
     // A dead runtime is the single most likely thing to be wrong, and "failed to
@@ -121,6 +140,9 @@ async function forward(request: NextRequest, target: string, allowed: string[]) 
   const contentType = upstream.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
   headers.set("cache-control", "no-store, no-transform");
+  for (const cookie of upstream.headers.getSetCookie()) headers.append("set-cookie", cookie);
+  const location = upstream.headers.get("location");
+  if (location) headers.set("location", location);
 
   return new Response(upstream.body, { status: upstream.status, headers });
 }

@@ -800,7 +800,7 @@ class _OneVault:
         self.values = values
         self.opened: list[tuple[Any, list[uuid.UUID], uuid.UUID]] = []
 
-    async def open(self, org: Any, entries: list[uuid.UUID], *, bot_id: uuid.UUID):  # type: ignore[no-untyped-def]
+    async def open(self, org: Any, entries: list[uuid.UUID], *, bot_id: uuid.UUID, profile: str = ""):  # type: ignore[no-untyped-def]  # noqa: E501
         self.opened.append((org, entries, bot_id))
         return "site.test", dict(self.values)
 

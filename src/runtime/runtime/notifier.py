@@ -54,7 +54,7 @@ class Notifier:
                 devices = (
                     []
                     if moment - note.created_at > STALE
-                    else await uow.push.subscriptions(note.organization_id)
+                    else await uow.push.subscriptions(note.organization_id, note.member_id)
                 )
             out.sent += 1
             payload = {

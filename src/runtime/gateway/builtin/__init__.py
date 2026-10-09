@@ -42,7 +42,7 @@ def build_registry(
     web_search.register(registry, resolved)
     publish_external.register(registry, resolved)
     browser.register(registry, resolved, uow_factory)
-    terminal.register(registry, resolved)
+    terminal.register(registry, resolved, uow_factory)
     connectors.register(registry, resolved, uow_factory)
     return registry
 

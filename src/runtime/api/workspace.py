@@ -9,6 +9,11 @@ reach this API, which has no authentication.
 
 Uploads are base64 JSON for the same reason as the drive's: the UI's proxy passes
 bodies through as text.
+
+**Whose workspace.** A bot's commands and downloads use its browser profile's workspace
+(`domain.members.computer_profile`), so `?bot_id=` picks that one — for anyone who can
+see the bot; writing to a team bot's needs its owner or an admin. Without it, the
+caller's own: theirs with members, the one shared workspace without.
 """
 
 from __future__ import annotations
@@ -17,11 +22,14 @@ import base64
 import binascii
 from typing import Any
 from urllib.parse import quote
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from runtime.api.bots import _computer_call, _relay
+from runtime.api.bots import _bot_or_404, _computer_call, _relay
+from runtime.api.identity import current_member
+from runtime.domain.members import can_edit, computer_profile
 
 router = APIRouter(prefix="/v1/computer", tags=["bots"])
 
@@ -39,16 +47,43 @@ class PutFile(BaseModel):
     data: str = Field(repr=False)
 
 
+async def _profile(request: Request, bot_id: UUID | None, *, writing: bool = False) -> str:
+    member = await current_member(request)
+    if bot_id is None:
+        return f"m-{member.id.hex}" if member is not None else ""
+    bot = await _bot_or_404(request, bot_id)
+    if writing and not can_edit(member, bot):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{bot.name} is shared with you; only its owner or an admin can change its "
+            "workspace",
+        )
+    return computer_profile(bot)
+
+
 @router.get("/workspace")
-async def workspace(request: Request, path: str = "/workspace") -> dict[str, Any]:
+async def workspace(
+    request: Request, path: str = "/workspace", bot_id: UUID | None = None
+) -> dict[str, Any]:
     return _relay(
-        await _computer_call(request, "GET", f"/workspace?path={_q(path)}", timeout_s=15.0)
+        await _computer_call(
+            request,
+            "GET",
+            f"/workspace?path={_q(path)}",
+            timeout_s=15.0,
+            profile=await _profile(request, bot_id),
+        )
     )
 
 
 @router.get("/workspace/file")
-async def workspace_file(request: Request, path: str) -> Response:
-    response = await _computer_call(request, "GET", f"/workspace/file?path={_q(path)}")
+async def workspace_file(request: Request, path: str, bot_id: UUID | None = None) -> Response:
+    response = await _computer_call(
+        request,
+        "GET",
+        f"/workspace/file?path={_q(path)}",
+        profile=await _profile(request, bot_id),
+    )
     if response is None or response.status_code >= 400:
         _relay(response)
     assert response is not None
@@ -65,30 +100,38 @@ async def workspace_file(request: Request, path: str) -> Response:
 
 
 @router.post("/workspace/file")
-async def put_workspace_file(body: PutFile, request: Request) -> dict[str, Any]:
+async def put_workspace_file(
+    body: PutFile, request: Request, bot_id: UUID | None = None
+) -> dict[str, Any]:
     try:
         base64.b64decode(body.data, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise HTTPException(status_code=422, detail="data is not base64") from exc
     return _relay(
         await _computer_call(
-            request, "POST", "/workspace/file", json={"path": body.path, "data": body.data}
+            request,
+            "POST",
+            "/workspace/file",
+            json={"path": body.path, "data": body.data},
+            profile=await _profile(request, bot_id, writing=True),
         )
     )
 
 
 @router.post("/terminal")
-async def run(body: CommandBody, request: Request) -> dict[str, Any]:
+async def run(body: CommandBody, request: Request, bot_id: UUID | None = None) -> dict[str, Any]:
+    profile = await _profile(request, bot_id, writing=True)
     return _relay(
         await _computer_call(
             request,
             "POST",
             "/terminal/run",
             json={
-                "screen_id": PERSON_SCREEN,
+                "screen_id": f"{PERSON_SCREEN}:{profile}" if profile else PERSON_SCREEN,
                 "command": body.command,
                 "timeout_s": body.timeout_s,
                 "local": False,
+                "profile": profile,
             },
             timeout_s=body.timeout_s + 15,
         )

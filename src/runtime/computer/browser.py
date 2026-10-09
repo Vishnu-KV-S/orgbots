@@ -1,7 +1,12 @@
 """The shared browser and its screens.
 
-One persistent Chromium context — so a login done once, by a person or by a bot, is a
-login every bot has — and one page per screen. A screen is keyed by the bot's id.
+A persistent Chromium context per **profile** — so a login done once, by a person or
+by a bot, is a login every bot in that profile has — and one page per screen. A screen
+is keyed by the bot's id. Without members there is one profile, `""`, in the profile
+directory; with members each member's bots share theirs and each team bot has its own
+(`domain.members.computer_profile`), in a sibling directory, so nobody's bot is signed
+in as somebody else. A screen asked for in a different profile than it has (its bot
+was shared, or made private) is closed and opened again in the new one.
 
 **Control is per screen and it is exclusive.** While a person holds a screen (to type a
 password, solve a CAPTCHA, finish a 2FA prompt) every bot action on it is refused with
@@ -120,10 +125,22 @@ class UnknownElementError(ComputerError):
     pass
 
 
+PROFILE = re.compile(r"^(|[mt]-[0-9a-f]{32})$")
+"""A profile key: `""`, a member's (`m-…`) or a team bot's (`t-…`). It becomes a
+directory name, so nothing else is accepted."""
+
+
+def check_profile(profile: str) -> str:
+    if not PROFILE.match(profile):
+        raise ComputerError(f"{profile!r} is not a browser profile")
+    return profile
+
+
 @dataclass
 class Screen:
     screen_id: str
     page: Page
+    profile: str = ""
     controller: str = "bot"
     """`bot` or `human`."""
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -181,28 +198,41 @@ class Computer:
         profile_dir: Path,
         *,
         headless: bool = True,
-        download_path: Callable[[str], Path] | None = None,
-        shown: Callable[[Path], str] | None = None,
+        download_path: Callable[[str, str], Path] | None = None,
+        shown: Callable[[Path, str], str] | None = None,
     ) -> None:
         self._profile_dir = profile_dir
         self._headless = headless
         self._download_path = download_path
-        self._shown = shown or str
+        self._shown = shown or (lambda path, profile: str(path))
         self._pw: Playwright | None = None
-        self._context: BrowserContext | None = None
+        self._contexts: dict[str, BrowserContext] = {}
         self._browser: Browser | None = None
         self._screens: dict[str, Screen] = {}
         self._start_lock = asyncio.Lock()
         self.started_at: float | None = None
 
+    def profile_path(self, profile: str) -> Path:
+        """The default profile is the profile directory; any other is a sibling of it."""
+        check_profile(profile)
+        if not profile:
+            return self._profile_dir
+        return self._profile_dir.with_name(f"{self._profile_dir.name}-{profile}")
+
     # --- lifecycle -------------------------------------------------------------------
 
     async def start(self) -> None:
+        await self._context_for("")
+
+    async def _context_for(self, profile: str) -> BrowserContext:
         async with self._start_lock:
-            if self._context is not None:
-                return
-            self._profile_dir.mkdir(parents=True, exist_ok=True)
-            self._pw = await async_playwright().start()
+            existing = self._contexts.get(profile)
+            if existing is not None:
+                return existing
+            path = self.profile_path(profile)
+            path.mkdir(parents=True, exist_ok=True)
+            if self._pw is None:
+                self._pw = await async_playwright().start()
             kwargs: dict[str, Any] = {
                 "headless": self._headless,
                 "viewport": VIEWPORT,
@@ -212,46 +242,56 @@ class Computer:
             executable = os.environ.get("COMPUTER_CHROMIUM_PATH")
             if executable:
                 kwargs["executable_path"] = executable
-            self._context = await self._pw.chromium.launch_persistent_context(
-                str(self._profile_dir), **kwargs
-            )
-            self._context.set_default_timeout(ACTION_TIMEOUT_MS)
-            self._context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
+            context = await self._pw.chromium.launch_persistent_context(str(path), **kwargs)
+            context.set_default_timeout(ACTION_TIMEOUT_MS)
+            context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
             # The persistent context opens with one blank page; it is nobody's screen.
-            self.started_at = time.time()
+            self._contexts[profile] = context
+            if self.started_at is None:
+                self.started_at = time.time()
+            return context
 
     async def stop(self) -> None:
         async with self._start_lock:
             self._screens.clear()
-            if self._context is not None:
-                await self._context.close()
-                self._context = None
+            for context in self._contexts.values():
+                with contextlib.suppress(PlaywrightError):
+                    await context.close()
+            self._contexts.clear()
             if self._pw is not None:
                 await self._pw.stop()
                 self._pw = None
+            self.started_at = None
 
     async def reset(self) -> None:
-        """Recover: restart the browser. Logins survive — they live in the profile."""
+        """Recover: restart the browser. Logins survive — they live in the profiles."""
         await self.stop()
         await self.start()
 
     @property
     def running(self) -> bool:
-        return self._context is not None
+        return bool(self._contexts)
+
+    @property
+    def profiles(self) -> list[str]:
+        return sorted(self._contexts)
 
     # --- screens ---------------------------------------------------------------------
 
-    async def screen(self, screen_id: str, *, label: str = "") -> Screen:
-        await self.start()
+    async def screen(self, screen_id: str, *, label: str = "", profile: str = "") -> Screen:
+        check_profile(profile)
         existing = self._screens.get(screen_id)
         if existing is not None and not existing.page.is_closed():
-            if label:
-                existing.label = label
-            return existing
-        assert self._context is not None
-        page = await self._context.new_page()
+            if existing.profile == profile:
+                if label:
+                    existing.label = label
+                return existing
+            # The bot was shared or made private: its screen moves to the new profile.
+            await self.close_screen(screen_id)
+        context = await self._context_for(profile)
+        page = await context.new_page()
         await page.goto(HOME_URL)
-        screen = Screen(screen_id=screen_id, page=page, label=label)
+        screen = Screen(screen_id=screen_id, page=page, profile=profile, label=label)
         if self._download_path is not None:
             page.on("download", lambda d: asyncio.ensure_future(self._save_download(screen, d)))
         self._screens[screen_id] = screen
@@ -263,11 +303,11 @@ class Computer:
         screen.downloading += 1
         entry: dict[str, Any] = {"name": str(download.suggested_filename), "seen": False}
         try:
-            target = self._download_path(download.suggested_filename or "download")
+            target = self._download_path(download.suggested_filename or "download", screen.profile)
             await download.save_as(str(target))
             entry.update(
                 name=target.name,
-                path=self._shown(target),
+                path=self._shown(target, screen.profile),
                 bytes=target.stat().st_size,
                 url=str(download.url).split("?", 1)[0][:300],
             )

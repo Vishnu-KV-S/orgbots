@@ -64,7 +64,7 @@ export function ComputerPane({ bot }: { bot: Bot }) {
           Workspace &amp; terminal
         </button>
       </div>
-      {view === "screen" ? <Screen bot={bot} /> : <WorkspacePane />}
+      {view === "screen" ? <Screen bot={bot} /> : <WorkspacePane botId={bot.id} />}
     </div>
   );
 }
