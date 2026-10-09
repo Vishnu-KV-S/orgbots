@@ -924,3 +924,79 @@ export const reactInGroup = (id: string, messageId: string, emoji: string, on: b
     json("POST", { emoji, on }),
   );
 
+// --- connectors (MCP apps) ---------------------------------------------------------------
+
+export const CONNECTORS_BASE = "/rt/v1/connectors";
+
+export interface ConnectorTool {
+  name: string;
+  description: string;
+  read_only: boolean;
+}
+
+export interface Connector {
+  id: string;
+  /** What a bot writes in `connector`. */
+  name: string;
+  title: string;
+  url: string;
+  auth_kind: "none" | "bearer" | "header";
+  header_name: string;
+  /** Whether a token is stored — never the token. */
+  has_token: boolean;
+  server_name: string;
+  status: "ok" | "error";
+  last_error: string;
+  enabled: boolean;
+  catalog_key: string | null;
+  tools: ConnectorTool[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketConnector {
+  key: string;
+  title: string;
+  category: string;
+  blurb: string;
+  url: string;
+  auth_kind: "none" | "bearer" | "header";
+  key_help: string;
+  needs_token: boolean;
+  takes_token: boolean;
+  /** This runtime has been connected to it, rather than only documented by its vendor. */
+  checked: boolean;
+  installed: boolean;
+}
+
+export const listConnectors = (signal?: AbortSignal) =>
+  request<{ connectors: Connector[] }>(CONNECTORS_BASE, { signal });
+
+export const addConnector = (fields: {
+  title: string;
+  url: string;
+  auth_kind: Connector["auth_kind"];
+  header_name?: string;
+  token?: string;
+}) => request<Connector>(CONNECTORS_BASE, json("POST", fields));
+
+export const updateConnector = (
+  id: string,
+  fields: { title?: string; enabled?: boolean; token?: string },
+) => request<Connector>(`${CONNECTORS_BASE}/${id}`, json("PATCH", fields));
+
+export const refreshConnector = (id: string) =>
+  request<Connector>(`${CONNECTORS_BASE}/${id}/refresh`, json("POST", {}));
+
+export const deleteConnector = (id: string) =>
+  request<{ deleted: string }>(`${CONNECTORS_BASE}/${id}`, { method: "DELETE" });
+
+export const listMarketConnectors = (signal?: AbortSignal) =>
+  request<{ connectors: MarketConnector[] }>(`${MARKETPLACE_BASE}/connectors`, { signal });
+
+export const installConnector = (key: string, token?: string) =>
+  request<Connector>(
+    `${MARKETPLACE_BASE}/connectors/${key}`,
+    json("POST", token ? { token } : {}),
+  );
+

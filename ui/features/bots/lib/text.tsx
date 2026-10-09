@@ -146,6 +146,8 @@ export function describeAction(action: BotAction | undefined): string {
       return `Move ${action.path ?? "a file"} to ${action.to ?? ""}`;
     case "delete_file":
       return `Delete ${action.path ?? "a file"}`;
+    case "use_connector":
+      return `Use ${action.text ?? "a connected app"}`;
     case "review":
       return `Auto Review: ${
         action.verdict === "allow" ? "allowed" : action.verdict === "deny" ? "refused" : "asked you"
@@ -200,6 +202,7 @@ export const ACTION_ICON: Record<string, string> = {
   move_file: "⇢",
   delete_file: "✕",
   review: "⛨",
+  use_connector: "⧉",
   run_command: "❯",
   copy_file: "⧉",
   save_skill: "✦",

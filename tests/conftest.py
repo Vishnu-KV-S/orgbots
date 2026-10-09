@@ -47,6 +47,7 @@ _TRUNCATE_ORDER = [
     "bot_recordings",
     "bot_skills",
     # Groups, wakes and reactions (047): wakes and reactions reference no organization.
+    "bot_connectors",
     "bot_reactions",
     "bot_wakes",
     "bot_group_messages",

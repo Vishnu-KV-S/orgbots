@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -165,6 +165,7 @@ StepAction = Literal[
     "run_command",
     "copy_file",
     "message_bot",
+    "use_connector",
 ]
 
 
@@ -238,7 +239,10 @@ class BotStep(BaseModel):
         "TEAMMATES: message_bot sends another of your person's bots a message without "
         "waiting (bot = its name, text = the message with every fact it needs); its answer "
         "comes back to you later as a message. handoff = true gives it the task to own "
-        "instead: it reports to your person and nothing comes back."
+        "instead: it reports to your person and nothing comes back. APPS: use_connector "
+        "calls a tool of an app your person connected (connector = its name, tool = the "
+        "tool, args = the tool's arguments as an object); prefer it to the browser for "
+        "those apps."
     )
     element: int | None = Field(
         default=None,
@@ -332,6 +336,16 @@ class BotStep(BaseModel):
     timeout: int | None = Field(
         default=None, ge=1, le=300, description="For run_command: seconds before it is stopped."
     )
+    connector: str | None = Field(
+        default=None, max_length=40, description="For use_connector: the connected app's name."
+    )
+    tool: str | None = Field(
+        default=None, max_length=200, description="For use_connector: the tool to call."
+    )
+    args: dict[str, Any] | None = Field(
+        default=None,
+        description="For use_connector: the tool's arguments, as the tool lists them.",
+    )
     handoff: bool = Field(
         default=False,
         description="For message_bot: hand the task over — the other bot owns it from now "
@@ -396,6 +410,10 @@ class BotStep(BaseModel):
             raise ValueError("copy_file needs `path` (the source) and `to` (the destination)")
         if self.action in SKILL_ACTIONS and self.skill is None:
             raise ValueError(f"{self.action} needs `skill` — at least its name")
+        if self.action == "use_connector" and not (
+            (self.connector or "").strip() and (self.tool or "").strip()
+        ):
+            raise ValueError("use_connector needs `connector` and `tool`")
         if self.action == "message_bot":
             if not (self.bot or "").strip():
                 raise ValueError("message_bot needs `bot` — the other bot's name")
@@ -434,17 +452,18 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=9)
-"""Version 9 added `message_bot` (with `handoff`). Version 8 added the terminal
-(`run_command` with `timeout` and `local`, `copy_file`). Version 7 let `look` take a
-`path` (an image in the team drive). Version 6 added skills (`save_skill`, `use_skill`,
-with `skill`). Version 5 added routines (`save_routine`, `delete_routine`, with
-`routine`). Version 4 added the team drive (`list_files` … `delete_file`, with `path`,
-`to`, `find` and `from_line`) and `look` (vision: a question about the screen). Version
-3 added working memory (`plan` and `notes`, carried from step to step within a turn) and
-`sign_in` (the login vault). Version 2 added memory (remember kinds, forget, recall,
-diary) and the brief (update_brief, create_bot's brief and seed memories). Version 1 was
-never run against stored data, so it is not kept."""
+BOT_STEP = SCHEMAS.register(BotStep, version=10)
+"""Version 10 added `use_connector` (with `connector`, `tool` and `args`). Version 9 added
+`message_bot` (with `handoff`). Version 8 added the terminal (`run_command` with
+`timeout` and `local`, `copy_file`). Version 7 let `look` take a `path` (an image in the
+team drive). Version 6 added skills (`save_skill`, `use_skill`, with `skill`). Version 5
+added routines (`save_routine`, `delete_routine`, with `routine`). Version 4 added the
+team drive (`list_files` … `delete_file`, with `path`, `to`, `find` and `from_line`) and
+`look` (vision: a question about the screen). Version 3 added working memory (`plan` and
+`notes`, carried from step to step within a turn) and `sign_in` (the login vault).
+Version 2 added memory (remember kinds, forget, recall, diary) and the brief
+(update_brief, create_bot's brief and seed memories). Version 1 was never run against
+stored data, so it is not kept."""
 
 
 # --- appearance -------------------------------------------------------------------------
@@ -532,6 +551,7 @@ def needs_approval(
     page_url: str,
     element: dict[str, object] | None,
     rules: tuple[BotRule, ...],
+    read_only: bool = False,
 ) -> GateDecision:
     """Should this step wait for a person — or not happen at all?
 
@@ -544,6 +564,23 @@ def needs_approval(
     machine) — two rule kinds, because "always allow in the sandbox" must never be read
     as "always allow on my laptop".
     """
+    if step.action == "use_connector":
+        # A connected app's tool: rules are keyed by the connector's name, like a site.
+        app = (step.connector or "").strip().lower()
+        for decision in ("deny", "ask", "allow"):
+            for rule in rules:
+                if rule.decision == decision and rule.matches("use_connector", app):
+                    if decision == "allow":
+                        return GateDecision(False, "allowed by your rule")
+                    verb = "never use" if decision == "deny" else "ask before using"
+                    return GateDecision(
+                        decision == "ask", f"your rule: {verb} {app}", deny=decision == "deny"
+                    )
+        if not read_only:
+            return GateDecision(True, f"this {app} tool may change things there")
+        if step.sensitive:
+            return GateDecision(True, "the bot marked this call as having real consequences")
+        return GateDecision(False, "a read-only tool")
     if step.action == "run_command":
         kind = "run_local" if step.local else "run_command"
         for decision, reason in (("deny", "never"), ("ask", "ask before"), ("allow", "")):

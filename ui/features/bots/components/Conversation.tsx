@@ -24,7 +24,7 @@ const STARTERS = [
   "Look up the opening hours of the nearest public library.",
 ];
 
-export type Pane = "computer" | "files" | "skills" | "details" | null;
+export type Pane = "computer" | "files" | "skills" | "apps" | "details" | null;
 
 export function Conversation({
   bot,
@@ -160,6 +160,14 @@ export function Conversation({
           title="How-tos every bot can follow"
         >
           ✦ <span className="tab-label">Skills</span>
+        </button>
+        <button
+          type="button"
+          className={cx("tab", pane === "apps" && "on")}
+          onClick={() => onPane(pane === "apps" ? null : "apps")}
+          title="Apps every bot can call directly"
+        >
+          ⧉ <span className="tab-label">Apps</span>
         </button>
         <button
           type="button"

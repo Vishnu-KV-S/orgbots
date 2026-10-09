@@ -1,9 +1,15 @@
-"""The marketplace — packaged skills a person can install into their library.
+"""The marketplace — packaged skills, and connectors to well-known apps.
 
 Shipped with the runtime as data, not fetched: a catalog that came from the network
 would be instructions every bot follows, written by whoever controls that network.
 Installing copies the skill into the organization's library as a `ready` skill the
 person can then read and change like any other; nothing here runs on its own.
+
+**Connectors** are remote MCP servers the vendors run (`domain.connectors`). Each entry
+is the server's address and how it authenticates — none, or a token the person pastes
+when installing. Servers that only accept an OAuth sign-in are not listed: the runtime
+speaks tokens, not OAuth flows, yet. `checked` marks an entry this runtime has been
+connected to; the others are as their vendors document them.
 """
 
 from __future__ import annotations
@@ -111,8 +117,7 @@ SKILLS: tuple[CatalogSkill, ...] = (
         steps=[
             "Read /shopping/watch.csv (link, target price, last price).",
             "Open each link and read the current price and availability.",
-            "Update the last price column and append a dated line to "
-            "/shopping/price-history.csv.",
+            "Update the last price column and append a dated line to /shopping/price-history.csv.",
         ],
         checks="The price read is the item's own price, not a bundle or a related item.",
         output="Only the items at or below their target, with links; otherwise one line.",
@@ -175,3 +180,94 @@ SKILLS: tuple[CatalogSkill, ...] = (
 
 def catalog_skill(key: str) -> CatalogSkill | None:
     return next((s for s in SKILLS if s.key == key), None)
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogConnector:
+    key: str
+    title: str
+    category: str
+    blurb: str
+    url: str
+    auth_kind: str = "none"
+    header_name: str = ""
+    key_help: str = ""
+    """What to paste, and where to get it, for a server that needs a token."""
+    optional_token: bool = False
+    checked: bool = False
+
+
+CONNECTORS: tuple[CatalogConnector, ...] = (
+    CatalogConnector(
+        "deepwiki",
+        "DeepWiki",
+        "Developer",
+        "Ask questions about any public GitHub repository's code and docs.",
+        "https://mcp.deepwiki.com/mcp",
+        checked=True,
+    ),
+    CatalogConnector(
+        "context7",
+        "Context7",
+        "Developer",
+        "Up-to-date documentation and code examples for libraries.",
+        "https://mcp.context7.com/mcp",
+        auth_kind="header",
+        header_name="CONTEXT7_API_KEY",
+        key_help="Optional: an API key from context7.com for higher limits.",
+        optional_token=True,
+    ),
+    CatalogConnector(
+        "github",
+        "GitHub",
+        "Developer",
+        "Issues, pull requests, code search and repositories.",
+        "https://api.githubcopilot.com/mcp/",
+        auth_kind="bearer",
+        key_help="A GitHub personal access token (Settings → Developer settings).",
+    ),
+    CatalogConnector(
+        "huggingface",
+        "Hugging Face",
+        "AI",
+        "Search models, datasets, Spaces and papers.",
+        "https://huggingface.co/mcp",
+        auth_kind="bearer",
+        key_help="Optional: a Hugging Face access token.",
+        optional_token=True,
+    ),
+    CatalogConnector(
+        "stripe",
+        "Stripe",
+        "Finance",
+        "Customers, payments, invoices and the Stripe docs.",
+        "https://mcp.stripe.com",
+        auth_kind="bearer",
+        key_help="A Stripe restricted API key (rk_…), scoped to what bots may touch.",
+    ),
+    CatalogConnector(
+        "cloudflare-docs",
+        "Cloudflare Docs",
+        "Developer",
+        "Search Cloudflare's documentation.",
+        "https://docs.mcp.cloudflare.com/mcp",
+    ),
+    CatalogConnector(
+        "microsoft-learn",
+        "Microsoft Learn",
+        "Developer",
+        "Search Microsoft's official documentation.",
+        "https://learn.microsoft.com/api/mcp",
+    ),
+    CatalogConnector(
+        "exa",
+        "Exa",
+        "Research",
+        "Web search and page contents, built for agents.",
+        "https://mcp.exa.ai/mcp",
+    ),
+)
+
+
+def catalog_connector(key: str) -> CatalogConnector | None:
+    return next((c for c in CONNECTORS if c.key == key), None)

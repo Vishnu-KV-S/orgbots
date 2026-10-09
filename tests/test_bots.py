@@ -45,6 +45,7 @@ from runtime.gateway.models import ModelResponse
 from runtime.graphs.registry import GRAPH_KEY, get_graph
 from runtime.org.bots import (
     BROWSER_TOOLS,
+    CONNECTOR_TOOLS,
     TERMINAL_TOOLS,
     BriefChange,
     BriefLockedError,
@@ -107,8 +108,8 @@ def test_actor_spec_is_narrow() -> None:
     name = actor_name_for("Sales Scout!", "3f9a")
     assert name == "bot-sales-scout-3f9a"
     spec = bot_actor_spec(name)
-    # The browser's two tools and the terminal's three, and nothing else.
-    assert spec.allowed_tools == BROWSER_TOOLS | TERMINAL_TOOLS
+    # The browser's two tools, the terminal's three, connector calls, and nothing else.
+    assert spec.allowed_tools == BROWSER_TOOLS | TERMINAL_TOOLS | CONNECTOR_TOOLS
     assert spec.graph_ref == "bot_agent@1"
     assert all(p.provider == "deepseek" for p in spec.model_profiles.profiles.values())
 
@@ -405,6 +406,16 @@ class NoGroups:
         return None
 
 
+class NoConnectors:
+    """An organization with no apps connected (`tests/test_bot_connectors.py` has some)."""
+
+    async def usable(self, organization_id: Any) -> list[Any]:
+        return []
+
+    async def for_prompt(self, organization_id: Any) -> list[Any]:
+        return []
+
+
 @dataclass
 class _Org:
     bots: FakeBots
@@ -412,6 +423,7 @@ class _Org:
     routines: Any = field(default_factory=NoRoutines)
     skills: Any = field(default_factory=NoSkills)
     groups: Any = field(default_factory=NoGroups)
+    connectors: Any = field(default_factory=NoConnectors)
 
 
 @dataclass

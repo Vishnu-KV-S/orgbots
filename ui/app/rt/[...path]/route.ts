@@ -13,9 +13,10 @@ import { type NextRequest } from "next/server";
  *
  *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*,
  *                                /v1/vault*, /v1/skills*, /v1/marketplace*, /v1/groups*,
- *                                /healthz
+ *                                /v1/connectors*, /healthz
  *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer*, /v1/vault*,
- *                                /v1/skills*, /v1/marketplace*, /v1/groups* only
+ *                                /v1/skills*, /v1/marketplace*, /v1/groups*,
+ *                                /v1/connectors* only
  *
  * `/v1/observe` stays GET-only because it is read-only *by construction* — every
  * statement in `runtime/api/observe.py` is a SELECT — and a proxy that forwarded a
@@ -36,6 +37,8 @@ import { type NextRequest } from "next/server";
  *
  * `/v1/skills` and `/v1/marketplace` are the organization's library of how-tos that
  * every bot reads; writing one changes what bots are told, never what they may do.
+ * `/v1/connectors` are the apps (MCP servers) bots may call; no response carries a
+ * connector's token, only whether one is set.
  *
  * `/v1/vault` lists saved logins by site and hint and can delete one; no response
  * from it carries a value. A credential card's answer is a POST under `/v1/bots`,
@@ -54,6 +57,7 @@ const BOTS = [
   "v1/skills",
   "v1/marketplace",
   "v1/groups",
+  "v1/connectors",
 ];
 const READABLE = ["v1/observe/", "v1/control/", "healthz", ...BOTS];
 const WRITABLE = ["v1/control/", ...BOTS];

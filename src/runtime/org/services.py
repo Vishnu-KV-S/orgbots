@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from runtime.artifacts.store import ArtifactStore
 from runtime.org.approvals import ApprovalService
 from runtime.org.bots import BotService
+from runtime.org.connectors import ConnectorService
 from runtime.org.evaluation import EvaluationService
 from runtime.org.files import TeamDrive
 from runtime.org.goals import GoalService
@@ -44,6 +45,7 @@ class OrgServices:
     routines: RoutineService
     skills: SkillService
     groups: GroupService
+    connectors: ConnectorService
 
 
 def build_org_services(
@@ -74,4 +76,5 @@ def build_org_services(
         routines=RoutineService(uow_factory),
         skills=SkillService(uow_factory),
         groups=GroupService(uow_factory),
+        connectors=ConnectorService(uow_factory),
     )
