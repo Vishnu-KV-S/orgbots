@@ -63,6 +63,7 @@ from runtime.persistence.repositories.tasks import EvaluationRepository, TaskRep
 from runtime.persistence.repositories.templates import TemplateShareRepository
 from runtime.persistence.repositories.triggers import TriggerRepository
 from runtime.persistence.repositories.vault import VaultRepository
+from runtime.persistence.repositories.x import XRepository
 from runtime.settings import Settings
 
 
@@ -156,6 +157,7 @@ class UnitOfWork:
         self.org_audit = OrgAuditRepository(session)
         self.scim = ScimRepository(session)
         self.otel = OtelRepository(session)
+        self.x = XRepository(session)
 
     async def commit(self) -> None:
         await self.session.commit()

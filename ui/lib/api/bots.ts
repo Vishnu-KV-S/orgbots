@@ -1306,3 +1306,40 @@ export const auditEvents = (action = "", signal?: AbortSignal) =>
   request<{ events: AuditEvent[] }>(`${ADMIN_BASE}/audit?action=${encodeURIComponent(action)}`, {
     signal,
   });
+
+// --- tag @bot on X ------------------------------------------------------------------------
+
+export const X_BASE = "/rt/v1/x";
+
+export interface XStatus {
+  account: string | null;
+  link: { handle: string; bot_id: string | null } | null;
+  admin?: {
+    enabled: boolean;
+    can_reply: boolean;
+    last_error: string;
+    last_polled_at: string | null;
+    recent: { post_id: string; author: string; outcome: string; note: string; at: string }[];
+  };
+}
+
+export const xStatus = (signal?: AbortSignal) => request<XStatus>(X_BASE, { signal });
+
+export const connectX = (account: {
+  handle: string;
+  read_token?: string;
+  post_token?: string;
+  clear_post?: boolean;
+  enabled?: boolean;
+}) => request<{ account: string; can_reply: boolean }>(`${X_BASE}/account`, json("PUT", account));
+
+export const disconnectX = () =>
+  request<{ account: null }>(`${X_BASE}/account`, { method: "DELETE" });
+
+export const xLinkCode = () =>
+  request<{ code: string; post: string; account: string }>(`${X_BASE}/link/code`, json("POST", {}));
+
+export const xChooseBot = (botId: string) =>
+  request<{ bot_id: string }>(`${X_BASE}/link`, json("PATCH", { bot_id: botId }));
+
+export const xUnlink = () => request<{ link: null }>(`${X_BASE}/link`, { method: "DELETE" });

@@ -62,6 +62,7 @@ from runtime.api.skills import router as skills_router
 from runtime.api.templates import router as templates_bots_router
 from runtime.api.templates import templates_router
 from runtime.api.workspace import router as workspace_router
+from runtime.api.x import router as x_router
 from runtime.domain.ids import OrganizationId, RunId, SessionId
 from runtime.domain.specs import StartRunRequest
 from runtime.events.stream import RedisStreams
@@ -135,6 +136,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(members_router, dependencies=signed_in)
     # The organization's policies, secrets, provisioning, telemetry and audit trail.
     app.include_router(admin_router, dependencies=signed_in)
+    # Tag @bot on X: the organization's account, and each person's link to theirs.
+    app.include_router(x_router, dependencies=signed_in)
 
     # Read-only. Mounted here rather than kept in a second process so that the
     # viewer reads through the same session factory and the same connection pool

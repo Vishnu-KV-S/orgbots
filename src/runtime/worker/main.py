@@ -89,6 +89,7 @@ from runtime.runtime.scheduler import Scheduler
 from runtime.runtime.sweeper import GovernanceSweeper
 from runtime.runtime.telemetry import TelemetryExporter
 from runtime.runtime.wakes import WakeRunner
+from runtime.runtime.x_tags import XPoller, XService
 from runtime.settings import get_settings
 from runtime.worker.lease import Reaper
 from runtime.worker.worker import Worker
@@ -123,6 +124,7 @@ async def run() -> None:
     wakes: WakeRunner | None = None
     notifier: Notifier | None = None
     telemetry: TelemetryExporter | None = None
+    x_tags: XPoller | None = None
     if settings.conductor_enabled:
         service = RunService(uow, settings=settings)
         if settings.scheduler_enabled:
@@ -138,6 +140,8 @@ async def run() -> None:
         # Each organization's audit trail and tool calls to its own collector, when an
         # admin set one up (`runtime.runtime.telemetry`).
         telemetry = TelemetryExporter(uow, settings)
+        # Tags of the organization's X account from linked people → their bots' tasks.
+        x_tags = XPoller(uow, BotManager(uow, service), XService(uow, settings))
 
     async with checkpointer(settings) as saver:
         worker = Worker(uow, streams, settings=settings, checkpointer=saver)
@@ -186,6 +190,8 @@ async def run() -> None:
                 notifier.stop()
             if telemetry is not None:
                 telemetry.stop()
+            if x_tags is not None:
+                x_tags.stop()
             if memory_worker is not None:
                 memory_worker.stop()
 
@@ -223,6 +229,8 @@ async def run() -> None:
             tasks.append(asyncio.create_task(notifier.run_forever(), name="notifier"))
         if telemetry is not None:
             tasks.append(asyncio.create_task(telemetry.run_forever(), name="telemetry"))
+        if x_tags is not None:
+            tasks.append(asyncio.create_task(x_tags.run_forever(), name="x-tags"))
         if memory_worker is not None:
             tasks.append(asyncio.create_task(memory_worker.run_forever(), name="memory"))
         await stopping.wait()

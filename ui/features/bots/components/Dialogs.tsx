@@ -18,11 +18,13 @@ import { useAction } from "@/lib/hooks/useAction";
 import { useResource } from "@/lib/hooks/useResource";
 import { cx } from "@/lib/cx";
 import { Designer, randomAppearance } from "../avatar";
+import { useMe } from "../lib/me";
 import { type PushState, disablePush, enablePush, pushState } from "../lib/push";
 import { TEMPLATES } from "../lib/templates";
 import { Avatar } from "./Avatar";
 import { BriefFields } from "./BriefEditor";
 import { TemplateReview, readTemplateFile } from "./Sharing";
+import { XSetting } from "./XSetting";
 
 export function Modal({
   title,
@@ -398,6 +400,7 @@ export function SettingsDialog({
   const [theme, setTheme] = useState<Theme>(() => readSetting("theme", "system") as Theme);
   const [notify, setNotify] = useState(() => readSetting("notify", "off") === "on");
   const reset = useAction(() => resetComputer());
+  const me = useMe();
 
   return (
     <Modal title="Settings" onClose={onClose}>
@@ -452,6 +455,11 @@ export function SettingsDialog({
       </section>
 
       <section className="dsec">
+        <h3>Tag on X</h3>
+        <XSetting />
+      </section>
+
+      <section className="dsec">
         <h3>Cloud computer</h3>
         <dl className="kv">
           <dt>Status</dt>
@@ -462,8 +470,9 @@ export function SettingsDialog({
           <dd>{computer?.screens?.length ?? 0} open</dd>
         </dl>
         <p className="screen-help">
-          All your bots share one cloud computer — the same browser profile, sign-ins and cookies —
-          and each has its own screen. Recover restarts the browser; sign-ins survive.
+          {me
+            ? "Your bots share your own browser profile — your sign-ins and cookies, nobody else's — and a bot shared with the team has its own. Each bot has its own screen. Recover restarts everyone's browser (an admin's job); sign-ins survive."
+            : "All your bots share one cloud computer — the same browser profile, sign-ins and cookies — and each has its own screen. Recover restarts the browser; sign-ins survive."}
         </p>
         {reset.error && <ErrorNotice>{reset.error}</ErrorNotice>}
         <div className="control-row">
