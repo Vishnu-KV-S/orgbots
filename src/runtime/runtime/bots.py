@@ -185,7 +185,9 @@ class BotManager:
         )
         async with self._uow.transaction() as uow:
             await uow.bots.copy_rules(source.id, copy.id)
-        return copy
+            if source.auto_review:
+                await uow.bots.update(copy.id, {"auto_review": True})
+        return await self.get(copy.id)
 
     async def update(self, bot_id: uuid.UUID, fields: dict[str, Any]) -> BotRow:
         await self.get(bot_id)

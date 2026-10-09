@@ -39,6 +39,11 @@ names with @ are woken to pick their part up. **A turn another bot's message sta
 (`input.wake_id`) answers that bot: the reply is relayed back — unless the message
 handed the task over, in which case the bot owns it and answers its person.
 
+**Auto Review** (`review.py`, when the bot has it on) puts a risky step to a second
+model before it happens: after the person's rules, before the action. "Never" and "ask
+first" rules decide without it; an "always allow" rule lets a step through only if the
+reviewer has no concerns.
+
 **A turn a routine started is the routine's message, answered** (`input.routine_id`).
 It may not create routines — only the person's own word in the conversation can — and
 a drafts-only routine (or a test run) parks every consequential step whatever the
@@ -89,6 +94,7 @@ from runtime.domain.bots import (
     ROUTINE_ACTIONS,
     SKILL_ACTIONS,
     BotStep,
+    GateDecision,
     host_of,
     is_secret_field,
     masked,
@@ -98,12 +104,14 @@ from runtime.domain.delegation import ChildContext, TaskSpec
 from runtime.domain.enums import WorkClass
 from runtime.domain.errors import DelegationDisabled, DelegationRefused, OutputSchemaViolation
 from runtime.domain.files import RECENT_IN_PROMPT, render_attachments, render_drive, team_of
+from runtime.domain.review import review_kind
 from runtime.domain.routines import RoutineError
 from runtime.domain.skills import SkillError, render_index, render_skill
 from runtime.gateway.tools import ToolCall
 from runtime.graphs.bot_agent.attachments import look_at_file
 from runtime.graphs.bot_agent.files import file_step
 from runtime.graphs.bot_agent.look import look
+from runtime.graphs.bot_agent.review import auto_review, wants_review
 from runtime.graphs.bot_agent.signin import resume as resume_credentials
 from runtime.graphs.bot_agent.signin import sign_in
 from runtime.graphs.bot_agent.terminal import copy_file, run_command
@@ -848,6 +856,29 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
             )
             return _end({"status": "replied", "steps": n, "kind": step.action, "reply": text})
 
+        if wants_review(bot) and step.action in _HELD_NOT_PARKED:
+            risky = review_kind(step)
+            if risky is not None:
+                verdict = await auto_review(
+                    node,
+                    kind=risky,
+                    action=_step_text(step),
+                    thought=step.thought,
+                    request=_latest_request(conversation),
+                    plan=plan,
+                    steps=steps,
+                    say=say,
+                )
+                if verdict.verdict != "allow":
+                    return _ok(
+                        steps,
+                        None,
+                        n,
+                        f"Auto Review {'refused' if verdict.verdict == 'deny' else 'held'} "
+                        f"{step.action}: {verdict.reason} — if it is still right, ask your "
+                        "person with ask_user first",
+                    )
+
         if step.action == "create_bot":
             name = (step.bot or "").strip()
             try:
@@ -994,6 +1025,19 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
                 "host": "",
             }
             gate = needs_approval(step, page_url="", element=None, rules=await bots.rules(bot_id))
+            if not gate.ask and not gate.deny and wants_review(bot):
+                verdict = await auto_review(
+                    node,
+                    kind=review_kind(step) or "a command",
+                    action=command["command"],
+                    thought=step.thought,
+                    request=_latest_request(conversation),
+                    plan=plan,
+                    steps=steps,
+                    say=say,
+                    where="your person's own computer" if step.local else "the sandbox",
+                )
+                gate = _with_review(gate, verdict)
             if gate.deny:
                 await say(
                     "run_command",
@@ -1086,6 +1130,21 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
             element=element,
             rules=rules,
         )
+        risky = review_kind(step, element) if wants_review(bot) else None
+        if risky is not None and not gate.ask and not gate.deny:
+            label = f" on “{element.get('label', '')}”" if element else ""
+            verdict = await auto_review(
+                node,
+                kind=risky,
+                action=f"{_describe(masked(action))}{label}",
+                thought=step.thought,
+                request=_latest_request(conversation),
+                plan=plan,
+                steps=steps,
+                say=say,
+                where=f"{page.get('title', '')} — {page.get('url', '')}",
+            )
+            gate = _with_review(gate, verdict)
         if gate.deny:
             await say(
                 "act",
@@ -1165,6 +1224,41 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
         outcome = "ok" if value.get("ok") else f"FAILED: {value.get('error')}"
         steps.append(_line(n, f"{_describe(action)} → {outcome} (now at {value.get('url', '')})"))
         return {"n": n + 1, "log": steps[-LOG_KEEP:], "done": False}
+
+
+_HELD_NOT_PARKED = frozenset(
+    {"create_bot", "ask_bot", "message_bot", "delete_file", "move_file", "save_routine"}
+)
+"""Risky steps an approval card cannot resume (it resumes browser actions and commands).
+Auto Review holding one tells the bot to ask its person instead."""
+
+
+def _latest_request(conversation: list[Any]) -> str:
+    return next((m.content for m in reversed(conversation) if m.role == "user"), "")
+
+
+def _step_text(step: BotStep) -> str:
+    """A non-browser step, as the reviewer reads it."""
+    parts: list[str] = [str(step.action)]
+    for name in ("bot", "path", "to", "text"):
+        value = getattr(step, name, None)
+        if value:
+            parts.append(f"{name}: {str(value)[:600]}")
+    if step.routine is not None:
+        parts.append(f"routine: {step.routine.model_dump_json(exclude_none=True)[:600]}")
+    if step.handoff:
+        parts.append("handoff: true")
+    return "\n".join(parts)
+
+
+def _with_review(gate: GateDecision, verdict: Any) -> GateDecision:
+    """The gate after Auto Review: a concern turns an allowed step into a question, and
+    a refusal into a refusal. It never turns a question into an allow."""
+    if verdict.verdict == "deny":
+        return GateDecision(False, f"Auto Review: {verdict.reason}", deny=True)
+    if verdict.verdict == "ask":
+        return GateDecision(True, f"Auto Review: {verdict.reason}")
+    return gate
 
 
 def _whose(bot: Any, name: str | None, helpers: list[Any]) -> tuple[Any, str] | str:

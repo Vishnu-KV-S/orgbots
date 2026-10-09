@@ -66,7 +66,7 @@ export function DetailsPane({
       <MemorySection bot={bot} />
       <Profile bot={bot} onChanged={onChanged} />
       <Looks bot={bot} onChanged={onChanged} />
-      <Rules bot={bot} />
+      <Rules bot={bot} onChanged={onChanged} />
       <SavedLogins bot={bot} />
       <section className="dsec">
         <h3>About</h3>
@@ -234,7 +234,7 @@ function pick(bot: Bot) {
   };
 }
 
-function Rules({ bot }: { bot: Bot }) {
+function Rules({ bot, onChanged }: { bot: Bot; onChanged: () => void }) {
   const fetcher = useCallback((signal: AbortSignal) => listRules(bot.id, signal), [bot.id]);
   const rules = useResource(fetcher, { intervalMs: 5000 });
   const [draft, setDraft] = useState<Pick<BotRule, "action_type" | "host" | "decision">>({
@@ -251,6 +251,9 @@ function Rules({ bot }: { bot: Bot }) {
   const remove = useAction((id: string) => deleteRule(bot.id, id), {
     onDone: rules.refresh,
   });
+  const review = useAction((on: boolean) => updateBot(bot.id, { auto_review: on }), {
+    onDone: onChanged,
+  });
 
   return (
     <section className="dsec">
@@ -261,6 +264,21 @@ function Rules({ bot }: { bot: Bot }) {
         go through it: they go through the secure sign-in form. Add rules to change that.{" "}
         <strong>Never</strong> beats <strong>ask first</strong>, which beats allow.
       </p>
+      <label className="check-row review-toggle">
+        <input
+          type="checkbox"
+          checked={bot.auto_review}
+          disabled={review.pending}
+          onChange={(e) => void review.run(e.target.checked)}
+        />
+        <span>
+          <strong>Auto Review</strong> — a second model checks {bot.name}&apos;s risky steps
+          (sending, buying, deleting, commands, handing work to other bots) against what you
+          asked. A concern asks you; a clear mismatch is refused. An “allow” rule then only lets
+          a step through when the reviewer has no concerns.
+        </span>
+      </label>
+      {review.error && <ErrorNotice>{review.error}</ErrorNotice>}
       {rules.data?.rules.map((r) => (
         <div key={r.id} className="rule">
           <span className={`decision ${r.decision}`}>{DECISION_LABEL[r.decision]}</span>

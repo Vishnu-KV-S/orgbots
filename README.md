@@ -232,6 +232,18 @@ bots it names at once, like a message does. Bot-to-bot chains stop at 4 hops, ea
 may send 60 such messages a day, and a reply never asks for a reply back. Your
 reactions are kept on the server, for both chats and groups.
 
+**Auto Review.** A switch per bot in Details (migration 048). With it on, a second
+model checks each risky step before it happens (`runtime/domain/review.py`): clicks
+that send, buy, delete or publish, Enter and typing that submits, commands, delegating
+to or messaging another bot, deleting or moving files, and setting up routines. It sees
+what you asked, the bot's plan and reasoning, and the exact action, but no page
+content, which is where an injection would come from. It answers *allow*, *ask* (the
+step is parked for you, or, for a step that can't be parked, the bot is told to ask) or
+*deny*. Your rules still come first: *never* and *ask first* decide without it, and
+*always allow* now lets a step through only when the reviewer has no concerns. If the
+reviewer can't run, the step waits for you rather than going through. Every verdict is
+written into the conversation with its reason.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
