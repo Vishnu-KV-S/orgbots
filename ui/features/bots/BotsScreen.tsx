@@ -8,6 +8,7 @@ import {
   deleteBot,
   duplicateBot,
   listBots,
+  listGroups,
   markRead,
   updateBot,
 } from "@/lib/api/bots";
@@ -20,6 +21,7 @@ import { ComputerPane } from "./components/ComputerPane";
 import { Conversation, type Pane } from "./components/Conversation";
 import { DetailsPane } from "./components/DetailsPane";
 import { FilesPane } from "./components/FilesPane";
+import { GroupConversation, GroupDialog } from "./components/GroupConversation";
 import { SkillsPane } from "./components/SkillsPane";
 import {
   CommandPalette,
@@ -35,7 +37,7 @@ const LIST_MS = 2500;
 
 const LINEUP_MOODS: Mood[] = ["idle", "browsing", "happy", "thinking", "typing"];
 
-type Dialog = "new" | "palette" | "settings" | null;
+type Dialog = "new" | "palette" | "settings" | "group" | null;
 
 /**
  * The bots workspace: sidebar → conversation → computer / details.
@@ -46,6 +48,9 @@ type Dialog = "new" | "palette" | "settings" | null;
  */
 export function BotsScreen() {
   const bots = useResource(listBots, { intervalMs: LIST_MS });
+  const groups = useResource(listGroups, { intervalMs: LIST_MS });
+  // A group chat is selected instead of a bot, never alongside one (`?group=`).
+  const [groupId, setGroupId] = useState<string | null>(null);
   const computer = useResource<ComputerStatus>(computerStatus, {
     intervalMs: 5000,
   });
@@ -68,13 +73,19 @@ export function BotsScreen() {
 
   const list = bots.data?.bots ?? null;
   const selected = useMemo(
-    () => list?.find((b) => b.id === selectedId) ?? null,
-    [list, selectedId],
+    () => (groupId ? null : (list?.find((b) => b.id === selectedId) ?? null)),
+    [list, selectedId, groupId],
+  );
+  const group = useMemo(
+    () => groups.data?.groups.find((g) => g.id === groupId) ?? null,
+    [groups.data, groupId],
   );
 
   // --- selection, in the URL ----------------------------------------------------------
   useEffect(() => {
-    const fromUrl = new URLSearchParams(window.location.search).get("bot");
+    const params = new URLSearchParams(window.location.search);
+    setGroupId(params.get("group"));
+    const fromUrl = params.get("bot");
     let remembered: string | null = null;
     try {
       remembered = localStorage.getItem("last-bot");
@@ -82,13 +93,24 @@ export function BotsScreen() {
       /* ignore */
     }
     setSelectedId(fromUrl ?? remembered);
-    const onPop = () => setSelectedId(new URLSearchParams(window.location.search).get("bot"));
+    const onPop = () => {
+      const now = new URLSearchParams(window.location.search);
+      setGroupId(now.get("group"));
+      setSelectedId(now.get("bot"));
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  const selectGroup = useCallback((id: string | null) => {
+    setGroupId(id);
+    setShowList(false);
+    window.history.pushState(null, "", id ? `/?group=${id}` : "/");
+  }, []);
+
   const select = useCallback((id: string | null) => {
     setSelectedId(id);
+    setGroupId(null);
     setShowList(false);
     const url = id ? `/?bot=${id}` : "/";
     window.history.pushState(null, "", url);
@@ -222,9 +244,25 @@ export function BotsScreen() {
           commands={commands}
           computer={computer.data}
           error={bots.error}
+          groups={groups.data?.groups ?? null}
+          selectedGroupId={groupId}
+          onSelectGroup={selectGroup}
+          onNewGroup={() => setDialog("group")}
         />
 
-        {selected ? (
+        {group ? (
+          <GroupConversation
+            key={group.id}
+            group={group}
+            bots={list ?? []}
+            onChanged={groups.refresh}
+            onDeleted={() => {
+              selectGroup(null);
+              groups.refresh();
+            }}
+            onOpenBot={select}
+          />
+        ) : selected ? (
           <Conversation
             key={selected.id}
             bot={selected}
@@ -383,6 +421,17 @@ export function BotsScreen() {
           />
         )}
         {dialog === "new" && <NewBotDialog onClose={() => setDialog(null)} onCreated={created} />}
+        {dialog === "group" && (
+          <GroupDialog
+            bots={list ?? []}
+            onClose={() => setDialog(null)}
+            onSaved={(g) => {
+              setDialog(null);
+              groups.refresh();
+              selectGroup(g.id);
+            }}
+          />
+        )}
         {dialog === "palette" && (
           <CommandPalette
             bots={list ?? []}

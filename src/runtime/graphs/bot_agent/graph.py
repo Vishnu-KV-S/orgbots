@@ -33,6 +33,12 @@ picks itself it loads with `use_skill`. Saving a skill is held to the same rule 
 creating a routine — only on the person's own turn — because a skill is instructions
 every bot in the organization will read.
 
+**A group turn reads the group, and answers there** (`input.group_id`): its conversation
+is the group's (or a thread's), its reply is posted to the group, and teammates it
+names with @ are woken to pick their part up. **A turn another bot's message started**
+(`input.wake_id`) answers that bot: the reply is relayed back — unless the message
+handed the task over, in which case the bot owns it and answers its person.
+
 **A turn a routine started is the routine's message, answered** (`input.routine_id`).
 It may not create routines — only the person's own word in the conversation can — and
 a drafts-only routine (or a test run) parks every consequential step whatever the
@@ -107,6 +113,7 @@ from runtime.graphs.common.structured import call_structured
 from runtime.graphs.registry import GRAPH_KEY, register_graph
 from runtime.observability.logging import get_logger
 from runtime.org.bots import BriefLockedError, HelperRefusedError, brief_of
+from runtime.org.groups import GroupError
 from runtime.org.routines import describe, render_routines
 
 log = get_logger("graphs.bot_agent")
@@ -265,6 +272,7 @@ def _system(
     drive: str = "",
     routines: str = "",
     skills: str = "",
+    peers: list[Any] | None = None,
 ) -> str:
     team = ""
     if helpers:
@@ -275,6 +283,13 @@ def _system(
         )
     if not depth_ok:
         team += "\n  You are as deep as helpers go: you cannot create helpers of your own."
+    if peers:
+        team += (
+            "\n  Your person's other bots — message_bot one when a part of the work is its "
+            "job (it answers later, without you waiting): "
+            + "; ".join(f"{p.name}{f' ({p.label})' if p.label else ''}" for p in peers[:20])
+            + "."
+        )
     if delegated_by:
         team += (
             f"\n- This turn is a task from {delegated_by}, the bot that created you, not "
@@ -317,21 +332,14 @@ def _prompt(
     plan: list[str] | None = None,
     notes: str = "",
     skills: list[str] | None = None,
+    me: str = "",
 ) -> str:
     lines = ["Conversation so far (oldest first; the latest message is what you are on):"]
     for message in conversation:
-        sender = (message.payload or {}).get("from_bot_name")
-        routine = (message.payload or {}).get("routine")
-        who = (
-            f"{sender} (the bot that created you)"
-            if sender
-            else f"Routine “{routine}” (set up by your person)"
-            if routine
-            else "Person"
-            if message.role == "user"
-            else "You"
-        )
-        lines.append(f"{who}: {message.content.strip()}")
+        payload = message.payload or {}
+        who = _speaker(payload, message.role, me)
+        indent = "  ↳ " if payload.get("thread") else ""
+        lines.append(f"{indent}{who}: {message.content.strip()}")
         attached = (message.payload or {}).get("attachments")
         if attached:
             lines.append(f"  {render_attachments(attached)}")
@@ -359,6 +367,23 @@ def _prompt(
         "Decide the next step.",
     ]
     return "\n".join(lines)
+
+
+def _speaker(payload: dict[str, Any], role: str, me: str) -> str:
+    """Who said a line, as the bot should read it."""
+    sender = payload.get("from_bot_name")
+    if sender and payload.get("peer"):
+        return f"{sender} (another of your person's bots)"
+    if sender:
+        return f"{sender} (the bot that created you)"
+    if payload.get("routine"):
+        return f"Routine \u201c{payload['routine']}\u201d (set up by your person)"
+    author_bot = payload.get("author_bot_id")
+    if author_bot:
+        return "You" if author_bot == me else f"{payload.get('author_name')} (teammate bot)"
+    if payload.get("author_name") == "(note)":
+        return "Note"
+    return "Person" if role == "user" else "You"
 
 
 def _line(n: int, text: str) -> str:
@@ -449,6 +474,15 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
     delegated_by = str(payload.get("from_bot_name") or "your manager bot") if delegation else None
     # A turn a routine started (scheduled, an event, or a person's test run).
     routine_turn = payload.get("routine_id") is not None
+    # A group's message, or another bot's (a queued delivery).
+    group_id = uuid.UUID(str(payload["group_id"])) if payload.get("group_id") else None
+    thread_root = uuid.UUID(str(payload["thread_root"])) if payload.get("thread_root") else None
+    hops = int(payload.get("hops") or 0)
+    wake = (
+        await node.org.groups.wake(uuid.UUID(str(payload["wake_id"])))
+        if payload.get("wake_id")
+        else None
+    )
     drafts_only = bool(payload.get("drafts_only"))
 
     async def say(kind: str, role: str, content: str, extra: dict[str, Any] | None = None) -> None:
@@ -678,6 +712,12 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
                 )
                 if part
             )
+        if group_id is not None or (wake is not None and wake.kind == "message"):
+            note = "\n".join(
+                part
+                for part in (note, await _peer_note(node, bot, group_id, thread_root, wake))
+                if part
+            )
         if chunk > 1 and n == 0:
             note = "\n".join(
                 part
@@ -690,7 +730,11 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
             )
 
         # 3. Decide.
-        conversation = await bots.conversation(bot_id)
+        conversation = (
+            await node.org.groups.conversation(group_id, thread_root=thread_root)
+            if group_id is not None
+            else await bots.conversation(bot_id)
+        )
         helpers = await bots.helpers(bot_id)
         depth_ok = await bots.depth(bot_id) < MAX_HELPER_DEPTH
         # What comes to mind is chosen against the conversation and this turn's work,
@@ -704,6 +748,7 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
         # the file this bot is waiting for.
         file_count, recent_files = await node.org.files.summary(team_of(bot), RECENT_IN_PROMPT)
         routines = await node.org.routines.for_bot(bot.id)
+        peers = await node.org.groups.peers(bot)
         library = await node.org.skills.index(bot.organization_id)
         asked_text = next((m.content for m in reversed(conversation) if m.role == "user"), "")
         named = await node.org.skills.mentioned_in(bot.organization_id, asked_text)
@@ -728,6 +773,7 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
                         ),
                         routines=render_routines(routines, dt.datetime.now(dt.UTC)),
                         skills=render_index(library),
+                        peers=peers,
                     ),
                     prompt=_prompt(
                         conversation,
@@ -738,6 +784,7 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
                         plan=plan,
                         notes=notes,
                         skills=[render_skill(k.name, k.body(), status=k.status) for k in named],
+                        me=str(bot.id),
                     ),
                 ),
                 BOT_STEP,
@@ -769,7 +816,26 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
         # 4/5. Act.
         if step.action in ("reply", "ask_user"):
             text = (step.text or "").strip()
-            await say("reply", "bot", text, {"kind": step.action})
+            where: dict[str, Any] = {"kind": step.action}
+            if group_id is not None:
+                # The answer belongs to the group; the bot's own chat keeps a copy that
+                # says where it went.
+                handed = await node.org.groups.post_reply(
+                    group_id,
+                    bot,
+                    text,
+                    run_id=ctx.run_id,
+                    step=n,
+                    hops=hops,
+                    thread_root=thread_root,
+                )
+                where.update(
+                    group_id=str(group_id), handed_to=[d.recipient_name for d in handed if d.queued]
+                )
+            elif wake is not None and wake.expects_reply:
+                await node.org.groups.relay_reply(wake, bot, text, run_id=ctx.run_id)
+                where.update(replied_to=str(wake.from_bot_id))
+            await say("reply", "bot", text, where)
             asked = next((m.content for m in reversed(conversation) if m.role == "user"), "")
             await bots.write_episode(
                 bot_id,
@@ -818,6 +884,9 @@ async def _pass(state: BotState, config: RunnableConfig, carry: dict[str, Any]) 
                 _line(n, f"{'created' if created else 'already had'} helper {helper.name}")
             )
             return {"n": n + 1, "log": steps[-LOG_KEEP:], "done": False}
+
+        if step.action == "message_bot":
+            return await _message_bot(node, bot, step, n=n, steps=steps, say=say, hops=hops)
 
         if step.action == "ask_bot":
             return await _ask_helper(
@@ -1481,6 +1550,87 @@ async def _skill(
     )
     draft = " as a draft for your person to review" if skill.status == "draft" else ""
     return _ok(steps, None, n, f"{saved.outcome} skill /{skill.name}{draft}")
+
+
+async def _peer_note(
+    node: Any,
+    bot: Any,
+    group_id: uuid.UUID | None,
+    thread_root: uuid.UUID | None,
+    wake: Any,
+) -> str:
+    """What a bot needs to know on a turn that is not its person's own message."""
+    if group_id is not None:
+        group = await node.org.groups.get(group_id)
+        roster = await node.org.groups.roster(group_id)
+        names = ", ".join(
+            f"{name}{f' ({label})' if label else ''}"
+            + (" — the lead" if group is not None and b == group.lead_bot_id else "")
+            + (" — you" if b == bot.id else "")
+            for b, name, label in roster
+        )
+        where = " You are answering in a thread under one message." if thread_root else ""
+        return (
+            f"This turn is in the group chat \u201c{group.name if group else 'a group'}\u201d "
+            f"with your person and these bots: {names}.{where} The conversation above is the "
+            "group's; the latest message is what you are on. Answer in the group with reply. "
+            "To give a teammate a part, name them with @Name in your reply and say exactly what "
+            "you need — they pick it up and answer in the group; give each part one owner, and "
+            "never @mention a teammate only to thank or acknowledge them."
+        )
+    sender = await node.org.bots.get(wake.from_bot_id) if wake.from_bot_id else None
+    name = sender.name if sender is not None else "another bot"
+    if wake.handoff:
+        return (
+            f"{name}, another of your person's bots, handed you the task in its latest "
+            "message: you own it now. Do it, and report the result to your person with reply."
+        )
+    if not wake.expects_reply:
+        return (
+            f"The latest message is {name}'s answer to a message you sent it. Carry on with "
+            "the work it was for; your reply goes to your person."
+        )
+    return (
+        f"The latest message is from {name}, another of your person's bots. Do what it asks "
+        f"if it is within your job; your reply goes back to {name}."
+    )
+
+
+async def _message_bot(
+    node: Any, bot: Any, step: BotStep, *, n: int, steps: list[str], say: Any, hops: int
+) -> dict[str, Any]:
+    """Send another bot a message, without waiting for its answer."""
+    name = (step.bot or "").strip()
+    text = (step.text or "").strip()
+    action = {"type": "message_bot", "bot": name, "text": text[:500], "handoff": step.handoff}
+    try:
+        sent = await node.org.groups.message_bot(
+            bot, name, text, run_id=node.ctx.run_id, step=n, hops=hops + 1, handoff=step.handoff
+        )
+    except GroupError as exc:
+        await say(
+            "message_bot",
+            "activity",
+            step.thought,
+            {"action": action, "ok": False, "error": str(exc)},
+        )
+        return _ok(steps, None, n, f"message to {name} failed: {exc}")
+    await say(
+        "message_bot",
+        "activity",
+        step.thought,
+        {
+            "action": {**action, "bot": sent.recipient_name},
+            "ok": True,
+            "recipient_id": str(sent.recipient_id),
+        },
+    )
+    what = (
+        f"handed the task to {sent.recipient_name}; it owns it now"
+        if step.handoff
+        else f"sent {sent.recipient_name} a message; its answer will come to you later"
+    )
+    return _ok(steps, None, n, what)
 
 
 def _route(state: BotState) -> str:

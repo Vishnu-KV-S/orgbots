@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import type { Bot, ComputerStatus } from "@/lib/api/bots";
+import type { Bot, ComputerStatus, Group } from "@/lib/api/bots";
 import { cx } from "@/lib/cx";
 import { timeAgo } from "../lib/text";
 import { moodOfBot } from "../avatar";
@@ -135,6 +135,54 @@ function BotRow({
   );
 }
 
+function GroupRow({
+  group,
+  bots,
+  active,
+  onSelect,
+}: {
+  group: Group;
+  bots: Bot[];
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const working = group.members.filter((m) => m.working).length;
+  const last = group.last_message;
+  const sub = working
+    ? `${working} working…`
+    : last
+      ? `${last.author_kind === "person" ? "You" : last.author_name}: ${last.content.replace(/\s+/g, " ")}`
+      : group.members.map((m) => m.name).join(", ");
+  return (
+    <div className={cx("brow", active && "active", group.unread && "unread")}>
+      <button
+        type="button"
+        className="brow-hit"
+        aria-current={active ? "true" : undefined}
+        onClick={onSelect}
+      >
+        <span className="group-stack" aria-hidden>
+          {group.members.slice(0, 3).map((m) => {
+            const bot = bots.find((b) => b.id === m.id);
+            return bot ? <Avatar key={m.id} bot={bot} size={22} /> : null;
+          })}
+        </span>
+        <div className="brow-main">
+          <div className="brow-name"># {group.name}</div>
+          <div className="brow-sub">{sub}</div>
+        </div>
+      </button>
+      <div className="brow-marks">
+        {group.unread ? (
+          <span className="mark-unread" title="Unread" />
+        ) : last ? (
+          <span className="brow-sub">{timeAgo(last.created_at)}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar({
   bots,
   selectedId,
@@ -145,6 +193,10 @@ export function Sidebar({
   commands,
   computer,
   error,
+  groups,
+  selectedGroupId,
+  onSelectGroup,
+  onNewGroup,
 }: {
   bots: Bot[] | null;
   selectedId: string | null;
@@ -155,6 +207,10 @@ export function Sidebar({
   commands: BotCommands;
   computer: ComputerStatus | null;
   error: string | null;
+  groups: Group[] | null;
+  selectedGroupId: string | null;
+  onSelectGroup: (id: string) => void;
+  onNewGroup: () => void;
 }) {
   const [showHidden, setShowHidden] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -242,6 +298,35 @@ export function Sidebar({
           >
             {showHidden ? "Hide hidden bots" : `Show ${hiddenCount} hidden`}
           </button>
+        )}
+        <div className="bside-group bside-group-row">
+          Groups
+          <button
+            type="button"
+            className="ibtn"
+            onClick={onNewGroup}
+            title="A group chat with several bots"
+            aria-label="New group"
+            disabled={(bots?.length ?? 0) < 2}
+          >
+            +
+          </button>
+        </div>
+        {(groups ?? []).map((g) => (
+          <GroupRow
+            key={g.id}
+            group={g}
+            bots={bots ?? []}
+            active={g.id === selectedGroupId}
+            onSelect={() => onSelectGroup(g.id)}
+          />
+        ))}
+        {groups && groups.length === 0 && (
+          <p className="brow-sub" style={{ padding: "2px 10px", whiteSpace: "normal" }}>
+            {(bots?.length ?? 0) < 2
+              ? "Make two bots to start a group chat."
+              : "Put several bots in one chat for work that needs them all."}
+          </p>
         )}
       </nav>
 

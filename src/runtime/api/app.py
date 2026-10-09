@@ -35,6 +35,8 @@ from runtime.api.bots import router as bots_router
 from runtime.api.bots import vault_router as bots_vault_router
 from runtime.api.control import router as control_router
 from runtime.api.errors import http_errors
+from runtime.api.groups import reactions_router
+from runtime.api.groups import router as groups_router
 from runtime.api.observe import router as observe_router
 from runtime.api.routines import hooks_router
 from runtime.api.routines import router as routines_router
@@ -130,6 +132,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(attachments_router)
     # The computer's shared /workspace and the person's sandboxed shell.
     app.include_router(workspace_router)
+    # Group chats between the person and their bots, and reactions on any message.
+    app.include_router(groups_router)
+    app.include_router(reactions_router)
     # Routines: a bot's own (`/v1/bots/{id}/routines`, behind the UI's proxy), and the
     # webhook that starts an event routine (`/v1/hooks`, which is not — it is called
     # from outside, and authenticated by its token and the sender's signature).

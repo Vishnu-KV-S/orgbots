@@ -18,7 +18,7 @@ import { TEMPLATES } from "../lib/templates";
 import { Avatar } from "./Avatar";
 import { BriefFields } from "./BriefEditor";
 
-function Modal({
+export function Modal({
   title,
   onClose,
   children,

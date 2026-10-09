@@ -2534,3 +2534,117 @@ button.frow:hover {
   font-size: 12px;
 }
 
+/* --- group chats ----------------------------------------------------------------------- */
+
+.bside-group-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.bside-group-row .ibtn {
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+}
+
+.group-stack {
+  display: inline-flex;
+  width: 38px;
+  flex: none;
+}
+
+.group-stack > * + * {
+  margin-left: -10px;
+}
+
+.group-faces {
+  display: inline-flex;
+}
+
+.group-faces > * + * {
+  margin-left: -12px;
+}
+
+.gm-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-active);
+  flex: none;
+}
+
+.thread-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.thread-replies {
+  border-left: 2px solid var(--line);
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.group-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.group-pick .pick {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  font-size: 13px !important;
+  color: var(--text) !important;
+  cursor: pointer;
+}
+
+.group-pick .pick input {
+  display: none;
+}
+
+.group-pick .pick.on {
+  border-color: var(--text);
+  background: var(--bg-active);
+}
+
+.group-pick .pick small {
+  color: var(--text-faint);
+}
+
+.gm-author {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+  text-align: left;
+}
+
+.gm-author .linklike {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+

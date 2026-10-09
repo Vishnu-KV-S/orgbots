@@ -614,9 +614,10 @@ async def messages(
         rows = await uow.bots.messages(bot_id, after_seq=after)
         pending = await uow.bots.live_pending(bot_id)
         asking = await uow.vault.live_requests(bot_id)
+        reactions = await uow.groups.reactions([m.id for m in rows])
     run_status = await _run_status(_uow(request), bot.last_run_id)
     return {
-        "messages": [_message_view(m) for m in rows],
+        "messages": [{**_message_view(m), "reactions": reactions.get(m.id, [])} for m in rows],
         "pending": [str(p.id) for p in pending],
         "credential_requests": [str(r.id) for r in asking],
         "working": _working(run_status),

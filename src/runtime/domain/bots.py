@@ -164,6 +164,7 @@ StepAction = Literal[
     "use_skill",
     "run_command",
     "copy_file",
+    "message_bot",
 ]
 
 
@@ -233,7 +234,11 @@ class BotStep(BaseModel):
         "sandboxed /workspace, which all your person's bots share and browser downloads "
         "land in; local = true runs it on your person's own machine instead, which they "
         "approve first. copy_file copies a file between /workspace and your team drive "
-        "(path = the source, to = the destination; one of them starts with /workspace)."
+        "(path = the source, to = the destination; one of them starts with /workspace). "
+        "TEAMMATES: message_bot sends another of your person's bots a message without "
+        "waiting (bot = its name, text = the message with every fact it needs); its answer "
+        "comes back to you later as a message. handoff = true gives it the task to own "
+        "instead: it reports to your person and nothing comes back."
     )
     element: int | None = Field(
         default=None,
@@ -327,6 +332,11 @@ class BotStep(BaseModel):
     timeout: int | None = Field(
         default=None, ge=1, le=300, description="For run_command: seconds before it is stopped."
     )
+    handoff: bool = Field(
+        default=False,
+        description="For message_bot: hand the task over — the other bot owns it from now "
+        "on and reports to your person itself.",
+    )
     local: bool = Field(
         default=False,
         description="For run_command: run on your person's own machine instead of the "
@@ -386,6 +396,11 @@ class BotStep(BaseModel):
             raise ValueError("copy_file needs `path` (the source) and `to` (the destination)")
         if self.action in SKILL_ACTIONS and self.skill is None:
             raise ValueError(f"{self.action} needs `skill` — at least its name")
+        if self.action == "message_bot":
+            if not (self.bot or "").strip():
+                raise ValueError("message_bot needs `bot` — the other bot's name")
+            if not (self.text or "").strip():
+                raise ValueError("message_bot needs `text` — the message")
         if self.action in ("create_bot", "ask_bot"):
             if not (self.bot or "").strip():
                 raise ValueError(f"{self.action} needs `bot` — the helper's name")
@@ -419,16 +434,17 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=8)
-"""Version 8 added the terminal (`run_command` with `timeout` and `local`, `copy_file`).
-Version 7 let `look` take a `path` (an image in the team drive). Version 6 added skills
-(`save_skill`, `use_skill`, with `skill`). Version 5 added routines (`save_routine`,
-`delete_routine`, with `routine`). Version 4 added the team drive (`list_files` …
-`delete_file`, with `path`, `to`, `find` and `from_line`) and `look` (vision: a question
-about the screen). Version 3 added working memory (`plan` and `notes`, carried from step
-to step within a turn) and `sign_in` (the login vault). Version 2 added memory (remember
-kinds, forget, recall, diary) and the brief (update_brief, create_bot's brief and seed
-memories). Version 1 was never run against stored data, so it is not kept."""
+BOT_STEP = SCHEMAS.register(BotStep, version=9)
+"""Version 9 added `message_bot` (with `handoff`). Version 8 added the terminal
+(`run_command` with `timeout` and `local`, `copy_file`). Version 7 let `look` take a
+`path` (an image in the team drive). Version 6 added skills (`save_skill`, `use_skill`,
+with `skill`). Version 5 added routines (`save_routine`, `delete_routine`, with
+`routine`). Version 4 added the team drive (`list_files` … `delete_file`, with `path`,
+`to`, `find` and `from_line`) and `look` (vision: a question about the screen). Version
+3 added working memory (`plan` and `notes`, carried from step to step within a turn) and
+`sign_in` (the login vault). Version 2 added memory (remember kinds, forget, recall,
+diary) and the brief (update_brief, create_bot's brief and seed memories). Version 1 was
+never run against stored data, so it is not kept."""
 
 
 # --- appearance -------------------------------------------------------------------------

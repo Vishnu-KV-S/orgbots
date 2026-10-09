@@ -38,6 +38,7 @@ from runtime.domain.bot_memory import BotBrief, brief_changes, clean_memory
 from runtime.domain.bots import BOT_TURN_PRIORITY, actor_name_for, host_of
 from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
 from runtime.domain.errors import UnknownActorError
+from runtime.domain.groups import Member, recipients
 from runtime.domain.ids import OrganizationId, RunId
 from runtime.domain.routines import ROUTINE_PRIORITY, routine_message
 from runtime.domain.specs import StartRunRequest
@@ -52,6 +53,7 @@ from runtime.org.bots import (
     write_brief,
 )
 from runtime.persistence.repositories.bots import BotRow
+from runtime.persistence.repositories.groups import GroupRow, WakeRow
 from runtime.persistence.repositories.routines import RoutineRow, RoutineRunRow
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.runtime.bootstrap import Registrar
@@ -636,6 +638,88 @@ class BotManager:
             )
             await uow.routines.note_fired(routine.id)
         return fire_row_id, sent
+
+    # --- groups and deliveries ----------------------------------------------------------
+
+    async def post_group(
+        self,
+        group: GroupRow,
+        text: str,
+        *,
+        thread_root: uuid.UUID | None = None,
+    ) -> tuple[uuid.UUID, list[Sent]]:
+        """A person's message in a group: the bots it names (or the lead) start on it now.
+
+        It is the person's instruction, so it starts like a message does — superseding
+        what those bots were doing — rather than waiting in the queue a bot's message
+        to a bot waits in. Each bot's own chat says where it went.
+        """
+        message_id = uuid.uuid4()
+        async with self._uow.transaction() as uow:
+            await uow.groups.add_message(
+                message_id,
+                group.id,
+                author_kind="person",
+                author_bot_id=None,
+                author_name="you",
+                content=text,
+                thread_root=thread_root,
+            )
+            members = [Member(b, n) for b, n, _ in await uow.groups.members(group.id)]
+            named = recipients(text, members, lead=group.lead_bot_id, author=None)
+            await uow.groups.touch(group.id, unread=False)
+        sent: list[Sent] = []
+        for bot_id in named:
+            bot = await self.get(bot_id)
+            async with self._uow.transaction() as uow:
+                await uow.bots.add_message(
+                    uuid.uuid4(),
+                    bot.id,
+                    role="system",
+                    content=f"Working on your message in the group “{group.name}”.",
+                    payload={"group_id": str(group.id), "group_name": group.name},
+                )
+                await uow.bots.expire_pending(bot.id)
+                await uow.vault.expire_requests(bot.id)
+                turn = await uow.bots.bump_turn(bot.id)
+            sent.append(
+                await self._start(
+                    bot,
+                    turn,
+                    key=f"bot:{bot.id}:group:{message_id}",
+                    extra={
+                        "group_id": str(group.id),
+                        "group_message_id": str(message_id),
+                        "thread_root": str(thread_root) if thread_root else None,
+                        "hops": 0,
+                    },
+                    anchor=message_id,
+                )
+            )
+        return message_id, sent
+
+    async def start_wake(self, wake: WakeRow) -> Sent:
+        """Start the turn a queued delivery asks for: a group's message that named this
+        bot, or a message another bot sent it (already in its conversation)."""
+        bot = await self.get(wake.bot_id)
+        async with self._uow.transaction() as uow:
+            turn = await uow.bots.bump_turn(bot.id)
+        return await self._start(
+            bot,
+            turn,
+            key=f"bot:{bot.id}:wake:{wake.id}",
+            extra={
+                "wake_id": str(wake.id),
+                "hops": wake.hops,
+                "group_id": str(wake.group_id) if wake.group_id else None,
+                "group_message_id": str(wake.group_message_id) if wake.group_message_id else None,
+                "thread_root": str(wake.thread_root) if wake.thread_root else None,
+                "from_bot_id": str(wake.from_bot_id) if wake.from_bot_id else None,
+                "handoff": wake.handoff,
+            },
+            anchor=wake.message_id or wake.group_message_id or wake.id,
+            priority=ROUTINE_PRIORITY,
+        )
 
     async def _start(
         self,
