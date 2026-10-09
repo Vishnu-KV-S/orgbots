@@ -57,7 +57,7 @@ from typing import Any
 import anthropic
 
 from runtime.domain.enums import TrustLevel, WorkClass
-from runtime.domain.errors import MissingCredentials, ProviderUnavailable
+from runtime.domain.errors import MissingCredentials, ModelCallNotAllowed, ProviderUnavailable
 from runtime.domain.specs import ModelProfile
 from runtime.gateway.models import ModelRequest, ModelResponse
 from runtime.observability.logging import get_logger
@@ -138,6 +138,14 @@ class ProviderCapabilities:
     through for an actor that already holds `web.search@1` — see
     `ModelGateway._server_tools`."""
     web_search_max_uses: int = 5
+    vision: bool = True
+    """`image` content blocks are read. False means a request carrying images is
+    refused before it is sent: a text-only endpoint that dropped the screenshot would
+    answer a question about a picture it never saw, confidently."""
+    vision_models: frozenset[str] = frozenset()
+    """The models on this endpoint that read images; empty means all of them. DeepSeek
+    is the reason it exists — `deepseek-flash` takes images and `deepseek-v4-pro` does
+    not, on one endpoint — and the refusal above applies per model."""
 
 
 @dataclass
@@ -221,10 +229,28 @@ class AnthropicProvider:
         )
 
         caps = self.capabilities
+        if req.images and (
+            not caps.vision or (caps.vision_models and profile.model not in caps.vision_models)
+        ):
+            raise ModelCallNotAllowed(
+                f"{self.name} model {profile.model!r} cannot read images; route this work "
+                "class to a vision-capable model"
+            )
+        content: str | list[dict[str, Any]] = req.prompt
+        if req.images:
+            # Images first, then the question: the documented order, and the one that
+            # keeps the varying part of the turn — the text — last.
+            content = [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": img.media_type, "data": img.data},
+                }
+                for img in req.images
+            ] + [{"type": "text", "text": req.prompt}]
         params: dict[str, Any] = {
             "model": profile.model,
             "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": req.prompt}],
+            "messages": [{"role": "user", "content": content}],
             "output_config": {"effort": effort},
         }
         if caps.adaptive_thinking:

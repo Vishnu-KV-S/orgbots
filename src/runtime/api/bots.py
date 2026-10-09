@@ -10,8 +10,19 @@ and taking control of it. They never call `act` — a person's input goes throug
 `/input`, which the computer refuses unless the person holds the screen, and a bot's
 actions go only through the gateway.
 
+**Sign-in details** come in through `/credentials/{request_id}` and nowhere else. The
+values are `SecretStr` from the moment they are parsed, sealed into the vault by
+`BotManager.submit_credentials`, and never returned by any endpoint: `/v1/vault` lists
+saved logins by site and hint, and can switch automatic use off or delete one.
+
+**Team files** are `/{bot_id}/files`: the drive of the team that bot is on, which the
+person browses, edits, uploads to and restores from through the same `TeamDrive` the
+bots write with. A person's save names the version it was made on, so saving over a
+bot's newer change is a 409 rather than a silent undo.
+
 **No authentication**, like `/v1/control`. Fine on a local devstack; anything that
-can reach this can drive a browser that may be signed in to real accounts.
+can reach this can drive a browser that may be signed in to real accounts — and,
+since the vault, submit to a credential card. Do not expose it on a network.
 """
 
 from __future__ import annotations
@@ -22,23 +33,42 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from runtime.api.errors import http_errors
 from runtime.domain.bot_memory import MEMORY_CHARS, BotBrief, MemoryKind, memory_handle
 from runtime.domain.bots import BotAppearance
 from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
+from runtime.domain.files import (
+    MAX_FILE_CHARS,
+    PERSON,
+    FileError,
+    FileLockedError,
+    FileTakenError,
+    NoSuchFileError,
+    StaleFileError,
+    Team,
+    folder_of,
+    name_of,
+    team_of,
+)
 from runtime.domain.ids import OrganizationId, RunId
+from runtime.gateway.vault import Vault, VaultUnavailableError
+from runtime.org.files import Change, TeamDrive
 from runtime.persistence.repositories.bots import (
     BotMemoryRow,
     BotMessageRow,
     BotRow,
     BriefRevisionRow,
 )
+from runtime.persistence.repositories.files import FileRevisionRow, TeamFileRow
+from runtime.persistence.repositories.vault import VaultEntryRow
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.runtime.bots import (
     BotManager,
     BotNotFoundError,
+    CredentialInputError,
+    CredentialRequestNotFoundError,
     MemoryNotFoundError,
     PendingNotFoundError,
 )
@@ -46,6 +76,7 @@ from runtime.settings import Settings
 
 router = APIRouter(prefix="/v1/bots", tags=["bots"])
 computer_router = APIRouter(prefix="/v1/computer", tags=["bots"])
+vault_router = APIRouter(prefix="/v1/vault", tags=["bots"])
 
 ORG_HEADER = "X-Organization-Id"
 
@@ -69,6 +100,25 @@ def _manager(request: Request) -> BotManager:
         manager = BotManager(_uow(request), request.app.state.service)
         request.app.state.bots = manager
     return manager
+
+
+def _drive(request: Request) -> TeamDrive:
+    drive = getattr(request.app.state, "team_drive", None)
+    if drive is None:
+        drive = TeamDrive(_uow(request))
+        request.app.state.team_drive = drive
+    return drive
+
+
+def _vault(request: Request) -> Vault:
+    vault = getattr(request.app.state, "vault", None)
+    if vault is None:
+        try:
+            vault = Vault.from_settings(_uow(request), _settings(request))
+        except VaultUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        request.app.state.vault = vault
+    return vault
 
 
 async def _organization(request: Request) -> OrganizationId:
@@ -141,6 +191,7 @@ def _bot_view(
         "last_run_id": str(bot.last_run_id) if bot.last_run_id else None,
         "duplicated_from": str(bot.duplicated_from) if bot.duplicated_from else None,
         "parent_bot_id": str(bot.parent_bot_id) if bot.parent_bot_id else None,
+        "team_id": str(bot.team_id),
         "created_by": bot.created_by,
         "appearance": bot.appearance,
         "created_at": bot.created_at.isoformat(),
@@ -175,6 +226,59 @@ def _revision_view(r: BriefRevisionRow) -> dict[str, Any]:
         "editor_name": r.editor_name,
         "reason": r.reason,
         "changed": r.changed,
+        "created_at": r.created_at.isoformat(),
+    }
+
+
+def _entry_view(e: VaultEntryRow) -> dict[str, Any]:
+    """A saved login as a list shows it: site, hint, what it holds. Never a value."""
+    return {
+        "id": str(e.id),
+        "host": e.host,
+        "label": e.label,
+        "kinds": list(e.kinds),
+        "auto_use": e.auto_use,
+        "use_count": e.use_count,
+        "last_used_at": e.last_used_at.isoformat() if e.last_used_at else None,
+        "created_at": e.created_at.isoformat(),
+        "updated_at": e.updated_at.isoformat(),
+    }
+
+
+def _file_view(f: TeamFileRow, *, content: bool = False) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "id": str(f.id),
+        "path": f.path,
+        "name": name_of(f.path),
+        "folder": folder_of(f.path),
+        "chars": f.chars,
+        "version": f.version,
+        "locked": f.locked,
+        "created_by_kind": f.created_by_kind,
+        "created_by_name": f.created_by_name,
+        "updated_by_kind": f.updated_by_kind,
+        "updated_by_bot_id": str(f.updated_by_bot_id) if f.updated_by_bot_id else None,
+        "updated_by_name": f.updated_by_name,
+        "created_at": f.created_at.isoformat(),
+        "updated_at": f.updated_at.isoformat(),
+        "deleted_at": f.deleted_at.isoformat() if f.deleted_at else None,
+    }
+    if content:
+        out["content"] = f.content or ""
+    return out
+
+
+def _file_revision_view(r: FileRevisionRow) -> dict[str, Any]:
+    return {
+        "id": str(r.id),
+        "version": r.version,
+        "op": r.op,
+        "path": r.path,
+        "content": r.content,
+        "editor_kind": r.editor_kind,
+        "editor_name": r.editor_name,
+        "run_id": str(r.run_id) if r.run_id else None,
+        "note": r.note,
         "created_at": r.created_at.isoformat(),
     }
 
@@ -239,6 +343,37 @@ class MessageBody(BaseModel):
 
 class DecisionBody(BaseModel):
     decision: Literal["once", "always", "deny"]
+
+
+class CredentialsBody(BaseModel):
+    """A credential card's answer: the values by field key, or a saved login's id."""
+
+    values: dict[str, SecretStr] = Field(default_factory=dict, max_length=12)
+    save: bool = True
+    use_entry_id: UUID | None = None
+
+
+class FileCreateBody(BaseModel):
+    path: str = Field(min_length=1, max_length=400)
+    content: str = Field(default="", max_length=MAX_FILE_CHARS)
+
+
+class FilePatch(BaseModel):
+    """One of: new content (with the version it was edited from), a new path, or the
+    lock."""
+
+    content: str | None = Field(default=None, max_length=MAX_FILE_CHARS)
+    path: str | None = Field(default=None, min_length=1, max_length=400)
+    locked: bool | None = None
+    base_version: int | None = Field(default=None, ge=1)
+
+
+class FileRestoreBody(BaseModel):
+    version: int | None = Field(default=None, ge=1)
+
+
+class VaultPatch(BaseModel):
+    auto_use: bool
 
 
 class RuleBody(BaseModel):
@@ -464,10 +599,12 @@ async def messages(
     async with _uow(request)() as uow:
         rows = await uow.bots.messages(bot_id, after_seq=after)
         pending = await uow.bots.live_pending(bot_id)
+        asking = await uow.vault.live_requests(bot_id)
     run_status = await _run_status(_uow(request), bot.last_run_id)
     return {
         "messages": [_message_view(m) for m in rows],
         "pending": [str(p.id) for p in pending],
+        "credential_requests": [str(r.id) for r in asking],
         "working": _working(run_status),
         "run_status": run_status,
     }
@@ -501,6 +638,223 @@ async def decide(
         "admitted": sent.admitted,
         "refusal_reason": sent.refusal_reason,
     }
+
+
+# --- sign-in details -------------------------------------------------------------------
+
+
+@router.post("/{bot_id}/credentials/{request_id}", status_code=status.HTTP_202_ACCEPTED)
+async def answer_credentials(
+    bot_id: UUID, request_id: UUID, body: CredentialsBody, request: Request
+) -> dict[str, Any]:
+    """Answer a credential card: typed values (sealed into the vault, and saved for
+    next time when `save`), or a saved login picked from the card."""
+    await _bot_or_404(request, bot_id)
+    manager = _manager(request)
+    try:
+        with http_errors():
+            if body.use_entry_id is not None:
+                sent = await manager.use_saved_login(bot_id, request_id, body.use_entry_id)
+            else:
+                values = {k: v.get_secret_value() for k, v in body.values.items()}
+                try:
+                    sent = await manager.submit_credentials(
+                        bot_id, request_id, values, save=body.save, vault=_vault(request)
+                    )
+                finally:
+                    values.clear()
+    except CredentialRequestNotFoundError as exc:
+        raise HTTPException(status_code=409, detail=f"no longer waiting: {exc}") from exc
+    except CredentialInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "run_id": str(sent.run_id) if sent.run_id else None,
+        "admitted": sent.admitted,
+        "refusal_reason": sent.refusal_reason,
+    }
+
+
+@router.post("/{bot_id}/credentials/{request_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel_credentials(bot_id: UUID, request_id: UUID, request: Request) -> dict[str, Any]:
+    await _bot_or_404(request, bot_id)
+    try:
+        with http_errors():
+            sent = await _manager(request).cancel_credentials(bot_id, request_id)
+    except CredentialRequestNotFoundError as exc:
+        raise HTTPException(status_code=409, detail=f"no longer waiting: {exc}") from exc
+    return {
+        "run_id": str(sent.run_id) if sent.run_id else None,
+        "admitted": sent.admitted,
+        "refusal_reason": sent.refusal_reason,
+    }
+
+
+@vault_router.get("")
+async def saved_logins(request: Request) -> dict[str, Any]:
+    org = await _organization(request)
+    async with _uow(request)() as uow:
+        rows = await uow.vault.saved(org)
+    return {"entries": [_entry_view(e) for e in rows]}
+
+
+@vault_router.patch("/{entry_id}")
+async def edit_saved_login(entry_id: UUID, body: VaultPatch, request: Request) -> dict[str, Any]:
+    org = await _organization(request)
+    async with _uow(request).transaction() as uow:
+        found = await uow.vault.set_auto_use(org, entry_id, body.auto_use)
+    if not found:
+        raise HTTPException(status_code=404, detail=f"no saved login {entry_id}")
+    return {"id": str(entry_id), "auto_use": body.auto_use}
+
+
+@vault_router.delete("/{entry_id}")
+async def delete_saved_login(entry_id: UUID, request: Request) -> dict[str, Any]:
+    org = await _organization(request)
+    async with _uow(request).transaction() as uow:
+        found = await uow.vault.delete_entry(org, entry_id)
+    if not found:
+        raise HTTPException(status_code=404, detail=f"no saved login {entry_id}")
+    return {"deleted": str(entry_id)}
+
+
+# --- team files -----------------------------------------------------------------------
+
+
+def _file_error(exc: FileError) -> HTTPException:
+    if isinstance(exc, NoSuchFileError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, StaleFileError):
+        return HTTPException(
+            status_code=409,
+            detail="This file changed since you opened it — reload it to see the newer "
+            "version before saving.",
+        )
+    if isinstance(exc, FileTakenError | FileLockedError):
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+async def _team(request: Request, bot_id: UUID) -> Team:
+    return team_of(await _bot_or_404(request, bot_id))
+
+
+def _changed(change: Change) -> dict[str, Any]:
+    return {"file": _file_view(change.file, content=True), "op": change.op}
+
+
+@router.get("/{bot_id}/files")
+async def team_files(
+    bot_id: UUID, request: Request, q: str | None = Query(default=None, max_length=200)
+) -> dict[str, Any]:
+    """The drive of `bot_id`'s team: every live file (no content), the trash, and who
+    is on the team. With `q`, the files matching it, best first, with a snippet."""
+    bot = await _bot_or_404(request, bot_id)
+    team = team_of(bot)
+    drive = _drive(request)
+    async with _uow(request)() as uow:
+        members = await uow.bots.team(bot.team_id)
+    out: dict[str, Any] = {
+        "team": {
+            "id": str(bot.team_id),
+            "members": [
+                {
+                    "id": str(m.id),
+                    "name": m.name,
+                    "label": m.label,
+                    "parent_bot_id": str(m.parent_bot_id) if m.parent_bot_id else None,
+                }
+                for m in members
+            ],
+        },
+        "files": [_file_view(f) for f in await drive.listing(team)],
+        "trash": [_file_view(f) for f in await drive.trash(team)],
+    }
+    if q and q.strip():
+        out["matches"] = [
+            {**_file_view(f), "snippet": text} for f, text in await drive.search(team, q)
+        ]
+    return out
+
+
+@router.post("/{bot_id}/files", status_code=status.HTTP_201_CREATED)
+async def create_file(bot_id: UUID, body: FileCreateBody, request: Request) -> dict[str, Any]:
+    team = await _team(request, bot_id)
+    try:
+        change = await _drive(request).create(team, body.path, body.content, editor=PERSON)
+    except FileError as exc:
+        raise _file_error(exc) from exc
+    return _changed(change)
+
+
+@router.get("/{bot_id}/files/{file_id}")
+async def get_file(bot_id: UUID, file_id: UUID, request: Request) -> dict[str, Any]:
+    team = await _team(request, bot_id)
+    found = await _drive(request).get(team, file_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"no file {file_id}")
+    return _file_view(found, content=True)
+
+
+@router.patch("/{bot_id}/files/{file_id}")
+async def update_file(
+    bot_id: UUID, file_id: UUID, body: FilePatch, request: Request
+) -> dict[str, Any]:
+    team = await _team(request, bot_id)
+    drive = _drive(request)
+    try:
+        if body.locked is not None and body.content is None and body.path is None:
+            return {"file": _file_view(await drive.set_locked(team, file_id, body.locked))}
+        change = await drive.update(
+            team,
+            file_id,
+            editor=PERSON,
+            content=body.content,
+            path=body.path,
+            base_version=body.base_version,
+        )
+    except FileError as exc:
+        raise _file_error(exc) from exc
+    return _changed(change)
+
+
+@router.delete("/{bot_id}/files/{file_id}")
+async def delete_file(
+    bot_id: UUID,
+    file_id: UUID,
+    request: Request,
+    base_version: int | None = Query(default=None, ge=1),
+) -> dict[str, Any]:
+    team = await _team(request, bot_id)
+    try:
+        change = await _drive(request).remove(
+            team, file_id, editor=PERSON, base_version=base_version
+        )
+    except FileError as exc:
+        raise _file_error(exc) from exc
+    return _changed(change)
+
+
+@router.get("/{bot_id}/files/{file_id}/revisions")
+async def file_revisions(bot_id: UUID, file_id: UUID, request: Request) -> dict[str, Any]:
+    team = await _team(request, bot_id)
+    try:
+        rows = await _drive(request).revisions(team, file_id)
+    except FileError as exc:
+        raise _file_error(exc) from exc
+    return {"revisions": [_file_revision_view(r) for r in rows]}
+
+
+@router.post("/{bot_id}/files/{file_id}/restore")
+async def restore_file(
+    bot_id: UUID, file_id: UUID, body: FileRestoreBody, request: Request
+) -> dict[str, Any]:
+    """Out of the trash, or back to an earlier revision — as a new revision."""
+    team = await _team(request, bot_id)
+    try:
+        change = await _drive(request).restore(team, file_id, editor=PERSON, version=body.version)
+    except FileError as exc:
+        raise _file_error(exc) from exc
+    return _changed(change)
 
 
 # --- rules ----------------------------------------------------------------------------

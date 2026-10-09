@@ -17,6 +17,10 @@ server-tool type — but it is no longer registered under a name of its own, so 
 profile can route a call to `api.anthropic.com`. Putting it back is one line here
 plus its entry in `DEFAULT_PROVIDER_CREDENTIALS`; leaving it out is what makes
 "which vendor sees our prompts" answerable from this file alone.
+
+That includes images. Bots' vision (`look`) sends a screenshot of a bot's screen to
+`deepseek-flash`, the one model on this endpoint that reads them (`vision_models`);
+an image addressed to any other DeepSeek model is refused before it is sent.
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ from typing import TYPE_CHECKING
 from runtime.gateway.models import EchoProvider, Provider
 from runtime.observability.logging import get_logger
 from runtime.settings import get_settings
+
+VISION_MODELS = frozenset({"deepseek-flash"})
+"""DeepSeek models that take image input (V4.1-Flash; `deepseek-v4-pro` does not)."""
 
 if TYPE_CHECKING:  # pragma: no cover
     from runtime.settings import Settings
@@ -57,6 +64,8 @@ def build_providers(settings: Settings | None = None) -> dict[str, Provider]:
                 capabilities=ProviderCapabilities(
                     schema_format=False,
                     prompt_caching=False,
+                    vision=True,
+                    vision_models=VISION_MODELS,
                     # The one capability an operator turns on, and the only one that
                     # can reach the network outside the tool gateway. Absent unless
                     # asked for by name.
@@ -75,6 +84,7 @@ def build_providers(settings: Settings | None = None) -> dict[str, Provider]:
             get_logger("gateway.providers").warning(
                 "provider.unavailable", provider="deepseek", error=str(exc)
             )
+
     return providers
 
 

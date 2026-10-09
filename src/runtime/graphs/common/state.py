@@ -78,6 +78,21 @@ class ArtifactRefView:
         return loaded
 
 
+async def whole(value: dict[str, Any], artifacts: ArtifactStore) -> dict[str, Any]:
+    """A tool result in full, for a node that needs every field of it now.
+
+    The gateway externalises any result over `artifact_threshold_bytes` and returns
+    `{"artifact": ref, "truncated": True}` in its place. A node that only cites a result
+    can keep the reference; one that acts on it — a bot reading the page it is about to
+    click on — must load it, or it sees an empty result. Same rule as `load`: call it
+    inside the node, never put what it returns into state.
+    """
+    ref = value.get("artifact")
+    if not value.get("truncated") or not isinstance(ref, dict):
+        return value
+    return await ArtifactRefView.from_json(ref).load(artifacts)
+
+
 def summarise(payload: Any, limit: int = MAX_SUMMARY_CHARS) -> str:
     """A short, stable rendering of an output, for prompts and for state.
 

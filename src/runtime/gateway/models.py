@@ -40,10 +40,10 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from runtime.budget.service import BudgetService
 from runtime.domain.context import RunContext
@@ -73,12 +73,44 @@ from runtime.settings import Settings, get_settings
 log = get_logger("gateway.models")
 
 
+IMAGE_TOKENS = 1_600
+"""What one screenshot costs in input tokens, for the reservation. DeepSeek bills an
+image at up to 1,024 tokens after resizing; the estimate rounds up, because
+under-reserving is the failure the reservation exists to stop."""
+
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+"""A conservative per-image limit (base64-decoded) — well inside what the endpoint
+accepts. Larger is refused here, with a reason, rather than as a 400 that reads like
+the model's fault. A viewport JPEG is tens of kilobytes."""
+
+
+class ImageInput(BaseModel):
+    """An image for a vision model, base64 encoded. Never logged, never stored: a
+    request is built, sent and dropped (nothing persists a `ModelRequest`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    media_type: Literal["image/jpeg", "image/png", "image/webp", "image/gif"]
+    data: str = Field(repr=False)
+
+    @field_validator("data")
+    @classmethod
+    def _not_too_big(cls, value: str) -> str:
+        if len(value) * 3 // 4 > MAX_IMAGE_BYTES:
+            raise ValueError(f"image is over {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
+        return value
+
+
 class ModelRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     prompt: str
     system: str | None = None
     max_output_tokens: int | None = None
+    images: tuple[ImageInput, ...] = ()
+    """Shown to the model before the prompt. Only a provider declaring `vision` takes
+    them; any other refuses the call rather than silently dropping what it was asked
+    to look at."""
     metadata: dict[str, Any] = {}
     """Provider hints that are not part of the contract: `json_schema` for a
     structured response, and `work_class`, which the gateway fills in itself so a
@@ -729,7 +761,7 @@ def _estimate_cents(profile: ModelProfile, req: ModelRequest) -> int:
     the reservation exists to prevent. The over-reservation is returned at
     reconcile a few hundred milliseconds later.
     """
-    input_tokens = max(1, len(req.prompt) // 4)
+    input_tokens = max(1, len(req.prompt) // 4) + IMAGE_TOKENS * len(req.images)
     output_tokens = req.max_output_tokens or profile.max_output_tokens
     return (
         input_tokens * profile.input_cents_per_mtok + output_tokens * profile.output_cents_per_mtok

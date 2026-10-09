@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ErrorNotice } from "@/components/ui";
-import { type Bot, type BotRule, deleteRule, listRules, putRule, updateBot } from "@/lib/api/bots";
+import {
+  type Bot,
+  type BotRule,
+  deleteRule,
+  deleteVaultEntry,
+  listRules,
+  listVault,
+  putRule,
+  setVaultAutoUse,
+  updateBot,
+} from "@/lib/api/bots";
 import { useAction } from "@/lib/hooks/useAction";
 import { useResource } from "@/lib/hooks/useResource";
 import { type Appearance, Designer, appearanceFor } from "../avatar";
@@ -16,6 +26,7 @@ const RULE_ACTIONS = [
   ["type", "typing"],
   ["select", "choosing an option"],
   ["press", "pressing a key"],
+  ["sign_in", "signing in with a saved login"],
 ] as const;
 
 /**
@@ -50,6 +61,7 @@ export function DetailsPane({
       <Profile bot={bot} onChanged={onChanged} />
       <Looks bot={bot} onChanged={onChanged} />
       <Rules bot={bot} />
+      <SavedLogins bot={bot} />
       <section className="dsec">
         <h3>About</h3>
         <dl className="kv">
@@ -238,9 +250,10 @@ function Rules({ bot }: { bot: Bot }) {
     <section className="dsec">
       <h3>Approvals</h3>
       <p className="screen-help" style={{ marginTop: 0 }}>
-        By default {bot.name} asks before typing into password fields and before anything it judges
-        consequential (orders, sending, posting, deleting). Add rules to change that. When rules
-        conflict, <strong>ask first</strong> wins.
+        By default {bot.name} asks before anything it judges consequential (orders, sending,
+        posting, deleting). Passwords and codes never go through it: they go through the secure
+        sign-in form. Add rules to change that. When rules conflict, <strong>ask first</strong>{" "}
+        wins.
       </p>
       {rules.data?.rules.map((r) => (
         <div key={r.id} className="rule">
@@ -322,6 +335,65 @@ function Rules({ bot }: { bot: Bot }) {
         </div>
         {(add.error || remove.error) && <ErrorNotice>{add.error || remove.error}</ErrorNotice>}
       </div>
+    </section>
+  );
+}
+
+/**
+ * The login vault, as far as anyone can see it: sites and hints. Every bot in this
+ * organization shares it, the way they share the browser's cookies. No value is ever
+ * sent to this page; a login is changed by entering it again on a sign-in card.
+ */
+function SavedLogins({ bot }: { bot: Bot }) {
+  const vault = useResource(listVault, { intervalMs: 15000 });
+  const toggle = useAction(
+    (id: string, autoUse: boolean) => setVaultAutoUse(id, autoUse),
+    { onDone: vault.refresh },
+  );
+  const remove = useAction((id: string) => deleteVaultEntry(id), { onDone: vault.refresh });
+  const entries = vault.data?.entries ?? [];
+
+  return (
+    <section className="dsec">
+      <h3>Saved logins</h3>
+      <p className="screen-help" style={{ marginTop: 0 }}>
+        When {bot.name} reaches a sign-in page, it asks you in the chat. What you enter is
+        encrypted and typed straight into the browser. No bot ever sees it. Logins you save
+        here are shared by all your bots and filled in automatically unless you switch that off.
+        Codes are never saved.
+      </p>
+      {entries.map((e) => (
+        <div key={e.id} className="rule">
+          <span className="grow">
+            <code>{e.host}</code> {e.label}
+            <span className="muted">
+              {" "}
+              · {e.use_count > 0 ? `used ${e.use_count}×` : "not used yet"}
+            </span>
+          </span>
+          <label className="creds-auto" title="Fill this login in without asking">
+            <input
+              type="checkbox"
+              checked={e.auto_use}
+              disabled={toggle.pending}
+              onChange={(ev) => void toggle.run(e.id, ev.target.checked)}
+            />
+            Auto
+          </label>
+          <button
+            type="button"
+            className="ibtn"
+            aria-label={`Delete saved login for ${e.host}`}
+            disabled={remove.pending}
+            onClick={() => void remove.run(e.id)}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      {vault.data && entries.length === 0 && <p className="screen-help">No saved logins yet.</p>}
+      {vault.error && <ErrorNotice>{vault.error}</ErrorNotice>}
+      {(toggle.error || remove.error) && <ErrorNotice>{toggle.error || remove.error}</ErrorNotice>}
     </section>
   );
 }

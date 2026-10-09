@@ -192,6 +192,12 @@ class WorkClass(StrEnum):
     every other number here.
     """
 
+    PERCEPTION = "perception"
+    """Reading an image: a bot looking at its own screen (`look`). Its own class
+    because it is the one call that goes to a vision model, with an image in it — a
+    cost and a data flow that should be findable as themselves, not folded into the
+    step they serve. Overhead, like every class but `WORK`."""
+
 
 M1_WORK_CLASSES = frozenset(
     {WorkClass.WORK, WorkClass.COORDINATION, WorkClass.EVALUATION, WorkClass.SUMMARIZATION}

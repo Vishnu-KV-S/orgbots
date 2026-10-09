@@ -14,6 +14,12 @@ person makes is a revision, like one a bot makes, so the history has no gaps.
 
 Duplicating copies the brief and rules but not memory or conversation, the way
 GrokBot documents it: a copy is a new employee with the same job description.
+
+**Sign-in details come in here and go nowhere a run can read.** A credential card's
+submission is sealed into the vault (`runtime.gateway.vault`) in the same transaction
+that marks the card answered, and the run it starts carries the card's id — the
+values are in no run input, no message and no log line. The run's first pass fills
+the form through the browser tool, which is the only thing that opens the vault.
 """
 
 from __future__ import annotations
@@ -24,11 +30,20 @@ from dataclasses import dataclass
 from typing import Any
 
 from runtime.domain.bot_memory import BotBrief, brief_changes, clean_memory
-from runtime.domain.bots import actor_name_for, host_of
+from runtime.domain.bots import BOT_TURN_PRIORITY, actor_name_for, host_of
+from runtime.domain.errors import UnknownActorError
 from runtime.domain.ids import OrganizationId
 from runtime.domain.specs import StartRunRequest
+from runtime.domain.vault import CredentialField, check_value, same_site
+from runtime.gateway.vault import Vault
 from runtime.observability.logging import get_logger
-from runtime.org.bots import brief_of, publish_bot_actor, store_memory, write_brief
+from runtime.org.bots import (
+    brief_of,
+    publish_bot_actor,
+    refresh_bot_actor,
+    store_memory,
+    write_brief,
+)
 from runtime.persistence.repositories.bots import BotRow
 from runtime.persistence.uow import UnitOfWorkFactory
 from runtime.runtime.bootstrap import Registrar
@@ -49,6 +64,14 @@ class MemoryNotFoundError(LookupError):
     pass
 
 
+class CredentialRequestNotFoundError(LookupError):
+    pass
+
+
+class CredentialInputError(ValueError):
+    """A submission the card should not have sent. Names the field, never its value."""
+
+
 @dataclass(frozen=True, slots=True)
 class Sent:
     message_id: uuid.UUID
@@ -64,7 +87,25 @@ class BotManager:
         self._registrar = Registrar(uow_factory)
 
     async def ensure_organization(self, organization_id: OrganizationId, name: str) -> None:
+        """The organization exists, and every live bot in it runs today's spec.
+
+        The API calls this once per organization per process, so a spec change — the
+        ceilings raised to fit `MAX_STEPS`, say — reaches the bots made before it on the
+        API's first request after a deploy, helpers included. Without it they would keep
+        the spec their actor was published with, for as long as they live.
+        """
         await self._registrar.ensure_organization(organization_id, name)
+        async with self._uow.transaction() as uow:
+            for bot in await uow.bots.list_for(organization_id):
+                try:
+                    version = await refresh_bot_actor(uow, organization_id, bot.actor_name)
+                except UnknownActorError:
+                    # An actor that is not there to refresh is a bot every message to
+                    # already says so; nothing to fix from here.
+                    log.warning("bot.actor_missing", bot_id=str(bot.id), actor=bot.actor_name)
+                    continue
+                if version is not None:
+                    log.info("bot.actor_refreshed", actor=bot.actor_name, version=version)
 
     # --- lifecycle -------------------------------------------------------------------
 
@@ -242,6 +283,11 @@ class BotManager:
             for victim in doomed:
                 await uow.bots.set_flags(victim, stop_requested=True)
                 await uow.bots.soft_delete(victim)
+                await uow.vault.forget_bot(victim)
+            # A team's drive outlives any one member — helpers kept here keep it — but
+            # not the last one. Trashed rather than dropped, like the bots themselves.
+            if not await uow.bots.team(bot.team_id):
+                await uow.files.close_team(bot.team_id)
         log.info("bot.deleted", bot_id=str(bot_id), with_helpers=with_helpers, count=len(doomed))
         return doomed
 
@@ -269,6 +315,7 @@ class BotManager:
             # A new instruction makes anything still waiting for approval moot; the
             # bot will re-propose it if it still applies.
             await uow.bots.expire_pending(bot_id)
+            await uow.vault.expire_requests(bot_id)
             turn = await uow.bots.bump_turn(bot_id)
         return await self._start(
             bot, turn, key=f"bot:{bot_id}:msg:{message_id}", extra={}, anchor=message_id
@@ -317,6 +364,153 @@ class BotManager:
             anchor=note_id,
         )
 
+    # --- sign-in details --------------------------------------------------------------
+
+    async def submit_credentials(
+        self,
+        bot_id: uuid.UUID,
+        request_id: uuid.UUID,
+        values: dict[str, str],
+        *,
+        save: bool,
+        vault: Vault,
+    ) -> Sent:
+        """The person filled in a credential card. Seal it, then resume the bot.
+
+        One transaction: the vault entry, the card marked answered (conditionally, so
+        a double submit loses rather than fills twice) and the line in the chat that
+        says it happened — without the values, which exist from here on only as
+        ciphertext and in the page they are typed into.
+        """
+        bot = await self.get(bot_id)
+        async with self._uow.transaction() as uow:
+            request = await uow.vault.get_request(request_id)
+            if request is None or request.bot_id != bot_id or request.status != "pending":
+                raise CredentialRequestNotFoundError(str(request_id))
+            fields = [CredentialField.from_dict(f) for f in request.fields]
+            asked = [f for f, raw in zip(fields, request.fields, strict=True) if raw.get("ask")]
+            clean: dict[str, str] = {}
+            for f in asked:
+                value = values.get(f.key, "")
+                if f.kind != "text" and not value.strip():
+                    raise CredentialInputError(f"{f.label} is required")
+                problem = check_value(f.kind, value) if value else None
+                if problem:
+                    raise CredentialInputError(f"{f.label} {problem}")
+                if value:
+                    clean[f.key] = (
+                        value.strip() if f.kind in ("email", "username", "otp") else value
+                    )
+            sealed = await vault.submit(
+                uow,
+                bot.organization_id,
+                bot_id=bot_id,
+                host=request.host,
+                fields=fields,
+                submitted=clean,
+                save=save,
+            )
+            clean.clear()
+            if not await uow.vault.decide_request(
+                request_id,
+                status="submitted",
+                entry_ids=[sealed.once_id],
+                saved=sealed.saved_id is not None,
+            ):
+                raise CredentialRequestNotFoundError(f"{request_id} was already answered")
+            note_id = uuid.uuid4()
+            await uow.bots.add_message(
+                note_id,
+                bot_id,
+                role="system",
+                content=(
+                    f"You entered your details for {request.host} securely"
+                    + (" and saved them to the vault." if sealed.saved_id else ".")
+                ),
+                payload={
+                    "credential_request_id": str(request_id),
+                    "decision": "submitted",
+                    "saved": sealed.saved_id is not None,
+                },
+            )
+            turn = await uow.bots.bump_turn(bot_id)
+        return await self._start(
+            bot,
+            turn,
+            key=f"bot:{bot_id}:creds:{request_id}",
+            extra={"resume_credentials_id": str(request_id)},
+            anchor=note_id,
+        )
+
+    async def use_saved_login(
+        self, bot_id: uuid.UUID, request_id: uuid.UUID, entry_id: uuid.UUID
+    ) -> Sent:
+        """The person picked a saved login on the card instead of typing one."""
+        bot = await self.get(bot_id)
+        async with self._uow.transaction() as uow:
+            request = await uow.vault.get_request(request_id)
+            entry = await uow.vault.get_entry(entry_id)
+            if request is None or request.bot_id != bot_id or request.status != "pending":
+                raise CredentialRequestNotFoundError(str(request_id))
+            if (
+                entry is None
+                or entry.kind != "saved"
+                or entry.organization_id != bot.organization_id
+                or not same_site(entry.host, request.host)
+            ):
+                raise CredentialInputError(f"that is not a saved login for {request.host}")
+            if not await uow.vault.decide_request(
+                request_id, status="submitted", entry_ids=[entry_id], saved=True
+            ):
+                raise CredentialRequestNotFoundError(f"{request_id} was already answered")
+            note_id = uuid.uuid4()
+            await uow.bots.add_message(
+                note_id,
+                bot_id,
+                role="system",
+                content=f"You chose your saved login {entry.label} for {request.host}.",
+                payload={
+                    "credential_request_id": str(request_id),
+                    "decision": "saved",
+                    "saved": True,
+                },
+            )
+            turn = await uow.bots.bump_turn(bot_id)
+        return await self._start(
+            bot,
+            turn,
+            key=f"bot:{bot_id}:creds:{request_id}",
+            extra={"resume_credentials_id": str(request_id)},
+            anchor=note_id,
+        )
+
+    async def cancel_credentials(self, bot_id: uuid.UUID, request_id: uuid.UUID) -> Sent:
+        """ "Not now" — the bot is resumed and told, so it carries on without signing in
+        rather than sitting in a conversation that silently stopped."""
+        bot = await self.get(bot_id)
+        async with self._uow.transaction() as uow:
+            request = await uow.vault.get_request(request_id)
+            if request is None or request.bot_id != bot_id:
+                raise CredentialRequestNotFoundError(str(request_id))
+            if not await uow.vault.decide_request(request_id, status="cancelled"):
+                raise CredentialRequestNotFoundError(f"{request_id} was already answered")
+            note_id = uuid.uuid4()
+            await uow.bots.add_message(
+                note_id,
+                bot_id,
+                role="system",
+                content=f"You chose not to sign in to {request.host}.",
+                payload={"credential_request_id": str(request_id), "decision": "cancelled"},
+            )
+            turn = await uow.bots.bump_turn(bot_id)
+        return await self._start(
+            bot,
+            turn,
+            key=f"bot:{bot_id}:creds:{request_id}",
+            extra={"resume_credentials_id": str(request_id)},
+            anchor=note_id,
+        )
+
     async def _start(
         self,
         bot: BotRow,
@@ -332,6 +526,7 @@ class BotManager:
                 actor_name=bot.actor_name,
                 input={"bot_id": str(bot.id), "turn": turn, **extra},
                 idempotency_key=key,
+                priority=BOT_TURN_PRIORITY,
             )
         )
         async with self._uow.transaction() as uow:

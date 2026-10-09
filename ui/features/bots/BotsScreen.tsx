@@ -19,6 +19,7 @@ import { Avatar } from "./components/Avatar";
 import { ComputerPane } from "./components/ComputerPane";
 import { Conversation, type Pane } from "./components/Conversation";
 import { DetailsPane } from "./components/DetailsPane";
+import { FilesPane } from "./components/FilesPane";
 import {
   CommandPalette,
   DeleteBotDialog,
@@ -49,6 +50,13 @@ export function BotsScreen() {
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>(null);
+  // A file a conversation's activity line asked to open; the Files pane clears it.
+  const [openFile, setOpenFile] = useState<string | null>(null);
+  const openInFiles = useCallback((path: string) => {
+    setOpenFile(path);
+    setPane("files");
+  }, []);
+  const fileOpened = useCallback(() => setOpenFile(null), []);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [toast, setToast] = useState<{
     text: string;
@@ -224,6 +232,7 @@ export function BotsScreen() {
             onPane={setPane}
             onBack={() => setShowList(true)}
             onChanged={refresh}
+            onOpenFile={openInFiles}
           />
         ) : (
           <section className="convo">
@@ -274,7 +283,12 @@ export function BotsScreen() {
         )}
 
         {selected && pane && (
-          <aside className="bpane" aria-label={pane === "computer" ? "Computer" : "Details"}>
+          <aside
+            className="bpane"
+            aria-label={
+              pane === "computer" ? "Computer" : pane === "files" ? "Team files" : "Details"
+            }
+          >
             <div className="bpane-tabs">
               <button
                 type="button"
@@ -282,6 +296,13 @@ export function BotsScreen() {
                 onClick={() => setPane("computer")}
               >
                 Computer
+              </button>
+              <button
+                type="button"
+                className={cx("tab", pane === "files" && "on")}
+                onClick={() => setPane("files")}
+              >
+                Files
               </button>
               <button
                 type="button"
@@ -303,6 +324,13 @@ export function BotsScreen() {
             <div className="bpane-body">
               {pane === "computer" ? (
                 <ComputerPane key={selected.id} bot={selected} />
+              ) : pane === "files" ? (
+                <FilesPane
+                  key={selected.team_id}
+                  bot={selected}
+                  openPath={openFile}
+                  onOpened={fileOpened}
+                />
               ) : (
                 <DetailsPane
                   key={selected.id}

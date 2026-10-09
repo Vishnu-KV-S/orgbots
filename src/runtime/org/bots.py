@@ -46,6 +46,7 @@ from runtime.domain.bots import (
     MAX_HELPER_DEPTH,
     MAX_HELPERS,
     MAX_HISTORY_MESSAGES,
+    MAX_STEPS,
     BotRule,
     actor_name_for,
     helper_id,
@@ -54,15 +55,19 @@ from runtime.domain.bots import (
 )
 from runtime.domain.enums import ActorKind, WorkClass
 from runtime.domain.hashing import canonical_hash
-from runtime.domain.ids import ActorId, OrganizationId
+from runtime.domain.ids import ActorId, CorrelationId, OrganizationId
 from runtime.domain.specs import ActorSpec, Ceilings, ModelProfile, ModelProfiles
+from runtime.domain.vault import CredentialField, VaultOption, site_of
+from runtime.domain.vault import request_id as credential_request_id
 from runtime.org.department import FLASH, PRO
+from runtime.org.inbox import KIND_BOT_CONTINUE, InboxService, dedupe_key
 from runtime.persistence.repositories.bots import (
     BotMemoryRow,
     BotMessageRow,
     BotPendingRow,
     BotRow,
 )
+from runtime.persistence.repositories.vault import CredentialRequestRow, VaultEntryRow
 from runtime.persistence.uow import UnitOfWork, UnitOfWorkFactory
 
 BOT_GRAPH = "bot_agent@1"
@@ -93,6 +98,29 @@ _SUMMARY_PROFILE = ModelProfile(
 )
 
 
+VISION_MODEL = "deepseek-flash"
+"""The DeepSeek model that takes images. Must stay in `gateway.providers.VISION_MODELS`."""
+
+_LOOK_PROFILE = ModelProfile(
+    provider="deepseek",
+    model=VISION_MODEL,
+    max_output_tokens=1_500,
+    temperature=0.0,
+    # Peak-hour list prices, so the ledger never under-counts: $0.30 in, $1.20 out per
+    # million tokens. An image is at most 1,024 tokens — a look is a few hundredths of
+    # a cent.
+    input_cents_per_mtok=30,
+    output_cents_per_mtok=120,
+    # One question about one screenshot while a person watches the bot work: answered
+    # straight off, like the step itself.
+    thinking=False,
+    effort="low",
+)
+"""Bots' vision (`look`). `deepseek-flash` is the DeepSeek model that reads images —
+`deepseek-v4-pro`, which makes the bot's decisions, does not — so a bot's screenshots go
+to the same vendor, through the same key, as everything else it does."""
+
+
 def bot_actor_spec(actor_name: str) -> ActorSpec:
     return ActorSpec(
         name=actor_name,
@@ -100,16 +128,24 @@ def bot_actor_spec(actor_name: str) -> ActorSpec:
         graph_ref=BOT_GRAPH,
         allowed_tools=BROWSER_TOOLS,
         ceilings=Ceilings(
-            # MAX_STEPS browser actions, each preceded by one model call, plus the
-            # observation that opens the turn and room for one corrective retry per
-            # step's schema.
-            max_llm_calls=60,
-            max_tool_calls=40,
+            # Derived from MAX_STEPS, because the step budget is what a turn is meant
+            # to stop on: it ends with a progress report and carries on. A ceiling
+            # below it ends the turn as a failure instead. Every pass looks before it
+            # acts — two tool calls, observe and act — and makes one model call that
+            # may need one corrective retry; the slack covers a resumed turn's parked
+            # action and a fill. (It was 40 tool calls, which a busy turn hit at about
+            # step 20.)
+            max_llm_calls=2 * MAX_STEPS + 12,
+            max_tool_calls=2 * MAX_STEPS + 12,
             max_wall_clock_s=1_800.0,
             max_cost_cents=300,
         ),
         model_profiles=ModelProfiles(
-            profiles={WorkClass.WORK: _STEP_PROFILE, WorkClass.SUMMARIZATION: _SUMMARY_PROFILE}
+            profiles={
+                WorkClass.WORK: _STEP_PROFILE,
+                WorkClass.SUMMARIZATION: _SUMMARY_PROFILE,
+                WorkClass.PERCEPTION: _LOOK_PROFILE,
+            }
         ),
     )
 
@@ -246,9 +282,105 @@ async def publish_bot_actor(
     await uow.actors.set_delegation(organization_id, actor_name, dict(BOT_DELEGATION))
 
 
+async def refresh_bot_actor(
+    uow: UnitOfWork, organization_id: OrganizationId, actor_name: str
+) -> int | None:
+    """Bring a bot's actor up to today's `bot_actor_spec`. Returns the new version, or
+    `None` when it was already current.
+
+    Every bot runs the same spec, so when the spec changes — a ceiling raised, a tool
+    added — every bot published before the change is running the old one, and keeps
+    running it: the spec is frozen into each actor version. This publishes the next
+    version for a stale actor, in the caller's transaction. It is the same narrow
+    write as `publish_bot_actor`: the spec is always `bot_actor_spec`, so it can only
+    move a bot to what a new bot gets, never widen one.
+
+    In-flight runs are unaffected — a run's spec was frozen at admission.
+    """
+    spec = bot_actor_spec(actor_name)
+    wanted = canonical_hash(spec)
+    current = await uow.actors.resolve_active(organization_id, actor_name)
+    if current.spec_hash == wanted:
+        return None
+    version = current.version + 1
+    version_id = await uow.actors.add_version(
+        current.actor_id, version, spec.model_dump(mode="json"), wanted
+    )
+    await uow.actors.set_active_version(current.actor_id, version_id)
+    return version
+
+
 class BotService:
-    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+    def __init__(
+        self,
+        uow_factory: UnitOfWorkFactory,
+        *,
+        inbox: InboxService | None = None,
+        max_chunks: int = 1,
+    ) -> None:
         self._uow = uow_factory
+        self._inbox = inbox
+        self._max_chunks = max_chunks if inbox is not None else 1
+
+    @property
+    def max_chunks(self) -> int:
+        """Runs one instruction may take (`Settings.bot_auto_continue_chunks`); 1 when
+        nothing would start the next one."""
+        return self._max_chunks
+
+    async def continue_later(
+        self,
+        bot: BotRow,
+        *,
+        run_id: Any,
+        step: int,
+        turn: int,
+        chunk: int,
+        carried: dict[str, Any],
+    ) -> bool:
+        """Carry a long task on in a fresh run. False when this was the last chunk.
+
+        The next run is started by the dispatcher from a `bot.continue` message the
+        bot sends its own actor — the same road a task assignment takes, so it is
+        admitted, budgeted and kill-switched like any run, and it is deduped by the run
+        that sent it (a replayed step sends nothing new). It carries the same `turn`:
+        a new message from the person, or Stop, still ends the task at the next step.
+        `carried` is the step log and working memory, which a new run would not have.
+        """
+        if self._inbox is None or chunk >= self._max_chunks:
+            return False
+        async with self._uow.transaction() as uow:
+            await uow.bots.add_message(
+                message_id(run_id, step, "continuing"),
+                bot.id,
+                role="system",
+                content=(
+                    f"Still working — this is a long task, so I'm carrying on "
+                    f"(part {chunk + 1} of up to {self._max_chunks})."
+                ),
+                payload={"chunk": chunk + 1, "max_chunks": self._max_chunks},
+                run_id=uuid.UUID(str(run_id)),
+            )
+            await self._inbox.send(
+                organization_id=bot.organization_id,
+                kind=KIND_BOT_CONTINUE,
+                recipient=bot.actor_name,
+                correlation_id=CorrelationId(
+                    uuid.uuid5(uuid.NAMESPACE_URL, f"botturn:{bot.id}:{turn}")
+                ),
+                key=dedupe_key("bot.continue", run_id),
+                subject=f"{bot.name}: part {chunk + 1}",
+                body={"bot_id": str(bot.id), "turn": turn, "chunk": chunk + 1, "carried": carried},
+                sender=bot.actor_name,
+                uow=uow,
+            )
+        return True
+
+    async def claim_run(self, bot_id: uuid.UUID, run_id: Any) -> None:
+        """Make this run the bot's current one. A chunk the dispatcher started is not
+        one `BotManager` started, and the chat's "working" reads `last_run_id`."""
+        async with self._uow.transaction() as uow:
+            await uow.bots.set_flags(bot_id, last_run_id=uuid.UUID(str(run_id)))
 
     async def get(self, bot_id: uuid.UUID) -> BotRow | None:
         async with self._uow() as uow:
@@ -562,3 +694,89 @@ class BotService:
                 bot_id, unread=True, needs_attention=needs_attention, stop_requested=False
             )
             await uow.bots.touch(bot_id)
+
+    # --- the login vault -----------------------------------------------------------
+    #
+    # Metadata only. Nothing here can decrypt an entry — that is `runtime.gateway.vault`,
+    # opened by the browser tool at the moment it types — so a run deciding whether to
+    # fill a form knows which logins exist and what they can answer, and nothing more.
+
+    async def vault_options(self, bot: BotRow, host: str) -> list[VaultOption]:
+        async with self._uow() as uow:
+            rows = await uow.vault.options(bot.organization_id, site_of(host), bot.id)
+        return [vault_option(r) for r in rows]
+
+    async def request_credentials(
+        self,
+        bot: BotRow,
+        *,
+        run_id: Any,
+        step: int,
+        host: str,
+        page_url: str,
+        purpose: str,
+        fields: list[CredentialField],
+        ask: set[str],
+        thought: str,
+        saved: list[VaultOption],
+        retry: bool,
+        reason: str,
+        working: dict[str, Any] | None = None,
+    ) -> uuid.UUID:
+        """Put a credential card in the conversation. Idempotent per `(run, step)`.
+
+        The request keeps every field of the form (a confirm box is filled, not
+        asked); the card shows the ones in `ask`. Neither holds a value — there is
+        none yet, and when there is, it goes to the vault, not here.
+        """
+        rid = credential_request_id(run_id, step)
+        shown = [f.as_dict() | {"ask": f.key in ask} for f in fields]
+        async with self._uow.transaction() as uow:
+            await uow.vault.add_request(
+                rid,
+                bot.id,
+                run_id=uuid.UUID(str(run_id)),
+                host=site_of(host),
+                page_url=page_url,
+                purpose=purpose,
+                fields=shown,
+                working=working,
+            )
+            await uow.bots.add_message(
+                message_id(run_id, step, "credentials"),
+                bot.id,
+                role="credentials",
+                content=thought,
+                payload={
+                    "credential_request_id": str(rid),
+                    "host": site_of(host),
+                    "page_url": page_url[:500],
+                    "purpose": purpose,
+                    "fields": [
+                        {"key": f.key, "kind": f.kind, "label": f.label}
+                        for f in fields
+                        if f.key in ask
+                    ],
+                    "saved": [{"id": str(o.id), "label": o.label} for o in saved],
+                    "retry": retry,
+                    "reason": reason,
+                },
+                run_id=uuid.UUID(str(run_id)),
+            )
+            await uow.bots.set_flags(bot.id, needs_attention=True, unread=True)
+        return rid
+
+    async def credential_request(self, request_id: uuid.UUID) -> CredentialRequestRow | None:
+        async with self._uow() as uow:
+            return await uow.vault.get_request(request_id)
+
+
+def vault_option(row: VaultEntryRow) -> VaultOption:
+    return VaultOption(
+        id=row.id,
+        kind="once" if row.kind == "once" else "saved",
+        host=row.host,
+        kinds=frozenset(row.kinds),
+        label=row.label,
+        auto_use=row.auto_use,
+    )

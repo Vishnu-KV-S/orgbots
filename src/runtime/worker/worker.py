@@ -117,7 +117,14 @@ class Worker:
             rate_limiter=self._rate_limiter,
             credentials=self._credentials,
         )
-        self._org = build_org_services(uow_factory, self._artifacts)
+        # A bot's long task carries on through the dispatcher, so only where one runs.
+        self._org = build_org_services(
+            uow_factory,
+            self._artifacts,
+            bot_chunks=(
+                self._settings.bot_auto_continue_chunks if self._settings.conductor_enabled else 1
+            ),
+        )
         # --- M3 -------------------------------------------------------------------
         # Built here, when it is built at all, because it needs `self._models` — the
         # same gateway the graphs use, so extraction and retrieval are accounted through

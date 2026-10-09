@@ -16,7 +16,7 @@ const STARTERS = [
   "Look up the opening hours of the nearest public library.",
 ];
 
-export type Pane = "computer" | "details" | null;
+export type Pane = "computer" | "files" | "details" | null;
 
 export function Conversation({
   bot,
@@ -25,6 +25,7 @@ export function Conversation({
   onPane,
   onBack,
   onChanged,
+  onOpenFile,
 }: {
   bot: Bot;
   bots: Bot[];
@@ -32,6 +33,8 @@ export function Conversation({
   onPane: (pane: Pane) => void;
   onBack: () => void;
   onChanged: () => void;
+  /** Open a team file, named by path, in the Files pane. */
+  onOpenFile: (path: string) => void;
 }) {
   const convo = useConversation(bot.id);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -92,13 +95,15 @@ export function Conversation({
 
   const mood = moodOfConversation(convo.messages, {
     working: convo.working,
-    pending: convo.pending.size,
+    pending: convo.pending.size + convo.asking.size,
   });
   const status = convo.working
     ? "Working…"
-    : convo.pending.size > 0
-      ? "Waiting for your approval"
-      : bot.label || bot.description || "Ready";
+    : convo.asking.size > 0
+      ? "Waiting for you to sign in"
+      : convo.pending.size > 0
+        ? "Waiting for your approval"
+        : bot.label || bot.description || "Ready";
 
   return (
     <section className="convo" aria-label={`Conversation with ${bot.name}`}>
@@ -118,6 +123,14 @@ export function Conversation({
           title="Watch or take control of this bot's screen"
         >
           🖥 Computer
+        </button>
+        <button
+          type="button"
+          className={cx("tab", pane === "files" && "on")}
+          onClick={() => onPane(pane === "files" ? null : "files")}
+          title="The files this bot's team shares"
+        >
+          📁 Files
         </button>
         <button
           type="button"
@@ -158,8 +171,10 @@ export function Conversation({
             bot={bot}
             messages={convo.messages}
             pending={convo.pending}
+            asking={convo.asking}
             working={convo.working}
             onReply={setReplyTo}
+            onOpenFile={onOpenFile}
             onDecided={() => {
               convo.poke();
               onChanged();

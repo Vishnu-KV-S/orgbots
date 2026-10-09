@@ -12,6 +12,13 @@ person for the mouse. Handing control back is an explicit act.
 clicks, keys are typed one at a time, and there is a short settle after each action.
 Partly so sites that watch for robotic input behave normally, and partly so that a
 person watching the screen can follow what is happening.
+
+**`fill` is how a login gets typed, and it is the last line of the vault's checks.**
+It types values the gateway opened from the vault — values no bot has seen — and it
+refuses unless the page is on the site the values belong to, checked immediately
+before each field because a page can navigate on its own. A password goes only into a
+password box, so a page cannot talk a bot into aiming one at a text field it will
+read back. Values are never logged and never in an error message.
 """
 
 from __future__ import annotations
@@ -42,6 +49,11 @@ from playwright.async_api import (
 from runtime.computer.snapshot import MAX_ELEMENTS, MAX_TEXT_CHARS, SNAPSHOT_JS
 
 VIEWPORT = {"width": 1280, "height": 800}
+SEALED_SELECTOR = (
+    "input[type=password], [data-vault-filled], input[autocomplete~=one-time-code], "
+    "input[autocomplete^=cc-]"
+)
+"""Fields whose contents a bot never reads — the same set `snapshot.SNAPSHOT_JS` seals."""
 ACTION_TIMEOUT_MS = 15_000
 NAV_TIMEOUT_MS = 30_000
 HOME_URL = "about:blank"
@@ -179,7 +191,23 @@ class Computer:
         return snap
 
     async def screenshot(self, screen: Screen, *, quality: int = 70) -> bytes:
+        """What a *person* sees — the watch-and-take-control view. Unmasked: they are
+        looking at their own screen, and a person who typed a value may see it."""
         return await screen.page.screenshot(type="jpeg", quality=quality)
+
+    async def bot_screenshot(self, screen: Screen, *, quality: int = 60) -> bytes:
+        """What a *bot's* vision model sees. Everything the page snapshot seals is
+        masked here too — password and code boxes, card fields, anything the vault
+        filled — so a screenshot cannot show a model the email address the text view
+        reports only as `(filled)`. Viewport only, never the full page: the bot
+        scrolls for the rest, and a full-page capture of a long feed is megabytes."""
+        page = screen.page
+        return await page.screenshot(
+            type="jpeg",
+            quality=quality,
+            mask=[page.locator(SEALED_SELECTOR)],
+            mask_color="#7f7f7f",
+        )
 
     # --- bot actions -----------------------------------------------------------------
 
@@ -223,6 +251,67 @@ class Computer:
         screen.mouse = (x, y)
         await asyncio.sleep(random.uniform(0.05, 0.2))  # noqa: S311
         return x, y
+
+    # --- the vault's fill ------------------------------------------------------------
+
+    async def fill(
+        self,
+        screen: Screen,
+        *,
+        expect_host: str,
+        fields: list[dict[str, Any]],
+        submit: bool,
+    ) -> dict[str, Any]:
+        """Type sign-in values into the form, then (optionally) submit with Enter.
+
+        `fields` are `{elements, value, password}`. Several elements are one code split
+        across boxes: a code as long as there are boxes goes one character to a box,
+        anything else is typed into the first and left to the page's own paste logic.
+        """
+        if screen.controller != "bot":
+            raise HumanInControlError(
+                "a person has taken control of this screen; wait for them to hand it back"
+            )
+        async with screen.lock:
+            last: Any = None
+            for spec in fields:
+                elements = [int(e) for e in spec.get("elements", [])]
+                value = str(spec.get("value", ""))
+                if not elements or not value:
+                    continue
+                _check_site(screen.page.url, expect_host)
+                handles = [
+                    await self._element(screen, {"type": "fill", "element": e}) for e in elements
+                ]
+                for number, handle in zip(elements, handles, strict=True):
+                    await _check_fillable(handle, number, password=bool(spec.get("password")))
+                pieces = list(value) if len(handles) > 1 and len(value) == len(handles) else [value]
+                for handle, piece in zip(handles, pieces, strict=False):
+                    await self._type_secret(screen, handle, piece)
+                    last = handle
+            if last is None:
+                raise ComputerError("there was nothing to fill on this page")
+            if submit:
+                _check_site(screen.page.url, expect_host)
+                await asyncio.sleep(random.uniform(0.2, 0.5))  # noqa: S311
+                await last.press("Enter")
+            screen.last_action = "fill"
+            screen.last_active = time.time()
+            await _settle(screen.page)
+        return await self.observe(screen)
+
+    async def _type_secret(self, screen: Screen, handle: Any, value: str) -> None:
+        x, y = await self._move_to(screen, handle)
+        await screen.page.mouse.click(x, y)
+        await handle.evaluate(
+            "el => { el.value = ''; el.dispatchEvent(new Event('input', {bubbles: true})); "
+            "el.setAttribute('data-vault-filled', '1'); }"
+        )
+        try:
+            await screen.page.keyboard.type(value, delay=random.randint(25, 70))  # noqa: S311
+        except PlaywrightError as exc:
+            # Never the exception text: it is about the keystrokes.
+            raise ComputerError("typing into the form failed") from exc
 
     # --- human takeover --------------------------------------------------------------
 
@@ -361,6 +450,47 @@ async def _settle(page: Page) -> None:
     with contextlib.suppress(PlaywrightTimeout):
         await page.wait_for_load_state("domcontentloaded", timeout=5_000)
     await asyncio.sleep(0.4)
+
+
+def _site(host: str) -> str:
+    """Mirrors `runtime.domain.vault.site_of` — the computer imports nothing from the
+    runtime, so the one rule both sides must agree on is written twice and tested
+    against each other."""
+    host = (host or "").strip().lower().rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def _check_site(page_url: str, expect_host: str) -> None:
+    from urllib.parse import urlparse
+
+    try:
+        actual = urlparse(page_url).hostname or ""
+    except ValueError:
+        actual = ""
+    if not expect_host or _site(actual) != _site(expect_host):
+        raise ComputerError(
+            f"the page is on {actual or 'no site'}, not {expect_host}; nothing was filled"
+        )
+    if urlparse(page_url).scheme != "https" and _site(actual) not in ("localhost", "127.0.0.1"):
+        raise ComputerError(f"{actual} is not using https; sign-in details are not sent to it")
+
+
+_FILLABLE = frozenset({"", "text", "email", "tel", "password", "number"})
+
+
+async def _check_fillable(handle: Any, number: int, *, password: bool) -> None:
+    info = await handle.evaluate(
+        "el => ({tag: el.tagName.toLowerCase(), type: (el.getAttribute('type') || '')"
+        ".toLowerCase(), disabled: !!el.disabled, readonly: !!el.readOnly})"
+    )
+    if info["tag"] != "input" or info["type"] not in _FILLABLE:
+        raise ComputerError(f"element [{number}] is not a text box")
+    if info["disabled"] or info["readonly"]:
+        raise ComputerError(f"element [{number}] cannot be typed into")
+    if password and info["type"] != "password":
+        raise ComputerError(
+            f"element [{number}] is not a password box; a password only goes into one"
+        )
 
 
 def _normalise_url(url: str) -> str:

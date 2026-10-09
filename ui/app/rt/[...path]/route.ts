@@ -11,8 +11,9 @@ import { type NextRequest } from "next/server";
  * **This file is where the surface's shape is enforced, and it is asymmetric on
  * purpose:**
  *
- *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*, /healthz
- *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer* only
+ *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*,
+ *                                /v1/vault*, /healthz
+ *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer*, /v1/vault* only
  *
  * `/v1/observe` stays GET-only because it is read-only *by construction* — every
  * statement in `runtime/api/observe.py` is a SELECT — and a proxy that forwarded a
@@ -31,13 +32,17 @@ import { type NextRequest } from "next/server";
  * computer unless that person has taken control of it. The screenshot is the one
  * non-JSON response that passes through here; the body is forwarded untouched.
  *
+ * `/v1/vault` lists saved logins by site and hint and can delete one; no response
+ * from it carries a value. A credential card's answer is a POST under `/v1/bots`,
+ * and like every body it passes through here as text, unparsed and unlogged.
+ *
  * A method that is not one of the five is unroutable: Next only calls the
  * handlers a route file exports.
  */
 
 const UPSTREAM = process.env.RUNTIME_API_URL ?? "http://127.0.0.1:8000";
 
-const BOTS = ["v1/bots", "v1/computer"];
+const BOTS = ["v1/bots", "v1/computer", "v1/vault"];
 const READABLE = ["v1/observe/", "v1/control/", "healthz", ...BOTS];
 const WRITABLE = ["v1/control/", ...BOTS];
 

@@ -165,7 +165,23 @@ class Settings(BaseSettings):
     Turn it off (`RUNTIME_CONDUCTOR_ENABLED=false`) when something else is driving the
     loop — a test that ticks deliberately, a second deployment that owns scheduling,
     or a worker pool scaled out behind one conductor. Two conductors are safe (the
-    `trigger_fires` primary key and `uq_run_idem` make them idempotent); zero is not."""
+    `trigger_fires` primary key and `uq_run_idem` make them idempotent); zero is not.
+
+    The scheduler half also needs `scheduler_enabled`, which is off by default."""
+
+    scheduler_enabled: bool = False
+    """Whether the conductor's scheduler fires cron triggers by itself.
+
+    **Off by default: work starts on an instruction, not on a clock.** A run is started
+    by a person (a chat message, the run button, `tick`), or by the run that delegated
+    to it (`ask_bot`, a head assigning a task through the inbox — which is why the
+    dispatcher stays on). A trigger nobody is watching otherwise starts research runs on
+    its own, and after any downtime catches up with one run per trigger at startup.
+
+    `runtime.cli tick` and the UI's tick still fire due triggers: pressing it is the
+    instruction. Set `RUNTIME_SCHEDULER_ENABLED=true` for a department that is meant to
+    run itself — §4's clean run needs it, since there a person typing `tick` is the
+    intervention."""
 
     # --- M3: memory ------------------------------------------------------------------
     # Everything here is off or shadowed by default. M3 §9: PR-27 through PR-34 are safe
@@ -336,6 +352,25 @@ class Settings(BaseSettings):
     actors, so they need an organization; this one is created on first use."""
 
     bots_organization_name: str = "Personal"
+
+    bot_auto_continue_chunks: int = Field(default=5, ge=1, le=20)
+    """How many runs ("chunks") one instruction to a bot may take before it stops and
+    asks for "continue". A run is `MAX_STEPS` (24) steps; past that, a long task posts
+    itself a `bot.continue` message and the dispatcher starts the next chunk with the
+    same turn, so Stop and a new message still interrupt it. 1 means never carry on
+    unasked.
+
+    **The dispatcher does this**, so it only happens where the conductor runs
+    (`conductor_enabled`); with the conductor off, every chunk ends with "say continue",
+    as it did before. **Worst case it is this many times a run's ceiling** — 5 x 300
+    cents, $15, for one instruction — though a step costs about a cent."""
+
+    credential_keys: str = ""
+    """`RUNTIME_CREDENTIAL_KEYS`, read here so `.env` is enough for the login vault
+    (`runtime.gateway.vault.load_cipher`). The credential broker still reads the process
+    environment only; this copy fills in for the vault when the environment lacks it."""
+
+    credential_active_key: str = ""
 
     log_level: str = "INFO"
     log_json: bool = True

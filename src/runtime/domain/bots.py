@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -33,7 +33,16 @@ from runtime.domain.bot_memory import BriefPatch, MemoryKind
 from runtime.domain.schemas import SCHEMAS
 
 MAX_STEPS = 24
-"""Browser actions per run. A turn that needs more reports progress and stops."""
+"""Steps per run — one chunk of a turn. A task that needs more carries on in a new run
+(`bot.continue`, up to `Settings.bot_auto_continue_chunks` chunks), or, past that or
+with auto-continue off, reports progress and waits for "continue"."""
+
+BOT_TURN_PRIORITY = 80
+"""Queue order, not admission. A bot turn is someone waiting at the chat box, so it is
+claimed ahead of background work (cron firings, the department loop: the default 50).
+Without it a scheduler catching up after downtime puts a "hi" behind every backlogged
+research run, and with one worker slot that is hours. A long task's next chunk is the
+same person's same turn, so it gets the same priority."""
 
 MAX_HISTORY_MESSAGES = 24
 """Conversation messages (person and bot, not activity) carried into a run's input."""
@@ -49,6 +58,13 @@ creates litter."""
 
 HELPER_REPLY_CHARS = 2_000
 """How much of a helper's answer is carried back into the asking bot's next prompt."""
+
+MAX_PLAN_ITEMS = 10
+PLAN_ITEM_CHARS = 200
+NOTES_CHARS = 1_500
+"""Working memory — a turn's plan and notes, rewritten by the model as it goes. Small on
+purpose: it rides in every step's output, and a step that overflows `max_output_tokens`
+is a malformed step."""
 
 BOT_DELEGATION = {
     "enabled": True,
@@ -84,6 +100,20 @@ BROWSER_ACTIONS = frozenset(
 
 TURN_ENDING = frozenset({"reply", "ask_user"})
 
+FILE_ACTIONS = frozenset(
+    {
+        "list_files",
+        "read_file",
+        "write_file",
+        "append_file",
+        "edit_file",
+        "move_file",
+        "delete_file",
+    }
+)
+"""Steps on the team's shared drive (`domain.files`). Like memory, the drive is the
+runtime's own state, so these are not tool calls: nothing leaves the database."""
+
 MAX_SEED_MEMORIES = 10
 """What a bot may hand a helper it creates, as the helper's first memories."""
 """Steps that hand the conversation back to the person."""
@@ -111,6 +141,15 @@ StepAction = Literal[
     "recall",
     "forget",
     "update_brief",
+    "sign_in",
+    "list_files",
+    "read_file",
+    "write_file",
+    "append_file",
+    "edit_file",
+    "move_file",
+    "delete_file",
+    "look",
 ]
 
 
@@ -123,6 +162,22 @@ class BotStep(BaseModel):
         max_length=1_200,
         description="Brief reasoning: what you see, what you are trying to do, and why "
         "this action is the next one. Shown to the person as your activity.",
+    )
+    plan: list[Annotated[str, Field(max_length=PLAN_ITEM_CHARS)]] = Field(
+        default_factory=list,
+        max_length=MAX_PLAN_ITEMS,
+        description="Your plan for a task that takes more than a couple of steps: short "
+        "checklist lines, each starting [x] done, [>] doing now or [ ] to do. Write it on "
+        "the first step of such a task and rewrite it whenever it changes; an empty list "
+        "keeps the plan you already have. Leave it empty for a plain reply.",
+    )
+    notes: str | None = Field(
+        default=None,
+        max_length=NOTES_CHARS,
+        description="Your working notes for this task — what you have found so far (names, "
+        "numbers, prices, links) and what you still need. Pages are gone once you leave "
+        "them, so anything you will need later goes here. Replaces your previous notes: "
+        "carry forward what still matters, concisely. Omit to keep the notes you have.",
     )
     action: StepAction = Field(
         description="navigate/click/type/press/select/scroll/hover/back/forward/reload/"
@@ -138,7 +193,20 @@ class BotStep(BaseModel):
         "under you (bot = its name, label = job title, text = its mission, brief = its full "
         "job brief, seed_memories = facts it should start out knowing). ask_bot gives one of "
         "your helpers a task and waits for its answer (bot = the helper's name, text = the "
-        "task, with every fact it needs)."
+        "task, with every fact it needs). SIGN-IN: sign_in hands a login, sign-up or "
+        "verification-code form to the runtime, which fills it from your person's vault or "
+        "asks them with a secure form (element = optional, any field of that form); you never "
+        "see or type the values. FILES (your team's shared drive): list_files lists a folder "
+        "(path = the folder, default /; or text = words to search file names and contents "
+        "for). read_file reads a file (path; from_line to continue a long one). write_file "
+        "creates a file, or replaces one you have read this turn (path, text = the whole "
+        "content). append_file adds text at the end, creating the file if needed (path, "
+        "text). edit_file replaces one passage (path, find = the exact text now in the file, "
+        "text = what replaces it). move_file renames or moves a file (path, to). delete_file "
+        "deletes one (path). VISION: look asks a vision model about what is on your screen "
+        "right now (text = your question) — for images, charts, maps, colours and layout, "
+        "or whenever the page listing does not explain what you see; the answer comes back "
+        "to you."
     )
     element: int | None = Field(
         default=None,
@@ -156,8 +224,28 @@ class BotStep(BaseModel):
     )
     text: str | None = Field(
         default=None,
-        description="The text to type (type), the message (reply / ask_user), or the "
-        "note to save (remember).",
+        description="The text to type (type), the message (reply / ask_user), the note "
+        "to save (remember), or a file's content (write_file, append_file; the "
+        "replacement for edit_file).",
+    )
+    path: str | None = Field(
+        default=None,
+        max_length=400,
+        description="For file actions: a path in your team drive, e.g. "
+        "/projects/acme/vendors.csv. For list_files, a folder (default /).",
+    )
+    to: str | None = Field(
+        default=None,
+        max_length=400,
+        description="For move_file: the new path, or a folder ending in / to move it into.",
+    )
+    find: str | None = Field(
+        default=None,
+        description="For edit_file: the passage to replace, copied exactly from the file as "
+        "it is now — enough of it to match one place only.",
+    )
+    from_line: int | None = Field(
+        default=None, ge=1, description="For read_file: the line to start reading from."
     )
     memory: str | None = Field(
         default=None,
@@ -217,7 +305,7 @@ class BotStep(BaseModel):
         if self.action == "press" and not (self.key or "").strip():
             raise ValueError("press needs `key`")
         if (
-            self.action in ("reply", "ask_user", "remember", "recall")
+            self.action in ("reply", "ask_user", "remember", "recall", "look")
             and not (self.text or "").strip()
         ):
             raise ValueError(f"{self.action} needs `text`")
@@ -228,6 +316,19 @@ class BotStep(BaseModel):
                 raise ValueError("update_brief needs `brief` with at least one field to change")
             if not (self.text or "").strip():
                 raise ValueError("update_brief needs `text` — why the brief is changing")
+        if self.action in FILE_ACTIONS - {"list_files"} and not (self.path or "").strip():
+            raise ValueError(f"{self.action} needs `path` — e.g. /notes/todo.md")
+        if self.action == "write_file" and self.text is None:
+            raise ValueError("write_file needs `text` — the file's whole content")
+        if self.action == "append_file" and not self.text:
+            raise ValueError("append_file needs `text` — what to add")
+        if self.action == "edit_file":
+            if not self.find:
+                raise ValueError("edit_file needs `find` — the exact passage to replace")
+            if self.text is None:
+                raise ValueError("edit_file needs `text` — the replacement (empty to delete it)")
+        if self.action == "move_file" and not (self.to or "").strip():
+            raise ValueError("move_file needs `to` — the new path, or a folder ending in /")
         if self.action in ("create_bot", "ask_bot"):
             if not (self.bot or "").strip():
                 raise ValueError(f"{self.action} needs `bot` — the helper's name")
@@ -261,10 +362,13 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=2)
-"""Version 2 added memory (remember kinds, forget, recall, diary) and the brief
-(update_brief, create_bot's brief and seed memories). Version 1 was never run against
-stored data, so it is not kept."""
+BOT_STEP = SCHEMAS.register(BotStep, version=4)
+"""Version 4 added the team drive (`list_files` … `delete_file`, with `path`, `to`,
+`find` and `from_line`) and `look` (vision: a question about the screen). Version 3
+added working memory (`plan` and `notes`, carried from step to step within a turn)
+and `sign_in` (the login vault). Version 2 added memory (remember kinds, forget,
+recall, diary) and the brief (update_brief, create_bot's brief and seed memories).
+Version 1 was never run against stored data, so it is not kept."""
 
 
 # --- appearance -------------------------------------------------------------------------

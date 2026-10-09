@@ -142,6 +142,23 @@ past conversation. A parent can teach or correct its helpers' memories, and the
 helper's conversation says who changed what. Everything is visible and editable in
 the bot's Details.
 
+**Team files.** A bot and every helper under it are a *team*, and a team shares a
+drive of text files (`runtime/domain/files.py`, migration 042): notes, markdown, CSV,
+JSON, at folder paths like `/projects/acme/vendors.csv`. Bots `list_files` (or search
+names and contents), `read_file`, `write_file`, `append_file`, `edit_file` (one exact
+passage), `move_file` and `delete_file`, and the system prompt names the files changed
+most recently, so a helper sees what its teammates just wrote. That is how work is
+handed over: the asker puts the material in a file and names the path in the task;
+a helper with a long result writes it to a file and replies with the path, not
+2,000 characters of it. Nobody overwrites a teammate by accident: a bot must have read a
+file this turn before replacing it, and a replace is refused if the file changed after
+that read. Every change is a revision with who made it, and the person's **Files** pane
+browses, searches, edits (a save made over a newer change is refused, not merged),
+uploads, downloads, locks (no bot may change a locked file), restores old versions and
+brings back deleted files. Clicking a file step in a conversation opens the file. A
+team keeps its files when its lead is deleted and the helpers move up; deleting a
+team's last bot deletes them.
+
 **3D bots.** Every bot has a body — orb, cube, capsule, pod or retro TV, with
 its own eyes, top accessory, finish, colour and glow — designed in the bot's Details
 (or when creating it) and saved as `bots.appearance`. A bot nobody designed, like a
@@ -154,8 +171,8 @@ drawn by one WebGL canvas (`ui/features/bots/avatar`), so a long sidebar costs o
 context, not one per bot.
 
 Not yet built (the next phases): skills and teach-by-demonstration, scheduled and
-event routines, plugins/connectors, group chats with several bots, file attachments
-and generated artifacts, voice chat, team bots.
+event routines, plugins/connectors, group chats with several bots, binary file
+attachments (team files are text), voice chat, team bots.
 
 ---
 

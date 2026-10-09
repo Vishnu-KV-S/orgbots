@@ -76,6 +76,12 @@ def test_the_conductor_is_on_by_default(settings: Settings) -> None:
     assert settings.conductor_enabled is True
 
 
+def test_the_scheduler_is_off_by_default(settings: Settings) -> None:
+    """Runs start on an instruction — a person, or the run that delegated — not on a
+    clock. A department meant to run itself sets `RUNTIME_SCHEDULER_ENABLED=true`."""
+    assert settings.scheduler_enabled is False
+
+
 # --- two conductors ---------------------------------------------------------------
 
 

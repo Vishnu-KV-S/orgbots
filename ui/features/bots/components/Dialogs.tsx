@@ -482,6 +482,11 @@ export function DeleteBotDialog({
   const helpers = helpersOf(bot, bots);
   const direct = helpers.filter((h) => h.parent_bot_id === bot.id);
   const parent = bots.find((b) => b.id === bot.parent_bot_id);
+  // A team's files go with its last bot; helpers that stay keep them.
+  const team = bots.filter((b) => b.team_id === bot.team_id);
+  const doomed = new Set([bot.id, ...helpers.map((h) => h.id)]);
+  const takesFilesAlone = team.every((b) => b.id === bot.id);
+  const takesFilesWithHelpers = team.every((b) => doomed.has(b.id));
   const remove = useAction((withHelpers: boolean) => onDelete(withHelpers));
   const names = (list: Bot[]) =>
     list.length <= 3
@@ -494,7 +499,8 @@ export function DeleteBotDialog({
   return (
     <Modal title={`Delete ${bot.name}?`} onClose={onClose}>
       <p className="screen-help" style={{ marginTop: 0 }}>
-        {bot.name}&apos;s conversation and memory will be deleted. This cannot be undone.
+        {bot.name}&apos;s conversation and memory will be deleted
+        {takesFilesAlone && ", and so will the files its team shares"}. This cannot be undone.
         {helpers.length > 0 &&
           ` It has ${helpers.length} helper bot${helpers.length === 1 ? "" : "s"} under it — what should happen to ${helpers.length === 1 ? "it" : "them"}?`}
       </p>
@@ -511,7 +517,7 @@ export function DeleteBotDialog({
               Keep {names(direct)} — {direct.length === 1 ? "it moves" : "they move"} up to{" "}
               {parent ? `${parent.name}` : "the top level"} and keep
               {direct.length === 1 ? "s" : ""} {direct.length === 1 ? "its" : "their"} memory and
-              conversations.
+              conversations, and the team&apos;s files.
             </span>
           </button>
           <button
@@ -524,7 +530,10 @@ export function DeleteBotDialog({
               Delete {bot.name} and{" "}
               {helpers.length === 1 ? "its helper" : `all ${helpers.length} helpers`}
             </strong>
-            <span>Also deletes {names(helpers)}.</span>
+            <span>
+              Also deletes {names(helpers)}
+              {takesFilesWithHelpers && " and the files the team shares"}.
+            </span>
           </button>
           <button
             type="button"

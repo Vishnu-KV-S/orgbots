@@ -201,6 +201,31 @@ async def _load(state: ResearchState, config: RunnableConfig) -> dict[str, Any]:
             f"{subject} positioning 2026",
         ][:MAX_QUERIES]
     )
+    if task is None and payload.get("subject"):
+        # No task row, because a cron fired this actor directly rather than a manager
+        # assigning it work. `synthesize` builds its whole brief out of `task`, so
+        # without this the trigger's subject reaches the *queries* and nothing else —
+        # a WORK call with a null objective and no acceptance criteria, which on a
+        # provider-side search profile is a report about whatever the model chose.
+        #
+        # Shaped like a task row rather than threaded through separately so that every
+        # downstream reader — `_memory_query`, the correction block, `synthesize`'s
+        # `task_input` — keeps exactly one shape to handle. `task_id` is deliberately
+        # absent: there is no row to claim and none to submit against, and `_submit`
+        # keys off `ctx.task_id` rather than off this, so a briefed run still ends
+        # with its report in the run output and nothing half-written to `tasks`.
+        task = {
+            "title": str(payload.get("title") or subject),
+            "objective": str(
+                payload.get("objective") or f"Report what is new and worth knowing about {subject}."
+            ),
+            "acceptance_criteria": [str(c) for c in (payload.get("acceptance_criteria") or [])],
+            "input": {"subject": subject, "queries": queries},
+            "attempt": 0,
+            "schema_failures": 0,
+            "last_schema_errors": None,
+        }
+
     return {"task": task, "queries": queries, "gaps": []}
 
 
@@ -523,7 +548,13 @@ def build() -> StateGraph[ResearchState, Any, Any, Any]:
 
 
 # One entry point. The graph is linear — load, search, fetch, synthesize, submit —
-# and does an assigned task; it never reads `mode`. `work` is named anyway because it
-# is the mode the dispatcher stamps on a `task.assigned` message, so it is the answer
-# to "what do I put in `input.mode` to make this actor run".
+# and it never reads `mode`. `work` is named anyway because it is the mode the
+# dispatcher stamps on a `task.assigned` message, so it is the answer to "what do I
+# put in `input.mode` to make this actor run".
+#
+# Two ways in, and `load` is where they converge. A manager assigns a task and the
+# run carries `ctx.task_id`; or a trigger fires the actor directly with a `subject`
+# in its input, and `load` builds the same brief shape out of that payload. The
+# second path ends at `submit` with the report in the run output rather than on a
+# task row — nothing to claim, nothing to evaluate, and no manager in the loop.
 register_graph("research@1", build, modes=("work",))

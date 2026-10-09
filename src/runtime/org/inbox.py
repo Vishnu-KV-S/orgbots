@@ -51,6 +51,9 @@ KIND_TASK_CLOSED = "task.closed"
 KIND_TRIGGER_FIRED = "trigger.fired"
 KIND_APPROVAL_DECIDED = "approval.decided"
 KIND_NOTE = "note"
+KIND_BOT_CONTINUE = "bot.continue"
+"""A bot's long task carrying on in a fresh run. Addressed by the bot to its own actor;
+the dispatcher starts the run. See `runtime.org.bots.BotService.continue_later`."""
 
 KNOWN_KINDS = frozenset(
     {
@@ -61,6 +64,7 @@ KNOWN_KINDS = frozenset(
         KIND_TRIGGER_FIRED,
         KIND_APPROVAL_DECIDED,
         KIND_NOTE,
+        KIND_BOT_CONTINUE,
     }
 )
 
