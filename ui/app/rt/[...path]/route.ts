@@ -13,10 +13,11 @@ import { type NextRequest } from "next/server";
  *
  *     GET                        /v1/observe/*, /v1/control/*, /v1/bots*, /v1/computer*,
  *                                /v1/vault*, /v1/skills*, /v1/marketplace*, /v1/groups*,
- *                                /v1/connectors*, /v1/push*, /healthz
+ *                                /v1/connectors*, /v1/push*, /v1/templates*,
+ *                                /healthz
  *     POST, PUT, PATCH, DELETE   /v1/control/*, /v1/bots*, /v1/computer*, /v1/vault*,
  *                                /v1/skills*, /v1/marketplace*, /v1/groups*,
- *                                /v1/connectors*, /v1/push* only
+ *                                /v1/connectors*, /v1/push*, /v1/templates* only
  *
  * `/v1/observe` stays GET-only because it is read-only *by construction* — every
  * statement in `runtime/api/observe.py` is a SELECT — and a proxy that forwarded a
@@ -59,6 +60,7 @@ const BOTS = [
   "v1/groups",
   "v1/connectors",
   "v1/push",
+  "v1/templates",
 ];
 const READABLE = ["v1/observe/", "v1/control/", "healthz", ...BOTS];
 const WRITABLE = ["v1/control/", ...BOTS];

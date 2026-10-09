@@ -29,6 +29,7 @@ import {
   DeleteBotDialog,
   NewBotDialog,
   SettingsDialog,
+  SharedTemplateDialog,
   notificationsEnabled,
 } from "./components/Dialogs";
 import { Sidebar, type BotCommands } from "./components/Sidebar";
@@ -39,7 +40,7 @@ const LIST_MS = 2500;
 
 const LINEUP_MOODS: Mood[] = ["idle", "browsing", "happy", "thinking", "typing"];
 
-type Dialog = "new" | "palette" | "settings" | "group" | null;
+type Dialog = "new" | "palette" | "settings" | "group" | "template" | null;
 
 /**
  * The bots workspace: sidebar → conversation → computer / details.
@@ -66,6 +67,8 @@ export function BotsScreen() {
   }, []);
   const fileOpened = useCallback(() => setOpenFile(null), []);
   const [dialog, setDialog] = useState<Dialog>(null);
+  // A shared template's token from `/?template=…`, until it is used or dismissed.
+  const [templateToken, setTemplateToken] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     text: string;
     undo?: () => void;
@@ -87,6 +90,11 @@ export function BotsScreen() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setGroupId(params.get("group"));
+    const shared = params.get("template");
+    if (shared) {
+      setTemplateToken(shared);
+      setDialog("template");
+    }
     const fromUrl = params.get("bot");
     let remembered: string | null = null;
     try {
@@ -440,6 +448,20 @@ export function BotsScreen() {
           />
         )}
         {dialog === "new" && <NewBotDialog onClose={() => setDialog(null)} onCreated={created} />}
+        {dialog === "template" && templateToken && (
+          <SharedTemplateDialog
+            token={templateToken}
+            onClose={() => {
+              setDialog(null);
+              setTemplateToken(null);
+              window.history.replaceState(null, "", "/");
+            }}
+            onCreated={(bot) => {
+              setTemplateToken(null);
+              created(bot);
+            }}
+          />
+        )}
         {dialog === "group" && (
           <GroupDialog
             bots={list ?? []}

@@ -1017,3 +1017,74 @@ export const pushUnsubscribe = (endpoint: string) =>
 
 export const pushTest = () => request<{ queued: boolean }>(`${PUSH_BASE}/test`, json("POST", {}));
 
+
+// --- templates --------------------------------------------------------------------------
+
+export const TEMPLATES_BASE = "/rt/v1/templates";
+
+/** A bot's setup as a file or a link: never its memories, conversation, sign-ins or files. */
+export interface BotTemplate {
+  format: "agent-org/bot-template";
+  version: number;
+  name: string;
+  label: string;
+  description: string;
+  avatar: string;
+  appearance: import("@/features/bots/avatar/appearance").Appearance | null;
+  brief: BotBrief;
+  auto_review: boolean;
+  rules: TemplateRule[];
+  routines: { name: string; instruction: string; kind: string; cron: string | null }[];
+}
+
+export interface TemplateRule {
+  action_type: string;
+  host: string;
+  decision: "ask" | "allow" | "deny";
+}
+
+/** What importing will do: the rules it writes, the allow rules it leaves out unless
+ * asked, and every routine — paused. */
+export interface TemplatePreview {
+  template: BotTemplate;
+  file_name: string;
+  plan: {
+    rules: TemplateRule[];
+    allows: TemplateRule[];
+    routines: { name: string; kind: string; when: string; instruction: string }[];
+  };
+  uses?: number;
+}
+
+export interface TemplateLink {
+  id: string;
+  token: string;
+  name: string;
+  uses: number;
+  created_at: string;
+}
+
+export const exportTemplate = (botId: string) =>
+  request<{ template: BotTemplate; file_name: string }>(`${BOTS_BASE}/${botId}/template`, {});
+
+export const listTemplateLinks = (botId: string, signal?: AbortSignal) =>
+  request<{ links: TemplateLink[] }>(`${BOTS_BASE}/${botId}/template-links`, { signal });
+
+export const makeTemplateLink = (botId: string) =>
+  request<TemplateLink>(`${BOTS_BASE}/${botId}/template-links`, json("POST", {}));
+
+export const revokeTemplateLink = (botId: string, linkId: string) =>
+  request<{ revoked: string }>(`${BOTS_BASE}/${botId}/template-links/${linkId}`, {
+    method: "DELETE",
+  });
+
+export const previewTemplate = (template: unknown) =>
+  request<TemplatePreview>(`${TEMPLATES_BASE}/preview`, json("POST", { template }));
+
+export const sharedTemplate = (token: string, signal?: AbortSignal) =>
+  request<TemplatePreview>(`${TEMPLATES_BASE}/shared/${encodeURIComponent(token)}`, { signal });
+
+export const importTemplate = (
+  source: { template: BotTemplate } | { token: string },
+  options: { name?: string; keep_allows: boolean },
+) => request<Bot>(`${TEMPLATES_BASE}/import`, json("POST", { ...source, ...options }));

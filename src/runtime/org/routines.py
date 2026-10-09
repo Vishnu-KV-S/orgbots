@@ -222,7 +222,7 @@ class RoutineService:
             existing = await uow.routines.get(rid)
             if existing is not None:
                 return existing
-            await self._create(
+            await self.insert(
                 uow,
                 bot,
                 spec,
@@ -234,7 +234,7 @@ class RoutineService:
         assert row is not None
         return row
 
-    async def _create(
+    async def insert(
         self,
         uow: UnitOfWork,
         bot: BotRow,
@@ -244,6 +244,8 @@ class RoutineService:
         created_by_kind: str,
         created_by_bot_id: uuid.UUID | None,
     ) -> None:
+        """Create a routine in the caller's transaction — with the bot it belongs to,
+        when a template makes both."""
         if await uow.routines.count_for_bot(bot.id) >= MAX_ROUTINES_PER_BOT:
             raise RoutineError(
                 f"{bot.name} already has {MAX_ROUTINES_PER_BOT} routines; change or delete "
@@ -374,6 +376,12 @@ class RoutineService:
             if row is not None:
                 await uow.routines.soft_delete(row.id)
         return row
+
+
+def check_routine(spec: RoutineSpec) -> None:
+    """`RoutineError` if the routine's schedule or time zone is not one this runtime
+    can keep — before anything is written."""
+    _next_for(spec)
 
 
 def _next_for(spec: RoutineSpec) -> dt.datetime | None:
