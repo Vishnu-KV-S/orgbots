@@ -112,6 +112,49 @@ jobs:
           RUNTIME_CHAOS_ITERATIONS: ${{ matrix.iterations }}
         run: uv run pytest -q tests/test_exactly_once.py --timeout=3000
 
+  mobile:
+    name: mobile app · 3D bundle · analyze · test · APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            ui/package-lock.json
+            mobile/bot3d/package-lock.json
+      - name: the 3D bots asset is built from the web app's current bot code
+        run: |
+          (cd ui && npm ci)
+          (cd mobile/bot3d && npm ci && npm run build)
+          git diff --exit-code -- mobile/assets/bot3d/index.html \
+            || (echo "::error::mobile/assets/bot3d/index.html is stale: run npm run build in mobile/bot3d" && exit 1)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7
+          channel: stable
+          cache: true
+      - name: analyze and test
+        working-directory: mobile
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+      - name: build an installable Android APK
+        working-directory: mobile
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orgbots-android-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
+
   compose:
     name: docker compose up
     runs-on: ubuntu-latest

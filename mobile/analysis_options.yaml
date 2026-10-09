@@ -1,0 +1,22 @@
+include: package:flutter_lints/flutter.yaml
+
+formatter:
+  page_width: 100
+
+analyzer:
+  exclude:
+    - build/**
+    - bot3d/**
+    - android/**
+    - ios/**
+    - web/**
+  language:
+    strict-casts: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    - prefer_single_quotes
+    - prefer_final_locals
+    - avoid_print
+    - unawaited_futures

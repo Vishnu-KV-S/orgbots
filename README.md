@@ -123,10 +123,17 @@ cd ui && npm install && npm run dev           # http://localhost:3000
 
 Run the tests with `uv run pytest -q`. Everything below is the full technical write-up: how each part works, why it was built that way, and what each test proves.
 
+### On your phone
+
+An iOS and Android app, built with Flutter, lives in [`mobile/`](mobile/README.md). It connects to the same server you open in a browser — no extra service to run — and shows the same animated 3D bots: it ships the web app's own three.js bot code. Chat with your bots, approve their steps, hand them a sign-in and take over their screen from anywhere.
+
+![The mobile app: bots, a finished task, an approval and a sign-in request](docs/images/mobile.png)
+
 ## Tech stack
 
 - **Backend:** Python 3.12, FastAPI, LangGraph, SQLAlchemy (async), Alembic, PostgreSQL, Redis, Playwright, OpenTelemetry, structlog
 - **Frontend:** Next.js, React 19, three.js with React Three Fiber, CodeMirror, React Flow
+- **Mobile:** Flutter (Dart), with the web app's three.js bots bundled in
 - **Quality:** pytest with Hypothesis, chaos tests that kill workers mid-run, ruff, mypy and import-linter layer contracts
 
 ## Author
