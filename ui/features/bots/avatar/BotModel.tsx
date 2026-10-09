@@ -1,27 +1,39 @@
 "use client";
 
-import { RoundedBox } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Appearance, Shape } from "./appearance";
-import { applyFace, cloneFace, easeFace, screenMaterial, targetFace } from "./eyes";
+import { applyFace, cloneFace, easeFace, glowMaterial, screenMaterial, targetFace } from "./eyes";
+import {
+  capsule,
+  catEar,
+  earPod,
+  podShell,
+  roundedBox,
+  type Surface,
+  slab,
+  sphere,
+  torus,
+} from "./geometry";
 import type { Mood } from "./mood";
 import { textures } from "./textures";
 
 /**
- * One bot, finished like a consumer product: soft-touch shell, rubber gasket, satin
- * metal, one anodised accent in the bot's colour.
+ * One bot, finished like a glossy consumer product: a clear-coated white shell,
+ * polished chrome, candy-gloss accents in the bot's colour, and a glass visor.
  *
- * **Every bot shares the finish and the eyes**; what differs is the shape, the top
- * piece, the shell colour and the accent colour. That is the look of a product
+ * **Every bot shares the finish, the eyes and the ears**; what differs is
+ * the shape, the top piece and the accent colour. That is the look of a product
  * family rather than a toy box.
  *
- * **Nothing has a hard edge.** Shells are rounded boxes with large radii or turned
- * profiles, displays are rounded rectangles, and the hardware is domes and capsules.
+ * **Everything is smooth.** Shells are subdivided rounded boxes or turned profiles,
+ * the visor is a pillowed slab bent round the body, and the hardware is domes and
+ * capsules — a glossy finish shows every facet, so there are none to show.
  *
- * **The face is a display**: a dark screen in a rubber gasket under a satin glass
- * cover, with soft LED eyes drawn into it (`eyes.ts`). The eyes are the only light.
+ * **The face is a display**: a deep black panel under a clear glass cover, with soft
+ * LED eyes drawn into it (`eyes.ts`). The glass is drawn additively, so it adds only
+ * its reflections and the eyes shine through untouched. The eyes are the only light.
  *
  * The body animation is a pose function — mood and time in, target transform out —
  * damped every frame, so moods blend instead of snapping.
@@ -31,21 +43,73 @@ import { textures } from "./textures";
 const SHELL = "#ffffff";
 
 interface Layout {
-  /** The screen mesh's vertical offset in the body; eye coordinates are relative to it. */
-  screenY: number;
-  eyeY: number;
+  /** The display: its centre, its size, and what it is bent round. */
+  face: { y: number; z: number; w: number; h: number; r: number; surface: Surface };
   eyeX: number;
+  /** The eyes' height relative to the display's centre. */
+  eyeY: number;
   topY: number;
-  halfWidth: number;
   floorY: number;
+  /** A side ear: where it sits on the right side (the left mirrors it), the tilt of the
+   * shell's normal there, and how far it is turned toward the front. */
+  ear: { x: number; y: number; z: number; tilt: number; yaw: number };
+  /** Where a pair of top pieces (cat ears, knobs) sits, and the shell's tilt there. */
+  crown: { x: number; y: number; tilt: number };
 }
 
 const LAYOUT: Record<Shape, Layout> = {
-  orb: { screenY: 0, eyeY: 0.02, eyeX: 0.15, topY: 0.6, halfWidth: 0.6, floorY: -0.62 },
-  cube: { screenY: -0.02, eyeY: -0.02, eyeX: 0.15, topY: 0.475, halfWidth: 0.55, floorY: -0.5 },
-  capsule: { screenY: 0.13, eyeY: 0.13, eyeX: 0.12, topY: 0.67, halfWidth: 0.42, floorY: -0.69 },
-  pod: { screenY: -0.12, eyeY: -0.12, eyeX: 0.15, topY: 0.6, halfWidth: 0.55, floorY: -0.42 },
-  tv: { screenY: 0, eyeY: 0, eyeX: 0.16, topY: 0.46, halfWidth: 0.6, floorY: -0.62 },
+  orb: {
+    face: { y: 0, z: 0.6, w: 0.84, h: 0.54, r: 0.22, surface: { kind: "sphere", radius: 0.6 } },
+    eyeX: 0.15,
+    eyeY: 0.02,
+    topY: 0.6,
+    floorY: -0.62,
+    ear: { x: 0.5725, y: 0.04, z: 0.175, tilt: 0.067, yaw: 0.3 },
+    crown: { x: 0.25, y: 0.5454, tilt: 0.43 },
+  },
+  cube: {
+    face: { y: -0.02, z: 0.5, w: 0.62, h: 0.44, r: 0.16, surface: { kind: "sphere", radius: 2.2 } },
+    eyeX: 0.15,
+    eyeY: 0,
+    topY: 0.475,
+    floorY: -0.5,
+    ear: { x: 0.55, y: 0.06, z: 0.06, tilt: 0, yaw: 0.22 },
+    crown: { x: 0.25, y: 0.475, tilt: 0 },
+  },
+  capsule: {
+    face: { y: 0.13, z: 0.42, w: 0.74, h: 0.34, r: 0.16, surface: { kind: "cylinder", radius: 0.42 } },
+    eyeX: 0.12,
+    eyeY: 0,
+    topY: 0.67,
+    floorY: -0.69,
+    ear: { x: 0.4016, y: 0.13, z: 0.1228, tilt: 0, yaw: 0.3 },
+    crown: { x: 0.22, y: 0.6077, tilt: 0.55 },
+  },
+  pod: {
+    face: {
+      y: -0.12,
+      z: 0.5276,
+      w: 0.92,
+      h: 0.27,
+      r: 0.12,
+      surface: { kind: "cylinder", radius: 0.5276, taper: 0.1316 },
+    },
+    eyeX: 0.15,
+    eyeY: 0,
+    topY: 0.6,
+    floorY: -0.42,
+    ear: { x: 0.5203, y: 0.13, z: 0.159, tilt: 0.146, yaw: 0.3 },
+    crown: { x: 0.25, y: 0.5399, tilt: 0.47 },
+  },
+  tv: {
+    face: { y: 0, z: 0.4, w: 0.72, h: 0.46, r: 0.14, surface: { kind: "sphere", radius: 1.5 } },
+    eyeX: 0.16,
+    eyeY: 0,
+    topY: 0.46,
+    floorY: -0.62,
+    ear: { x: 0.6, y: 0.06, z: 0.04, tilt: 0, yaw: 0.22 },
+    crown: { x: 0.28, y: 0.46, tilt: 0 },
+  },
 };
 
 interface Pose {
@@ -70,6 +134,10 @@ const BASE: Pose = {
   spin: false,
 };
 
+/** A smooth 0→1→0 bump over the first `width` of a cycle. */
+const bump = (c: number, width: number) =>
+  c >= 0 && c < width ? Math.sin((c / width) * Math.PI) : 0;
+
 /** Movements are small and weighted — a heavy object hovering, not a balloon. */
 function pose(mood: Mood, t: number): Pose {
   const p: Pose = { ...BASE };
@@ -78,6 +146,7 @@ function pose(mood: Mood, t: number): Pose {
       p.y = 0.025 * Math.sin(t * 1.4);
       p.rotZ = 0.02 * Math.sin(t * 0.8);
       p.rotY = 0.16 * Math.sin(t * 0.3);
+      p.sy = 1 + 0.006 * Math.sin(t * 1.4 + 1);
       break;
     case "thinking":
       p.y = 0.02 * Math.sin(t * 1.6);
@@ -88,17 +157,16 @@ function pose(mood: Mood, t: number): Pose {
       p.rotY = 0.22 * Math.sin(t * 1.9);
       break;
     case "clicking": {
-      const c = (t % 0.8) / 0.8;
-      const hit = c < 0.14;
-      p.sy = hit ? 0.93 : 1;
-      p.sx = hit ? 1.04 : 1;
-      p.y = hit ? -0.03 : 0.015 * Math.sin(c * Math.PI);
-      p.rotX = hit ? 0.07 : 0;
+      const hit = bump((t % 0.8) / 0.8, 0.2);
+      p.sy = 1 - 0.06 * hit;
+      p.sx = 1 + 0.03 * hit;
+      p.y = -0.03 * hit;
+      p.rotX = 0.07 * hit;
       break;
     }
     case "typing":
-      p.x = 0.004 * Math.sin(t * 55);
-      p.rotZ = 0.01 * Math.sin(t * 41);
+      p.x = 0.003 * Math.sin(t * 55);
+      p.rotZ = 0.008 * Math.sin(t * 41);
       p.y = 0.008 * Math.sin(t * 8);
       break;
     case "waiting":
@@ -114,9 +182,10 @@ function pose(mood: Mood, t: number): Pose {
     }
     case "happy": {
       const c = (t % 1.8) / 1.8;
-      p.y = c < 0.4 ? 0.12 * Math.sin((c / 0.4) * Math.PI) : 0;
-      p.sy = c > 0.4 && c < 0.47 ? 0.95 : 1;
-      p.sx = c > 0.4 && c < 0.47 ? 1.03 : 1;
+      p.y = 0.12 * bump(c, 0.4);
+      const land = bump(c - 0.4, 0.1);
+      p.sy = 1 - 0.05 * land;
+      p.sx = 1 + 0.03 * land;
       break;
     }
     case "creating":
@@ -145,153 +214,108 @@ function pose(mood: Mood, t: number): Pose {
   return p;
 }
 
-function useMaterials(a: Appearance) {
-  const tex = textures();
-  const materials = useMemo(() => {
-    // Soft-touch shell: matte, a fine grain, a little velvet at grazing angles.
-    const shell = new THREE.MeshPhysicalMaterial({
+/** The finishes every bot shares, made once. */
+let shared: ReturnType<typeof sharedMaterials> | null = null;
+function sharedMaterials() {
+  return {
+    // Gloss white: a satin base under a crisp clear coat, like painted ABS. The
+    // clear coat carries the sharp softbox reflections; the base keeps the white soft.
+    shell: new THREE.MeshPhysicalMaterial({
       color: SHELL,
-      roughness: 0.58,
-      roughnessMap: tex.plasticRough,
-      bumpMap: tex.softGrain,
-      bumpScale: 0.35,
-      sheen: 0.35,
-      sheenRoughness: 0.8,
-      sheenColor: new THREE.Color("#ffffff"),
-      clearcoat: 0.06,
-      clearcoatRoughness: 0.6,
-    });
-    // Graphite rubber: the gasket round the display, the base, the ears.
-    const rubber = new THREE.MeshPhysicalMaterial({
-      color: "#2a2a2d",
-      roughness: 0.82,
-      bumpMap: tex.softGrain,
-      bumpScale: 0.5,
-      sheen: 0.2,
-      sheenRoughness: 0.9,
-      sheenColor: new THREE.Color("#ffffff"),
-    });
-    // Satin dark metal, with a trace of brush grain.
-    const metal = new THREE.MeshPhysicalMaterial({
-      color: "#6e6a65",
-      metalness: 0.9,
-      roughness: 0.34,
-      roughnessMap: tex.brushedRough,
-    });
-    // One anodised accent in the bot's colour, like the ring round a lens.
-    const accent = new THREE.MeshPhysicalMaterial({
-      color: a.glow,
-      metalness: 0.45,
-      roughness: 0.38,
-      clearcoat: 0.3,
-      clearcoatRoughness: 0.3,
-    });
-    // Satin cover glass: dark, softly reflective.
-    const glass = new THREE.MeshPhysicalMaterial({
-      color: "#0e0e10",
-      roughness: 0.14,
-      clearcoat: 0.5,
-      clearcoatRoughness: 0.15,
-      envMapIntensity: 0.5,
+      roughness: 0.3,
+      specularIntensity: 0.4,
+      clearcoat: 1,
+      clearcoatRoughness: 0.035,
+    }),
+    // Piano black, for the ear caps and the antenna's foot.
+    gloss: new THREE.MeshPhysicalMaterial({
+      color: "#121317",
+      roughness: 0.22,
+      clearcoat: 1,
+      clearcoatRoughness: 0.03,
+    }),
+    // Polished chrome. It mirrors the studio, so it reads as metal on any background.
+    metal: new THREE.MeshPhysicalMaterial({
+      color: "#e9ebef",
+      metalness: 1,
+      roughness: 0.09,
+    }),
+    // Clear cover glass, drawn additively: black adds nothing, so all that shows is
+    // its reflections, laid over the display beneath.
+    glass: new THREE.MeshPhysicalMaterial({
+      color: "#000000",
+      roughness: 0.04,
+      clearcoat: 1,
+      clearcoatRoughness: 0.02,
+      envMapIntensity: 1.5,
       transparent: true,
-      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
-    });
-    // The display itself: soft LED eyes, drawn by a shader (`eyes.ts`).
-    const screen = screenMaterial(a);
-    const seam = new THREE.MeshStandardMaterial({ color: "#1d1d1f", roughness: 0.8 });
-    return { shell, rubber, metal, accent, glass, screen, seam };
-  }, [a.glow, tex]);
+    }),
+    // The hairline gap round the display and along the shell's part lines.
+    seam: new THREE.MeshStandardMaterial({ color: "#0c0c0e", roughness: 0.6 }),
+  };
+}
 
-  useEffect(() => () => Object.values(materials).forEach((m) => m.dispose()), [materials]);
-  return materials;
+function useMaterials(a: Appearance, layout: Layout) {
+  shared ??= sharedMaterials();
+  const own = useMemo(() => {
+    // The display itself: soft LED eyes, drawn by a shader (`eyes.ts`).
+    const screen = screenMaterial(a, [layout.face.w / 2, layout.face.h / 2]);
+    return {
+      // Candy gloss in the bot's colour: the ear rings, the top piece's details.
+      accent: new THREE.MeshPhysicalMaterial({
+        color: a.glow,
+        roughness: 0.28,
+        clearcoat: 1,
+        clearcoatRoughness: 0.04,
+      }),
+      screen,
+      // The display's light, spilling onto the shell round it.
+      glow: glowMaterial(screen, layout.face.r),
+    };
+  }, [a.glow, layout]);
+  useEffect(() => () => Object.values(own).forEach((m) => m.dispose()), [own]);
+  return { ...shared, ...own };
 }
 
 type Mats = ReturnType<typeof useMaterials>;
 
-/** A flat panel with rounded corners — a display, its gasket, the glass over it.
- * (`RoundedBox` cannot round corners beyond half its depth, which for a thin panel
- * is no rounding at all.) Centred, with its front face at z = depth / 2. */
-const panels = new Map<string, THREE.ExtrudeGeometry>();
-function panel(w: number, h: number, r: number, depth: number): THREE.ExtrudeGeometry {
-  const key = `${w}:${h}:${r}:${depth}`;
-  const hit = panels.get(key);
-  if (hit) return hit;
-  const shape = new THREE.Shape();
-  const x = -w / 2;
-  const y = -h / 2;
-  shape.moveTo(x + r, y);
-  shape.lineTo(x + w - r, y);
-  shape.quadraticCurveTo(x + w, y, x + w, y + r);
-  shape.lineTo(x + w, y + h - r);
-  shape.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  shape.lineTo(x + r, y + h);
-  shape.quadraticCurveTo(x, y + h, x, y + h - r);
-  shape.lineTo(x, y + r);
-  shape.quadraticCurveTo(x, y, x + r, y);
-  const bevel = Math.min(0.006, depth / 2.5);
-  const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth,
-    bevelEnabled: true,
-    bevelThickness: bevel,
-    bevelSize: bevel,
-    bevelSegments: 4,
-    curveSegments: 16,
-  });
-  geometry.translate(0, 0, -depth / 2);
-  panels.set(key, geometry);
-  return geometry;
-}
-
-/** The pod: one turned profile — dome, gently tapered sides, a rounded foot. */
-let podGeometry: THREE.LatheGeometry | null = null;
-function pod(): THREE.LatheGeometry {
-  if (podGeometry) return podGeometry;
-  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -0.41)];
-  for (let i = 0; i <= 8; i++) {
-    const a = -Math.PI / 2 + (i / 8) * (Math.PI / 2);
-    pts.push(new THREE.Vector2(0.42 + 0.08 * Math.cos(a), -0.33 + 0.08 * Math.sin(a)));
+/** The display: a deep black panel with a rounded, pillowed edge, a hairline seam
+ * round it, and clear glass over it, all bent to the body — and, under it all, the
+ * light the screen spills onto the shell when it shines. */
+function Visor({ m, layout }: { m: Mats; layout: Layout }) {
+  const { y, z, w, h, r, surface } = layout.face;
+  // A domed face bulges out of a flat one: lift it so its corners sit on the shell.
+  let lift = 0;
+  if (surface.kind === "sphere" && surface.radius > 1) {
+    const R = surface.radius;
+    const cx = w / 2 - r * 0.3;
+    const cy = h / 2 - r * 0.3;
+    lift = R - R * Math.cos(cx / R) * Math.cos(cy / R) - 0.004;
   }
-  pts.push(new THREE.Vector2(0.55, 0.05));
-  for (let i = 1; i <= 24; i++) {
-    const a = (i / 24) * (Math.PI / 2);
-    pts.push(new THREE.Vector2(Math.max(0.0001, 0.55 * Math.cos(a)), 0.05 + 0.55 * Math.sin(a)));
-  }
-  podGeometry = new THREE.LatheGeometry(pts, 96);
-  return podGeometry;
-}
-
-/** A rounded rectangular display in a rubber gasket, under glass. */
-function FlatFace({
-  m,
-  w,
-  h,
-  r,
-  z,
-  y,
-}: {
-  m: Mats;
-  w: number;
-  h: number;
-  r: number;
-  z: number;
-  y: number;
-}) {
+  const sink = lift + 0.04;
+  // The light the display casts lies on the shell itself, so it follows the shell:
+  // round the sphere or cylinder, or flat on a box's face.
+  const shell: Surface = surface.kind === "sphere" && surface.radius > 1 ? { kind: "flat" } : surface;
   return (
-    <group position={[0, y, 0]}>
+    <>
       <mesh
-        geometry={panel(w + 0.07, h + 0.07, r + 0.035, 0.014)}
-        position={[0, 0, z]}
-        material={m.rubber}
+        geometry={slab(w + 0.24, h + 0.24, r + 0.12, 0.005, 0.002, shell, 0.04)}
+        material={m.glow}
+        position={[0, y, z]}
+        renderOrder={1}
       />
-      <mesh geometry={panel(w, h, r, 0.01)} position={[0, 0, z + 0.008]} material={m.screen} />
-      <mesh
-        geometry={panel(w + 0.01, h + 0.01, r + 0.005, 0.006)}
-        position={[0, 0, z + 0.02]}
-        material={m.glass}
-        renderOrder={2}
-      />
-    </group>
+      <group position={[0, y, z + lift]}>
+        <mesh geometry={slab(w + 0.026, h + 0.026, r + 0.013, 0.004, 0.003, surface, sink)} material={m.seam} />
+        <mesh geometry={slab(w, h, r, 0.026, 0.02, surface, sink)} material={m.screen} />
+        <mesh
+          geometry={slab(w + 0.003, h + 0.003, r + 0.0015, 0.0275, 0.0215, surface, sink)}
+          material={m.glass}
+          renderOrder={2}
+        />
+      </group>
+    </>
   );
 }
 
@@ -300,171 +324,127 @@ function Body({ shape, m }: { shape: Shape; m: Mats }) {
     case "orb":
       return (
         <group>
-          <mesh material={m.shell}>
-            <sphereGeometry args={[0.6, 96, 64]} />
-          </mesh>
-          {/* Gasket, display, glass: patches of concentric spheres across the front. */}
-          <mesh material={m.rubber}>
-            <sphereGeometry args={[0.6015, 80, 48, Math.PI / 2 - 0.88, 1.76, 0.97, 1.1]} />
-          </mesh>
-          <mesh material={m.screen}>
-            <sphereGeometry args={[0.603, 80, 48, Math.PI / 2 - 0.8, 1.6, 1.04, 0.96]} />
-          </mesh>
-          <mesh material={m.glass} renderOrder={2}>
-            <sphereGeometry args={[0.618, 80, 48, Math.PI / 2 - 0.82, 1.64, 1.02, 1.0]} />
-          </mesh>
-          <mesh material={m.seam} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.36, 0]}>
-            <torusGeometry args={[0.48, 0.003, 6, 96]} />
-          </mesh>
+          <mesh geometry={sphere(0.6, 160, 120)} material={m.shell} />
+          <mesh geometry={torus(0.48, 0.0028)} material={m.seam} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.36, 0]} />
         </group>
       );
     case "cube":
-      return (
-        <group>
-          <RoundedBox args={[1.1, 0.95, 1.0]} radius={0.2} smoothness={10} material={m.shell} />
-          <FlatFace m={m} w={0.62} h={0.44} r={0.15} z={0.5} y={-0.02} />
-        </group>
-      );
+      return <mesh geometry={roundedBox(1.1, 0.95, 1.0, 0.22)} material={m.shell} />;
     case "capsule":
       return (
         <group>
-          <mesh material={m.shell}>
-            <capsuleGeometry args={[0.42, 0.5, 24, 64]} />
-          </mesh>
-          <mesh material={m.rubber} position={[0, 0.13, 0]}>
-            <cylinderGeometry args={[0.4215, 0.4215, 0.38, 64, 1, true, -1.0, 2.0]} />
-          </mesh>
-          <mesh material={m.screen} position={[0, 0.13, 0]}>
-            <cylinderGeometry args={[0.423, 0.423, 0.32, 64, 1, true, -0.92, 1.84]} />
-          </mesh>
-          <mesh material={m.glass} position={[0, 0.13, 0]} renderOrder={2}>
-            <cylinderGeometry args={[0.44, 0.44, 0.34, 64, 1, true, -0.95, 1.9]} />
-          </mesh>
-          <mesh material={m.seam} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.18, 0]}>
-            <torusGeometry args={[0.42, 0.003, 6, 96]} />
-          </mesh>
+          <mesh geometry={capsule(0.42, 0.5, 128)} material={m.shell} />
+          <mesh geometry={torus(0.42, 0.0028)} material={m.seam} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.18, 0]} />
         </group>
       );
     case "pod":
       return (
         <group>
-          <mesh material={m.shell} geometry={pod()} />
-          <mesh material={m.rubber} position={[0, -0.12, 0]}>
-            <cylinderGeometry args={[0.5485, 0.5105, 0.29, 80, 1, true, -1.05, 2.1]} />
-          </mesh>
-          <mesh material={m.screen} position={[0, -0.12, 0]}>
-            <cylinderGeometry args={[0.5464, 0.5148, 0.24, 80, 1, true, -0.98, 1.96]} />
-          </mesh>
-          <mesh material={m.glass} position={[0, -0.12, 0]} renderOrder={2}>
-            <cylinderGeometry args={[0.564, 0.532, 0.26, 80, 1, true, -1.0, 2.0]} />
-          </mesh>
-          <mesh material={m.seam} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-            <torusGeometry args={[0.551, 0.003, 6, 96]} />
-          </mesh>
+          <mesh geometry={podShell()} material={m.shell} />
+          <mesh geometry={torus(0.551, 0.0028)} material={m.seam} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.05, 0]} />
         </group>
       );
     case "tv":
       return (
         <group>
-          <RoundedBox args={[1.2, 0.92, 0.8]} radius={0.18} smoothness={10} material={m.shell} />
-          <FlatFace m={m} w={0.72} h={0.46} r={0.14} z={0.4} y={0} />
+          <mesh geometry={roundedBox(1.2, 0.92, 0.8, 0.2)} material={m.shell} />
           {[-1, 1].map((s) => (
             <mesh
               key={s}
+              geometry={capsule(0.03, 0.14, 32)}
               material={m.metal}
               position={[s * 0.34, -0.53, 0]}
               rotation={[0, 0, s * 0.22]}
-            >
-              <capsuleGeometry args={[0.028, 0.14, 8, 20]} />
-            </mesh>
+            />
           ))}
         </group>
       );
   }
 }
 
-function TopPiece({ a, m, layout }: { a: Appearance; m: Mats; layout: Layout }) {
+/** Round ear pods on both sides, like a pair of headphones: a white shell, a ring in
+ * the bot's colour, a piano-black cap. */
+function Ears({ m, layout }: { m: Mats; layout: Layout }) {
+  const { x, y, z, tilt, yaw } = layout.ear;
+  return (
+    <>
+      {[-1, 1].map((s) => (
+        <group key={s} position={[s * x, y, z]} rotation={[0, -s * yaw, 0]}>
+          <group rotation={[0, 0, -s * (Math.PI / 2 - tilt)]}>
+            <mesh geometry={earPod()} material={m.shell} />
+            <mesh geometry={torus(0.098, 0.015)} material={m.accent} position={[0, 0.064, 0]} rotation={[Math.PI / 2, 0, 0]} />
+            <mesh geometry={sphere(0.068)} material={m.gloss} position={[0, 0.066, 0]} scale={[1, 0.38, 1]} />
+          </group>
+        </group>
+      ))}
+    </>
+  );
+}
+
+function TopPiece({ a, m, layout, phase }: { a: Appearance; m: Mats; layout: Layout; phase: number }) {
   const wobble = useRef<THREE.Group>(null);
+  const twitch = useRef<THREE.Group>(null);
   useFrame((state) => {
-    if (wobble.current) wobble.current.rotation.z = 0.05 * Math.sin(state.clock.elapsedTime * 2.6);
+    const t = state.clock.elapsedTime + phase;
+    if (wobble.current) wobble.current.rotation.z = 0.05 * Math.sin(t * 2.6);
+    // Now and then one cat ear flicks.
+    if (twitch.current) twitch.current.rotation.x = -0.35 * bump(t % 5.3, 0.22);
   });
   const y = layout.topY;
+  const crown = layout.crown;
   switch (a.top) {
     case "ring":
-      // A lens-like button: satin metal bezel, the accent ring, a rubber centre.
+      // A lens-like button: a chrome bezel, the accent ring, a black glass centre.
       return (
         <group position={[0, y - 0.02, 0]}>
-          <mesh material={m.metal} rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.125, 0.022, 24, 64]} />
-          </mesh>
-          <mesh material={m.accent} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.006, 0]}>
-            <torusGeometry args={[0.096, 0.012, 20, 64]} />
-          </mesh>
-          <mesh material={m.rubber} position={[0, 0.004, 0]} scale={[1, 0.28, 1]}>
-            <sphereGeometry args={[0.085, 40, 20]} />
-          </mesh>
+          <mesh geometry={torus(0.125, 0.022)} material={m.metal} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh geometry={torus(0.094, 0.012)} material={m.accent} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.008, 0]} />
+          <mesh geometry={sphere(0.085)} material={m.gloss} position={[0, 0.004, 0]} scale={[1, 0.3, 1]} />
         </group>
       );
     case "knobs":
       return (
-        <group position={[0, y + 0.02, 0]}>
+        <>
           {[-1, 1].map((s) => (
-            <group key={s} position={[s * 0.26, 0, 0]}>
-              <mesh material={m.metal}>
-                <capsuleGeometry args={[0.06, 0.06, 12, 32]} />
-              </mesh>
-              <mesh material={m.accent} position={[0, 0.085, 0]} scale={[1, 0.6, 1]}>
-                <sphereGeometry args={[0.04, 24, 16]} />
-              </mesh>
+            <group key={s} position={[s * crown.x, crown.y, 0]} rotation={[0, 0, -s * crown.tilt]}>
+              <mesh geometry={capsule(0.058, 0.07)} material={m.metal} position={[0, 0.04, 0]} />
+              <mesh geometry={sphere(0.042)} material={m.accent} position={[0, 0.135, 0]} scale={[1, 0.65, 1]} />
             </group>
           ))}
-        </group>
+        </>
       );
     case "antenna":
       return (
         <group ref={wobble} position={[0, y - 0.02, 0]}>
-          <mesh material={m.rubber} scale={[1, 0.5, 1]}>
-            <sphereGeometry args={[0.055, 32, 16]} />
-          </mesh>
-          <mesh material={m.metal} position={[0, 0.15, 0]}>
-            <capsuleGeometry args={[0.01, 0.26, 6, 12]} />
-          </mesh>
-          <mesh material={m.accent} position={[0, 0.3, 0]}>
-            <sphereGeometry args={[0.03, 24, 16]} />
-          </mesh>
+          <mesh geometry={sphere(0.06)} material={m.gloss} scale={[1, 0.5, 1]} />
+          <mesh geometry={capsule(0.011, 0.26, 24)} material={m.metal} position={[0, 0.15, 0]} />
+          <mesh geometry={sphere(0.042)} material={m.accent} position={[0, 0.31, 0]} />
         </group>
       );
     case "ears":
+      // Cat ears: white shells, the bot's colour inside.
       return (
-        <group>
+        <>
           {[-1, 1].map((s) => (
-            <group key={s} position={[s * (layout.halfWidth + 0.02), 0.05, 0]}>
-              <RoundedBox
-                args={[0.07, 0.26, 0.22]}
-                radius={0.034}
-                smoothness={6}
-                material={m.rubber}
-              />
-              <mesh material={m.accent} position={[s * 0.036, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-                <capsuleGeometry args={[0.012, 0.12, 6, 12]} />
-              </mesh>
+            <group
+              key={s}
+              ref={s > 0 ? twitch : undefined}
+              position={[s * crown.x, crown.y - 0.01, 0]}
+              rotation={[0, 0, -s * (crown.tilt * 0.75 + 0.18)]}
+            >
+              <mesh geometry={catEar()} material={m.shell} scale={[1, 1, 0.48]} />
+              <mesh geometry={catEar()} material={m.accent} scale={[0.6, 0.7, 0.3]} position={[0, 0.02, 0.026]} />
             </group>
           ))}
-        </group>
+        </>
       );
     case "halo":
       // A sensor ring on a short mast.
       return (
         <group position={[0, y - 0.02, 0]}>
-          <mesh material={m.metal} position={[0, 0.07, 0]}>
-            <capsuleGeometry args={[0.018, 0.1, 6, 16]} />
-          </mesh>
-          <mesh material={m.metal} position={[0, 0.15, 0]} rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.1, 0.016, 20, 64]} />
-          </mesh>
-          <mesh material={m.accent} position={[0, 0.15, 0]} rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.1, 0.006, 12, 64]} />
-          </mesh>
+          <mesh geometry={capsule(0.018, 0.1, 24)} material={m.metal} position={[0, 0.07, 0]} />
+          <mesh geometry={torus(0.1, 0.016)} material={m.metal} position={[0, 0.15, 0]} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh geometry={torus(0.1, 0.0065)} material={m.accent} position={[0, 0.15, 0.012]} rotation={[Math.PI / 2, 0, 0]} />
         </group>
       );
     case "none":
@@ -496,7 +476,7 @@ export function BotModel({
   phase?: number;
 }) {
   const layout = LAYOUT[appearance.shape];
-  const m = useMaterials(appearance);
+  const m = useMaterials(appearance, layout);
   const root = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
   // The face being shown, eased toward the mood's target every frame.
@@ -532,22 +512,26 @@ export function BotModel({
 
     // The display: ease the eyes toward this moment's expression and draw it.
     easeFace(face.current, targetFace(mood, layout.eyeX, t, phase * 7), dt);
-    applyFace(m.screen, face.current, 0, layout.eyeY - layout.screenY);
+    applyFace(m.screen, face.current, 0, layout.eyeY, t);
   });
 
   return (
     <group>
       <group ref={root}>
         <group ref={body}>
-          {/* Keyed so a shape change remounts the parts rather than letting React reuse
-              one shape's meshes for another's: a mesh that had its geometry as a prop
-              and is reused for one that declares it as a child ends up with none. */}
-          <Body key={appearance.shape} shape={appearance.shape} m={m} />
+          {/* Keyed so a shape change remounts the parts rather than reusing one shape's
+              meshes for another's. */}
+          <group key={appearance.shape}>
+            <Body shape={appearance.shape} m={m} />
+            <Visor m={m} layout={layout} />
+            <Ears m={m} layout={layout} />
+          </group>
           <TopPiece
             key={`${appearance.top}:${appearance.shape}`}
             a={appearance}
             m={m}
             layout={layout}
+            phase={phase}
           />
         </group>
       </group>

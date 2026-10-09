@@ -15,6 +15,12 @@ import type { Mood } from "./mood";
  * small dots that ripple in sequence, and morph back when it is done. It is the same
  * distance field, blended between the two shapes, so the change is a melt rather than
  * a cut.
+ *
+ * **A happy bot blushes**: two soft pink glows under the outer corners of its eyes.
+ *
+ * **A sleeping bot's screen becomes a screensaver**: the eyes fade out and the whole
+ * panel fills with a slowly flowing vector field, breathing with the body, and fades
+ * back to eyes when it wakes.
  */
 
 export interface EyeShape {
@@ -41,17 +47,25 @@ export interface Face {
   bright: number;
   /** 0 = the bot's colour, 1 = error red. */
   alarm: number;
+  /** Rosy cheeks under the eyes, 0..1. */
+  blush: number;
+  /** 0 eyes, 1 the sleep screensaver over the whole panel. */
+  sleep: number;
 }
 
+// The display is bent round the body; its UVs carry the flat position, so the eyes
+// are drawn undistorted whatever the screen is wrapped round.
 const VERT = /* glsl */ `
-  varying vec3 vPos;
+  varying vec2 vPos;
   void main() {
-    vPos = position;
+    vPos = uv;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
-const FRAG = /* glsl */ `
+// Everything the display shines, as `emit(p)`: shared by the screen and by the light
+// it spills onto the shell round it.
+const COMMON = /* glsl */ `
   uniform vec3 uColor;
   uniform vec3 uAlarm;
   uniform float uAlarmMix;
@@ -62,7 +76,45 @@ const FRAG = /* glsl */ `
   uniform vec4 uDotLift;
   uniform vec2 uDotCentre;
   uniform float uBright;
-  varying vec3 vPos;
+  uniform float uBlush;
+  uniform vec3 uBlushColor;
+  uniform vec2 uHalf;
+  uniform float uTime;
+  uniform float uSleep;
+  varying vec2 vPos;
+
+  // --- the sleep screen ---------------------------------------------------------------
+  // A flowing vector field, coloured by its velocity. The field is from MartinRGB's
+  // https://www.shadertoy.com/view/DttSRB (mode 0), via its "Thank you to MartinRGB"
+  // remix; constants are inlined from the original's settings.
+
+  float flowF(vec2 p) {
+    return sin(p.x + sin(p.y + uTime * 0.1)) * sin(p.y * p.x * 0.1 + uTime * 0.2);
+  }
+
+  vec2 flowField(vec2 p) {
+    vec2 ep = vec2(0.05, 0.0);
+    vec2 g = vec2(0.0);
+    // The drift is the same every step, so it is worked out once.
+    vec2 drift = vec2(sin(uTime * 0.25), cos(uTime * 0.25)) / 10.0;
+    for (int i = 0; i < 20; i++) {
+      float t0 = flowF(p);
+      float t1 = flowF(p + ep.xy);
+      float t2 = flowF(p + ep.yx);
+      g = vec2(t1 - t0, t2 - t0) / ep.xx;
+      // Along the field's tangent (twist 50), a little up its gradient (detail 200).
+      p += 0.5 * vec2(-g.y, g.x) + g / 200.0 + drift;
+    }
+    return g;
+  }
+
+  // Hash without Sine, by David Hoskins — https://www.shadertoy.com/view/4djSRW
+  // (Creative Commons Attribution-ShareAlike 4.0). Used to dither the gradients.
+  float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 19.19);
+    return fract((p3.x + p3.y) * p3.z);
+  }
 
   float eye(vec2 p, vec4 e, vec3 lid) {
     vec2 q = p - e.xy;
@@ -118,32 +170,113 @@ const FRAG = /* glsl */ `
 
   // Every smoothstep here is written low-edge-first: GLSL leaves a reversed one
   // undefined, and some GPUs return 0 for it.
-  void main() {
-    vec2 p = vPos.xy;
+  vec3 emit(vec2 p) {
     float d = face(p);
     float aa = max(fwidth(d), 0.0015) + 0.002;
     float body = 1.0 - smoothstep(-aa, aa, d);
-    // A faint bloom just past the edge — enough to read as light, not a halo.
-    float bloom = exp(-max(d, 0.0) / 0.01) * 0.14 * (1.0 - body);
-    float depth = clamp(-d / 0.04, 0.0, 1.0);
+    // Light spreading in the panel: a tight bloom at the edge and a wide, faint glow.
+    float outside = max(d, 0.0);
+    float bloom = (exp(-outside / 0.01) * 0.2 + exp(-outside / 0.045) * 0.012) * (1.0 - body);
+    float depth = clamp(-d / 0.035, 0.0, 1.0);
 
     vec3 tint = mix(uColor, uAlarm, uAlarmMix);
-    vec3 core = mix(tint, vec3(1.0), 0.14);
+    vec3 core = mix(tint, vec3(1.0), 0.16);
     vec3 col = (mix(tint, core, depth) * body + tint * bloom) * uBright;
 
-    gl_FragColor = vec4(col, 1.0);
+    // Cheeks: two soft ovals under the outer corners of the eyes.
+    vec2 cl = (p - vec2(uL.x - 0.035, uL.y - uL.w - 0.035)) / vec2(0.05, 0.026);
+    vec2 cr = (p - vec2(uR.x + 0.035, uR.y - uR.w - 0.035)) / vec2(0.05, 0.026);
+    float cheeks = exp(-dot(cl, cl) * 1.6) + exp(-dot(cr, cr) * 1.6);
+    col += uBlushColor * cheeks * uBlush;
+
+    // The panel itself: not dead black but a deep, cool black that falls off toward
+    // the edges, the way an OLED under glass reads.
+    vec2 edge = abs(p) / uHalf;
+    float vignette = 1.0 - 0.6 * smoothstep(0.4, 1.1, max(edge.x, edge.y));
+    col += vec3(0.0012, 0.0014, 0.0024) * vignette;
+
+    // Asleep: the whole panel is the flow field, glowing and breathing with the body.
+    // The field is turned a quarter turn, so its bands lie horizontally, and drawn
+    // about twice the original's size — a few broad waves across the screen — and a
+    // little longer still from side to side.
+    if (uSleep > 0.001) {
+      vec2 q = p / uHalf.y;
+      vec2 g = flowField(vec2(q.y * 1.5, -q.x * 1.1));
+      // Coloured by which way the field flows there, round a blue-green palette (iq's
+      // cosine palette held to the cool side of the wheel: deep blue, azure, aqua,
+      // emerald) that drifts slowly, so each wave band is its own shade; the field's
+      // speed keeps the original's soft light and dark between bands.
+      float hue = atan(g.y, g.x) / 6.2832 * 1.5 + length(g) * 0.12 + uTime * 0.03;
+      vec3 flow = vec3(0.05, 0.62, 0.68) + vec3(0.05, 0.38, 0.32) * cos(6.2832 * (hue + vec3(0.5, 0.0, 0.32)));
+      flow *= 1.15 * (0.75 + 0.35 * clamp(length(g) * 0.5, 0.0, 1.0));
+      // Glow: the brightest bands push toward white, and light pools along the glass's
+      // edge instead of falling off into shadow.
+      float crest = smoothstep(0.7, 1.2, max(max(flow.r, flow.g), flow.b));
+      float rim = smoothstep(0.55, 1.05, max(edge.x, edge.y));
+      float breath = 0.9 + 0.1 * sin(uTime);
+      col = mix(col, flow * (0.55 + 0.3 * crest + 0.25 * rim) * breath, uSleep);
+    }
+    return col;
+  }
+`;
+
+const FRAG = /* glsl */ `
+  ${COMMON}
+  void main() {
+    gl_FragColor = vec4(emit(vPos), 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    // A half-step of noise, so the soft gradients do not band.
+    gl_FragColor.rgb += (hash12(gl_FragCoord.xy) - 0.5) / 255.0 * uSleep;
+  }
+`;
+
+/**
+ * The light the display spills onto the shell round it. Drawn on a thin layer over
+ * the shell, a little wider than the display: each point takes the colour the screen
+ * shines at its nearest edge and fades with distance from it, so a bright screen
+ * pours its colours out over the white, and a black one (eyes on a dark panel) casts
+ * nothing. Blended over the shell rather than added, because added light only
+ * saturates a white surface further, and colour on white has to tint it.
+ */
+const GLOW_FRAG = /* glsl */ `
+  ${COMMON}
+  uniform float uRadius;
+  void main() {
+    vec2 p = vPos;
+    // How far outside the display's rounded rectangle this point is.
+    vec2 k = abs(p) - uHalf + uRadius;
+    float away = max(length(max(k, 0.0)) + min(max(k.x, k.y), 0.0) - uRadius, 0.0);
+    // The colour just inside the nearest edge, averaged over a span that widens with
+    // distance, the way light spreads. Averaging different hues greys them, and grey
+    // light on a white shell does not show, so the mix is saturated back up.
+    vec2 lo = -uHalf + 0.03;
+    vec2 hi = uHalf - 0.03;
+    float spread = 0.02 + away * 0.6;
+    vec3 light = (
+      emit(clamp(p, lo, hi)) +
+      emit(clamp(p + vec2(spread, 0.0), lo, hi)) +
+      emit(clamp(p - vec2(spread, 0.0), lo, hi)) +
+      emit(clamp(p + vec2(0.0, spread), lo, hi)) +
+      emit(clamp(p - vec2(0.0, spread), lo, hi))
+    ) / 5.0;
+    light = max(mix(vec3(dot(light, vec3(0.3333))), light, 1.6), 0.0);
+    float strength = max(max(light.r, light.g), light.b);
+    float alpha = clamp(strength * 1.1, 0.0, 1.0) * exp(-away / 0.04) * 0.9;
+    gl_FragColor = vec4(light / max(strength, 1e-4), alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
 `;
 
-export function screenMaterial(appearance: Appearance): THREE.ShaderMaterial {
+/** `half` is the screen's half width and height, for the vignette. */
+export function screenMaterial(appearance: Appearance, half: [number, number]): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
     uniforms: {
-      uColor: { value: new THREE.Color(appearance.glow).multiplyScalar(2.6) },
-      uAlarm: { value: new THREE.Color("#ff3a2e").multiplyScalar(2.6) },
+      uColor: { value: new THREE.Color(appearance.glow).multiplyScalar(2.2) },
+      uAlarm: { value: new THREE.Color("#ff3a2e").multiplyScalar(2.2) },
       uAlarmMix: { value: 0 },
       uL: { value: new THREE.Vector4() },
       uLlid: { value: new THREE.Vector3() },
@@ -154,7 +287,26 @@ export function screenMaterial(appearance: Appearance): THREE.ShaderMaterial {
       uDotLift: { value: new THREE.Vector4() },
       uDotCentre: { value: new THREE.Vector2() },
       uBright: { value: 1 },
+      uBlush: { value: 0 },
+      uBlushColor: { value: new THREE.Color("#ff5c8a").multiplyScalar(0.9) },
+      uHalf: { value: new THREE.Vector2(...half) },
+      uTime: { value: 0 },
+      uSleep: { value: 0 },
     },
+    toneMapped: true,
+  });
+}
+
+/** The display's light on the shell round it (see `GLOW_FRAG`). It shares the
+ * screen's uniforms, so it always shows what the screen does; `radius` is the
+ * display's corner radius. */
+export function glowMaterial(screen: THREE.ShaderMaterial, radius: number): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader: VERT,
+    fragmentShader: GLOW_FRAG,
+    uniforms: { ...screen.uniforms, uRadius: { value: radius } },
+    transparent: true,
+    depthWrite: false,
     toneMapped: true,
   });
 }
@@ -194,6 +346,8 @@ export function targetFace(mood: Mood, spacing: number, t: number, seed: number)
     dotLift: [0, 0, 0, 0],
     bright: 1,
     alarm: 0,
+    blush: 0,
+    sleep: 0,
   };
   const look = (x: number, y: number) => {
     left.x += x;
@@ -261,6 +415,7 @@ export function targetFace(mood: Mood, spacing: number, t: number, seed: number)
     case "happy":
       lids(0, 0.55);
       look(0, 0.008 + 0.005 * Math.sin(t * 5));
+      f.blush = 1;
       break;
     case "creating":
       scale(1.12);
@@ -275,8 +430,10 @@ export function targetFace(mood: Mood, spacing: number, t: number, seed: number)
       f.bright = 1 + 0.15 * Math.sin(t * 2);
       break;
     case "sleeping":
+      // Eyes close as the screensaver fades in over them.
       lids(0.55, 0.42);
       f.bright = 0.4 + 0.1 * Math.sin(t * 1.0);
+      f.sleep = 1;
       break;
     case "stopped":
       lids(0.6, 0.38);
@@ -312,6 +469,9 @@ export function easeFace(face: Face, target: Face, dt: number): void {
   for (let i = 0; i < 4; i++) face.dotLift[i] = ease(face.dotLift[i], target.dotLift[i], fast);
   face.bright = ease(face.bright, target.bright, slow);
   face.alarm = ease(face.alarm, target.alarm, slow);
+  face.blush = ease(face.blush, target.blush, Math.min(1, dt * 4));
+  // Drifting off and waking up are slow fades, not cuts.
+  face.sleep = ease(face.sleep, target.sleep, Math.min(1, dt * 1.8));
 }
 
 export function cloneFace(f: Face): Face {
@@ -328,6 +488,7 @@ export function applyFace(
   face: Face,
   originX: number,
   originY: number,
+  time: number,
 ): void {
   const u = material.uniforms;
   const put = (v: THREE.Vector4, lid: THREE.Vector3, e: EyeShape) => {
@@ -342,4 +503,7 @@ export function applyFace(
   u.uDotCentre.value.set(originX, originY);
   u.uBright.value = face.bright;
   u.uAlarmMix.value = face.alarm;
+  u.uBlush.value = face.blush;
+  u.uSleep.value = face.sleep;
+  u.uTime.value = time;
 }

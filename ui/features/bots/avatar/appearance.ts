@@ -40,7 +40,7 @@ export const TOPS: { id: Top; label: string }[] = [
   { id: "ring", label: "Ring" },
   { id: "knobs", label: "Knobs" },
   { id: "antenna", label: "Antenna" },
-  { id: "ears", label: "Ears" },
+  { id: "ears", label: "Cat ears" },
   { id: "halo", label: "Halo" },
   { id: "none", label: "None" },
 ];
