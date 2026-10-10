@@ -2,23 +2,36 @@
 
 # Orgbots
 
-**Open-source AI employees that work on a computer of their own.**<br/>
-They browse real websites, remember what they learn and work in teams: a self-hosted alternative to Grok Bot, OpenAI Dots and Meta Muse, on a durable, governed agent runtime.
+### The open-source alternative to Grok Bot, OpenAI Dots and Meta Muse
+
+**Self-hosted AI employees with a computer of their own.**<br/>
+Give a bot a job. It browses real websites, remembers what it learns, builds its own team of helper bots, and asks you before anything that matters.
 
 ![Five bots: idle, happy, thinking, asleep, and asking for you](docs/images/bots.png)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Vishnu-KV-S/orgbots?style=social)](https://github.com/Vishnu-KV-S/orgbots/stargazers)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?logo=langchain&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)
-![three.js](https://img.shields.io/badge/three.js-000000?logo=threedotjs&logoColor=white)
+![Flutter](https://img.shields.io/badge/Flutter-02569B?logo=flutter&logoColor=white)
+
+[Quick start](#quick-start) · [Why Orgbots](#orgbots-vs-grok-bot-openai-dots-and-meta-muse) · [Features](#features) · [Architecture](#architecture) · [Mobile app](#on-your-phone)
 
 </div>
 
-**Orgbots** is an open-source platform for running **autonomous AI agents as persistent employees**. Each bot has its own screen on a shared cloud computer, browses and acts on real websites, keeps a job brief and a long-term memory, builds its own team of helper bots, and asks you before it does anything that matters. Under the bots sits a production-minded **agent runtime**: durable runs that survive crashes, exactly-once tool effects, budgets, approvals, a kill switch, prompt-injection defences and an audit trail for every decision.
+---
+
+**Orgbots** is a free, open-source, self-hosted platform for running **autonomous AI agents as always-on coworkers**. If you like the idea of **Grok Bot**, **OpenAI Dots** or **Meta Muse** but want to run it on your own server, with your own model keys and your own data, Orgbots is built for you.
+
+Each bot gets its own screen on a cloud computer, a job brief and a long-term memory. Watch it work live, take over its browser to sign in or solve a CAPTCHA, and approve or deny each step that matters. Underneath sits a production-grade agent runtime: runs that survive crashes, tools that fire exactly once, budgets, a kill switch and an audit trail for every decision.
+
+```bash
+docker run -d -p 3000:3000 -v orgbots-data:/data -e RUNTIME_DEEPSEEK_API_KEY=sk-... ghcr.io/vishnu-kv-s/orgbots:latest
+```
+
+One command, then open **http://localhost:3000** and create your first bot.
 
 ## See it work
 
@@ -31,15 +44,25 @@ They browse real websites, remember what they learn and work in teams: a self-ho
 ![Every step the bot took, with its reasoning, retries and plan](docs/images/app-steps.png)
 <sub>Every step is recorded with the bot's reasoning. Here it works around repeated 504 errors from GitHub before answering.</sub>
 
-## Why it is different
+## Orgbots vs Grok Bot, OpenAI Dots and Meta Muse
 
-Like Grok Bot, OpenAI Dots and Meta Muse, every bot is an always-on coworker with its own screen on a cloud computer. Unlike them, Orgbots is **open source and runs on your own infrastructure**, and where most agent frameworks stop at a loop around a model, it is built like infrastructure:
+Grok Bot, OpenAI Dots and Meta Muse are hosted, closed-source products: you use them through the vendor's app, on the vendor's servers, with the vendor's model. Orgbots gives you the same idea, an always-on AI coworker with its own computer, as software you own.
 
-- **Durable by construction.** Runs are journaled. Kill a worker in the middle of a tool call and the run resumes elsewhere, and the effect journal proves the tool ran **exactly once**.
-- **Governed.** Every action goes through a tool gateway that checks authority, budgets at every level, rate limits and approvals, writes an audit row for each *decision*, and honours a kill switch you can pull without a redeploy.
-- **Safe with real credentials.** Secrets live in an encrypted vault rather than the environment, passwords are typed by the computer rather than the model, and an injection corpus is part of the test suite.
-- **Organization as code.** Departments, actors and their authority are YAML documents with a `validate | plan | apply | drift` control plane, like Terraform for an AI team.
-- **Built to be measured.** Each milestone ships with the numbers that decide whether it deserves to exist: cost per accepted outcome, rejection rate, unassisted completion rate.
+| | **Orgbots** | Hosted agents (Grok Bot, OpenAI Dots, Meta Muse) |
+|---|---|---|
+| Source code | Open source, MIT | Closed |
+| Where it runs | Your laptop, server or cloud, in one Docker container | The vendor's cloud |
+| Your data and sign-ins | Stay on your machine, in an encrypted vault | Stored by the vendor |
+| Model | Your own API key (DeepSeek today, Anthropic-compatible client) | The vendor's model |
+| Cost | Free; you pay only for model tokens | Subscription |
+| Customise and extend | Change anything: tools, MCP connectors, org-as-code YAML | Only what the vendor exposes |
+
+Orgbots is also built to be trusted with real work, where most open-source agents stop at a loop around a model:
+
+- **Durable by construction.** Runs are journaled. Kill a worker mid tool call and the run resumes elsewhere; the effect journal proves the tool ran **exactly once**.
+- **Governed.** Every action goes through a tool gateway that checks authority, budgets, rate limits and approvals, writes an audit row for each *decision*, and honours a kill switch you can pull without a redeploy.
+- **Safe with real credentials.** Passwords are typed by the computer, never seen by the model, and a prompt-injection corpus is part of the test suite.
+- **Organization as code.** Departments, actors and their authority are YAML with a `validate | plan | apply | drift` control plane, like Terraform for an AI team.
 
 ## Features
 
@@ -52,6 +75,7 @@ Like Grok Bot, OpenAI Dots and Meta Muse, every bot is an always-on coworker wit
 - **Routines** on a schedule or on events, **skills** taught by demonstration, a sandboxed **terminal**
 - **Group chats** where bots message bots, **Auto Review** by a second model, **voice** chat and dictation
 - **MCP connectors** (apps) every bot can call, **shareable bot templates**, an installable **PWA** with push notifications
+- **iOS and Android app** built with Flutter, with the same animated 3D bots
 - **Teams and enterprise:** roles, team bots, network allowlists, team secrets, **SCIM 2.0**, an audit log and **OpenTelemetry** export
 - **Tag @bot on X** to hand it a task
 - **Animated 3D avatars** in three.js: glossy, expressive, with a mood for every action
@@ -136,9 +160,26 @@ An iOS and Android app, built with Flutter, lives in [`mobile/`](mobile/README.m
 - **Mobile:** Flutter (Dart), with the web app's three.js bots bundled in
 - **Quality:** pytest with Hypothesis, chaos tests that kill workers mid-run, ruff, mypy and import-linter layer contracts
 
+## FAQ
+
+**Is there an open-source alternative to Grok Bot?**<br/>
+Yes. Orgbots gives you always-on AI bots with their own browser, memory and approvals, like Grok Bot, as MIT-licensed software you host yourself.
+
+**Is there an open-source alternative to OpenAI Dots?**<br/>
+Yes. Like OpenAI Dots, each Orgbots bot is a persistent coworker with its own screen on a cloud computer. Unlike Dots, you run it on your own infrastructure with your own model key.
+
+**Is there an open-source alternative to Meta Muse?**<br/>
+Yes. Orgbots covers the same ground (bots that browse, remember and work in teams) and adds a governed runtime: budgets, approvals, a kill switch and an audit log.
+
+**Which models does it support?**<br/>
+Orgbots ships with an Anthropic-compatible model client and uses DeepSeek by default. See [Models and providers](#models-and-providers).
+
+**Can I run it on my laptop?**<br/>
+Yes. One `docker run` starts everything; see [Quick start](#quick-start).
+
 ## Author
 
-Built by **[Vishnu KV](https://github.com/Vishnu-KV-S)**. If this project is useful to you, a ⭐ helps others find it. Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Built by **[Vishnu KV](https://github.com/Vishnu-KV-S)**. If Orgbots is useful to you, **a ⭐ on GitHub helps others find it**. Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Licensed under the [MIT License](LICENSE).
 
