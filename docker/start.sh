@@ -23,6 +23,9 @@ API_PORT="${ORGBOTS_API_PORT:-8000}"
 COMPUTER_PORT="${ORGBOTS_COMPUTER_PORT:-8020}"
 UI_PORT="${ORGBOTS_PORT:-3000}"
 UI_HOST="${ORGBOTS_HOST:-0.0.0.0}"
+# The bots' computer: Playwright's Chromium in this container when empty, else the desktop
+# computer (docker/computer, `scripts/computer.sh up`) at this URL.
+COMPUTER_URL="${ORGBOTS_COMPUTER_URL:-}"
 
 log() { printf '%-8s | %s\n' orgbots "$*"; }
 
@@ -125,7 +128,7 @@ export RUNTIME_DATABASE_URL="postgresql+psycopg://runtime@127.0.0.1:$PG_PORT/run
 export RUNTIME_REDIS_URL="redis://127.0.0.1:$REDIS_PORT/0"
 export RUNTIME_ARTIFACT_BACKEND=fs
 export RUNTIME_ARTIFACT_FS_ROOT="$DATA/artifacts"
-export RUNTIME_COMPUTER_URL="http://127.0.0.1:$COMPUTER_PORT"
+export RUNTIME_COMPUTER_URL="${COMPUTER_URL:-http://127.0.0.1:$COMPUTER_PORT}"
 export RUNTIME_COMPUTER_HOST=127.0.0.1
 export RUNTIME_COMPUTER_PORT="$COMPUTER_PORT"
 export RUNTIME_COMPUTER_PROFILE="$DATA/computer/profile"
@@ -150,8 +153,12 @@ if ! (cd "$APP" && "$PY" -m alembic upgrade head) 2>&1 |
 fi
 
 cd "$APP"
-start computer "$PY" -m runtime.computer.main
-APP_PIDS+=("$LAST_PID")
+if [[ -z "$COMPUTER_URL" ]]; then
+  start computer "$PY" -m runtime.computer.main
+  APP_PIDS+=("$LAST_PID")
+else
+  log "the bots' computer is the desktop computer at $COMPUTER_URL"
+fi
 start api "$PY" -m uvicorn runtime.api.app:app --host 127.0.0.1 --port "$API_PORT" \
   --no-access-log
 APP_PIDS+=("$LAST_PID")

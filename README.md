@@ -100,6 +100,14 @@ docker build -t orgbots https://github.com/Vishnu-KV-S/orgbots.git
 | `RUNTIME_DEEPSEEK_API_KEY` | The model key. Without it the app runs, but bots cannot think. |
 | `RUNTIME_CREDENTIAL_KEYS` | Optional. The login vault's encryption key; one is generated on first boot and kept in `/data`. |
 | `/data` | The volume: database, browser profile and sign-ins, files, and the generated key. |
+| `ORGBOTS_COMPUTER_URL` | Optional. Use the desktop computer (below) instead of the built-in headless Chromium. |
+
+The container's own browser is Playwright's headless Chromium. For the bots' real desktop computer (Google Chrome on a Linux desktop you can watch, see [Bots](#bots)), run both from a checkout with one command:
+
+```bash
+scripts/orgbots.sh up         # the computer (desktop on :6080), then Orgbots on :3000
+scripts/orgbots.sh down       # stop both; data and sign-ins are kept
+```
 
 ### From source
 
@@ -108,7 +116,12 @@ For development. Requires Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js
 ```bash
 git clone https://github.com/Vishnu-KV-S/orgbots.git
 cd orgbots
+scripts/dev.sh                                # everything below, with hot reload
+```
 
+`scripts/dev.sh` runs Postgres, Redis and the bots' desktop computer in Docker, installs the Python and UI dependencies when they change, migrates, and runs the API, the worker and the UI here, each reloading on an edit. Ctrl+C stops the app; `scripts/dev.sh down` stops the Docker side too. By hand, with the built-in headless browser in place of the desktop computer:
+
+```bash
 docker compose up -d --wait                   # Postgres, Redis, MinIO
 uv venv --python 3.12 && uv pip install -e ".[dev,computer]"
 uv run playwright install chromium            # the browser the bots drive

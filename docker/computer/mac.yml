@@ -1,0 +1,23 @@
+# The computer on a Mac. scripts/computer.sh adds this file on macOS; by hand:
+#
+#   TZ=Europe/London docker compose -f docker-compose.yml -f docker/computer/mac.yml \
+#     up -d --build computer shell
+#
+# macOS has no /etc/timezone, and Docker Desktop does not share /etc, so the time zone
+# comes in as TZ (start-computer reads it) in place of the two mounts. The image is
+# native: Chrome is published for arm64 as well as amd64.
+services:
+  computer:
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes: !override
+      - computer-profiles:/data/profiles
+      - computer-workspaces:/data/workspaces
+      - computer-shell:/run/shell
+
+  shell:
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes: !override
+      - computer-workspaces:/data/workspaces
+      - computer-shell:/run/shell

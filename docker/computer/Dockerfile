@@ -57,13 +57,15 @@ RUN curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSIO
  && python3 -m venv /opt/websockify \
  && /opt/websockify/bin/pip install --no-cache-dir --no-deps "websockify==${WEBSOCKIFY_VERSION}"
 
-# Google Chrome, signed by Google's key.
+# Google Chrome, signed by Google's key, for this machine's architecture: Google
+# publishes it for amd64 and, since July 2026, arm64, so an Apple Silicon Mac builds a
+# native image rather than an emulated one. A dropped download is retried.
 RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
       | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
- && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
       > /etc/apt/sources.list.d/google-chrome.list \
- && apt-get update \
- && apt-get install -y --no-install-recommends google-chrome-stable \
+ && apt-get -o Acquire::Retries=10 update \
+ && apt-get -o Acquire::Retries=10 install -y --no-install-recommends google-chrome-stable \
  && rm -rf /var/lib/apt/lists/*
 
 # The service's Python packages, from the repository's lock file — the same versions the

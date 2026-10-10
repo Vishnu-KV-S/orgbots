@@ -80,6 +80,21 @@ const WRITABLE = ["v1/control/", ...BOTS];
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Whether a write's `Origin` is this site. It is compared with the host the browser
+ * addressed (`Host`, or `X-Forwarded-Host` behind a proxy), not `request.nextUrl.origin`:
+ * a server bound to 0.0.0.0, as in the single container, reports that as its origin,
+ * and every same-site write from `localhost:3000` would be refused.
+ */
+function sameSite(request: NextRequest, origin: string) {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  try {
+    return host !== null && new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 function refuse(target: string, method: string) {
   return Response.json(
     { detail: `refused: ${method} ${target} is not proxied` },
@@ -97,7 +112,7 @@ async function forward(request: NextRequest, target: string, allowed: string[]) 
     return refuse(target, request.method);
   }
   const origin = request.headers.get("origin");
-  if (request.method !== "GET" && origin && origin !== request.nextUrl.origin) {
+  if (request.method !== "GET" && origin && !sameSite(request, origin)) {
     return Response.json({ detail: "refused: a write from another site" }, { status: 403 });
   }
   const session = request.cookies.get(SESSION_COOKIE)?.value;
