@@ -75,7 +75,12 @@ class Session extends ChangeNotifier {
   Future<void> connect(String input) async {
     final url = normalizeServer(input);
     if (url == null) {
-      throw ApiError('That doesn’t look like a server address', 0);
+      throw ApiError(
+        input.contains('@')
+            ? 'That’s an email address. Enter your Orgbots server’s address here, like bots.example.com or your computer’s Wi‑Fi address, 192.168.x.x:3000; you sign in on the next screen.'
+            : 'That doesn’t look like a server address',
+        0,
+      );
     }
     final previous = api.server;
     api.server = url;

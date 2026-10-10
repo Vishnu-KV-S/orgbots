@@ -158,7 +158,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                             onPressed: _address.text.trim().isEmpty ? null : _go,
                           ),
                           Text(
-                            'The same address you open in a browser. HTTPS is assumed; type http:// for a server on your own network.',
+                            'The same address you open in a browser, not your email. HTTPS is assumed, except for a server on your own network (like 192.168.x.x:3000 — your computer’s Wi‑Fi address).',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: p.textFaint, fontSize: 13, height: 1.4),
                           ),

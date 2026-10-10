@@ -6,6 +6,8 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to an Orgbots server on your own network.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Attach photos to a message for your bot.</string>
 	<key>NSCameraUsageDescription</key>

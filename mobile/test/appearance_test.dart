@@ -120,5 +120,9 @@ void main() {
     expect(normalizeServer('bots.example.com'), 'https://bots.example.com');
     expect(normalizeServer('http://192.168.1.5:3000/some/path'), 'http://192.168.1.5:3000');
     expect(normalizeServer('  '), isNull);
+    expect(normalizeServer('192.168.220.12:3000'), 'http://192.168.220.12:3000');
+    expect(normalizeServer('localhost:3000'), 'http://localhost:3000');
+    expect(normalizeServer('8.8.8.8'), 'https://8.8.8.8');
+    expect(normalizeServer('someone@gmail.com'), isNull);
   });
 }

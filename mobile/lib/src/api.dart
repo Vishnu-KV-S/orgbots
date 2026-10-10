@@ -77,6 +77,8 @@ class Api {
     }
     if (response.statusCode >= 400) {
       var detail = response.body;
+      // Another site's error page (a wrong address) says nothing useful in a notice.
+      if (detail.trimLeft().startsWith('<')) detail = '';
       try {
         final decoded = jsonDecode(response.body);
         if (decoded is Map && decoded['detail'] is String) {
@@ -195,15 +197,27 @@ class Api {
 }
 
 /// Turn a server address as typed into one we can call: scheme added, path dropped.
+/// Without a scheme, a server on this network (a private IP, localhost or `.local`)
+/// gets http and anything else https.
 String? normalizeServer(String input) {
   var value = input.trim();
   if (value.isEmpty) return null;
   if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(value)) {
-    value = 'https://$value';
+    final host = Uri.tryParse('http://$value')?.host ?? '';
+    value = '${_isLocalHost(host) ? 'http' : 'https'}://$value';
   }
   final uri = Uri.tryParse(value);
-  if (uri == null || uri.host.isEmpty) return null;
+  // `name@host` is an email address (or credentials), never an Orgbots server.
+  if (uri == null || uri.host.isEmpty || uri.userInfo.isNotEmpty) return null;
   return '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+}
+
+bool _isLocalHost(String host) {
+  if (host == 'localhost' || host.endsWith('.local')) return true;
+  final ip = host.split('.').map(int.tryParse).toList();
+  if (ip.length != 4 || ip.contains(null)) return false;
+  final a = ip[0]!, b = ip[1]!;
+  return a == 10 || a == 127 || (a == 192 && b == 168) || (a == 172 && b >= 16 && b <= 31);
 }
 
 // --- models --------------------------------------------------------------------------

@@ -72,7 +72,12 @@ running Orgbots server (see the [main README](../README.md)).
 cd mobile
 flutter pub get
 flutter run            # on a connected phone or a simulator
+flutter run --release  # on an iPhone you'll use unplugged
 ```
+
+On an iPhone, a debug build (plain `flutter run`) only works while it stays connected to
+the Mac: once you see "Lost connection to device", iOS kills it with a code-signing error
+the next time it runs new code. Use `--release` to keep using the app away from the Mac.
 
 Enter your server's address. For a server on your own network, use
 `http://<your-computer's-LAN-IP>:3000`, not `localhost` (on the phone, that is the phone).
