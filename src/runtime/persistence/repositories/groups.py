@@ -20,7 +20,7 @@ _MESSAGE = """
 """
 _WAKE = """
     id, bot_id, kind, group_id, group_message_id, thread_root, from_bot_id, message_id, hops,
-    expects_reply, handoff, status, run_id, detail, created_at, started_at
+    expects_reply, handoff, status, run_id, detail, created_at, started_at, due_at, task
 """
 
 
@@ -70,6 +70,10 @@ class WakeRow:
     detail: str
     created_at: dt.datetime
     started_at: dt.datetime | None
+    due_at: dt.datetime | None
+    """A check-in waits until then; other deliveries start as soon as the bot is free."""
+    task: str
+    """A check-in's task, as the bot wrote it for its later self."""
 
 
 def _group(r: Any) -> GroupRow:
@@ -332,15 +336,17 @@ class GroupRepository:
         expects_reply: bool = False,
         handoff: bool = False,
         status: str = "queued",
+        due_at: dt.datetime | None = None,
+        task: str = "",
     ) -> bool:
         result = await self._s.execute(
             text(
                 """
                 INSERT INTO bot_wakes (id, bot_id, kind, group_id, group_message_id,
                                        thread_root, from_bot_id, message_id, hops,
-                                       expects_reply, handoff, status)
+                                       expects_reply, handoff, status, due_at, task)
                 VALUES (:id, :bot, :kind, :g, :gm, :thread, :from, :m, :hops, :reply,
-                        :handoff, :status)
+                        :handoff, :status, :due, :task)
                 ON CONFLICT (id) DO NOTHING
                 """
             ),
@@ -357,6 +363,8 @@ class GroupRepository:
                 "reply": expects_reply,
                 "handoff": handoff,
                 "status": status,
+                "due": due_at,
+                "task": task,
             },
         )
         return bool(getattr(result, "rowcount", 0))
@@ -370,16 +378,45 @@ class GroupRepository:
         return None if row is None else _wake(row)
 
     async def queued_wakes(self, limit: int = 200) -> list[WakeRow]:
+        """Deliveries a free bot may start now — a check-in only once it is due."""
         rows = (
             await self._s.execute(
                 text(
                     f"SELECT {_WAKE} FROM bot_wakes WHERE status = 'queued' "
-                    "ORDER BY created_at LIMIT :limit"
+                    "AND (due_at IS NULL OR due_at <= now()) "
+                    "ORDER BY coalesce(due_at, created_at) LIMIT :limit"
                 ),
                 {"limit": limit},
             )
         ).all()
         return [_wake(r) for r in rows]
+
+    async def queued_check(self, bot_id: uuid.UUID) -> WakeRow | None:
+        """The bot's check-in still to come, if it has one."""
+        row = (
+            await self._s.execute(
+                text(
+                    f"SELECT {_WAKE} FROM bot_wakes WHERE bot_id = :b AND kind = 'check' "
+                    "AND status = 'queued' ORDER BY due_at DESC LIMIT 1"
+                ),
+                {"b": bot_id},
+            )
+        ).first()
+        return None if row is None else _wake(row)
+
+    async def cancel_checks(
+        self, bot_id: uuid.UUID, reason: str, *, keep: uuid.UUID | None = None
+    ) -> int:
+        """Drop the bot's queued check-ins (but `keep`), with the reason on each."""
+        result = await self._s.execute(
+            text(
+                "UPDATE bot_wakes SET status = 'skipped', detail = :why "
+                "WHERE bot_id = :b AND kind = 'check' AND status = 'queued' "
+                "AND (CAST(:keep AS uuid) IS NULL OR id <> :keep)"
+            ),
+            {"b": bot_id, "why": reason, "keep": keep},
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def claim_wake(self, wake_id: uuid.UUID) -> bool:
         result = await self._s.execute(

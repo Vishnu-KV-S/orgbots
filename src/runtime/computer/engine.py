@@ -9,7 +9,8 @@ is stopped. Two engines, one interface:
 - **`DesktopChrome`** — the bots' computer: Google Chrome as a person runs it, in windows
   on the computer's display (`DISPLAY`), with its own profile directory, and nothing on
   its command line but what this module puts there — none of the switches a test harness
-  adds (`--enable-automation`, `--headless`, a fake screen size, a software GPU). Each
+  adds (`--enable-automation`, `--headless`, a fake screen size, a software GPU), and
+  `navigator.webdriver` false, as it is in a person's Chrome. Each
   screen is its own window, so every bot's page is the visible tab of a window and keeps
   rendering, the way it would on a person's desktop. Runs in `docker/computer`.
 
@@ -94,6 +95,10 @@ class DesktopChrome(Engine):
     # Not one of these is visible to a page. They keep every bot's window painting and
     # its timers running while another window is on top of it — on a person's desktop
     # the window would be in front when it mattered; here several bots work at once.
+    # The last one is the exception, by intent: being driven over
+    # `--remote-debugging-pipe` makes Chrome report `navigator.webdriver === true` to
+    # every page, which Cloudflare and every other bot check reads first — and a page
+    # that decides it is talking to a robot shows a challenge instead of itself.
     BASE_FLAGS = (
         "--no-first-run",
         "--no-default-browser-check",
@@ -103,6 +108,7 @@ class DesktopChrome(Engine):
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
         "--disable-background-timer-throttling",
+        "--disable-blink-features=AutomationControlled",
     )
 
     def __init__(

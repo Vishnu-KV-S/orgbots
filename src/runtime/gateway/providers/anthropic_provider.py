@@ -114,6 +114,18 @@ above says why, so it is used *only* where the capability is absent. It is writt
 out here rather than inline so the two paths are visibly different things: one is a
 constraint, the other is a request."""
 
+SCHEMA_REMINDER = (
+    "\n\n(Answer with the single JSON object the system prompt describes — it starts "
+    "with {{ — not prose, not XML-style tags.)"
+)
+"""Said again at the end of the user turn, with the schema left in the system block.
+
+A request made once, at the top of a long prompt, fades by its end: with a 15,000-token
+page between them, `deepseek-v4-pro` thinking at full effort answered a bot's step as
+`<thought>…</thought><action>wait</action>` on every try, its corrective retry
+included, and the turn ended "confused". The reminder is short and fixed, and it goes
+last, so the prefix an endpoint caches on its own is the same as before."""
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderCapabilities:
@@ -236,7 +248,10 @@ class AnthropicProvider:
                 f"{self.name} model {profile.model!r} cannot read images; route this work "
                 "class to a vision-capable model"
             )
-        content: str | list[dict[str, Any]] = req.prompt
+        text = req.prompt
+        if req.metadata.get("json_schema") is not None and not caps.schema_format:
+            text += SCHEMA_REMINDER.format()
+        content: str | list[dict[str, Any]] = text
         if req.images:
             # Images first, then the question: the documented order, and the one that
             # keeps the varying part of the turn — the text — last.
@@ -246,7 +261,7 @@ class AnthropicProvider:
                     "source": {"type": "base64", "media_type": img.media_type, "data": img.data},
                 }
                 for img in req.images
-            ] + [{"type": "text", "text": req.prompt}]
+            ] + [{"type": "text", "text": text}]
         params: dict[str, Any] = {
             "model": profile.model,
             "max_tokens": max_tokens,
@@ -395,6 +410,7 @@ class AnthropicProvider:
             output_tokens=output_tokens,
             cost_cents=_cost_cents(profile, input_tokens, output_tokens),
             trust=TrustLevel.UNTRUSTED,
+            server_searches=server_searches,
         )
 
     async def _send_classified(self, params: dict[str, Any], max_tokens: int) -> Any:

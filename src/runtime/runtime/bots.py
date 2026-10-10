@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from runtime.domain.bot_memory import BotBrief, brief_changes, clean_memory
-from runtime.domain.bots import BOT_TURN_PRIORITY, actor_name_for, host_of
+from runtime.domain.bots import BOT_TURN_PRIORITY, actor_name_for, host_of, steerable
 from runtime.domain.enums import LIVE_RUN_STATUSES, RunStatus
 from runtime.domain.errors import UnknownActorError
 from runtime.domain.groups import Member, recipients
@@ -92,6 +92,8 @@ class Sent:
     run_id: uuid.UUID | None
     admitted: bool
     refusal_reason: str | None
+    steered: bool = False
+    """The message joined the turn already working (`run_id`), instead of starting one."""
 
 
 class BotManager:
@@ -414,6 +416,8 @@ class BotManager:
         await self.get(bot_id)
         async with self._uow.transaction() as uow:
             await uow.bots.set_flags(bot_id, stop_requested=True)
+            # Stop means stop: a check-in the bot set itself would start it again later.
+            await uow.groups.cancel_checks(bot_id, "you pressed Stop")
 
     # --- conversation ----------------------------------------------------------------
 
@@ -426,29 +430,72 @@ class BotManager:
         payload: dict[str, Any] | None = None,
         run_input: dict[str, Any] | None = None,
     ) -> Sent:
-        """A person's message: record it, supersede whatever was running, start a run.
+        """A person's message: record it, and steer the turn working on their last one —
+        or, when none is, start a run.
+
+        **Steering.** A message that arrives while the bot works on its person's request
+        is usually about that request — "I mean on Claude", "skip the PDFs" — and a
+        fresh run, which knew nothing of the plan, the notes or what the bot had just
+        done, read it with none of that. So it joins the running turn, which reads it
+        at its next step (`graphs.bot_agent`). Decided under the bot row's lock, which
+        the turn's end takes too (`BotService.settle_turn`): a turn that has closed is
+        never steered, and a turn that has not will see the message. Stop pressed, or a
+        message carrying more than who sent it, still starts a turn of its own.
 
         `payload` rides on the message (what the conversation shows about it) and
         `run_input` on the run — a demonstration's message carries its recording in both,
         so the chat can label it and the turn can tie the skill it writes to it."""
         bot = await self.get(bot_id)
         message_id = uuid.uuid4()
+        extra = dict(run_input or {})
         async with self._uow.transaction() as uow:
+            locked = await uow.bots.lock(bot_id)
+            steer = (
+                locked is not None
+                and await self._steerable(uow, locked)
+                and steerable({"turn": locked.turn, **extra})
+            )
             await uow.bots.add_message(
                 message_id, bot_id, role="user", content=text, reply_to=reply_to, payload=payload
             )
-            # A new instruction makes anything still waiting for approval moot; the
-            # bot will re-propose it if it still applies.
-            await uow.bots.expire_pending(bot_id)
-            await uow.vault.expire_requests(bot_id)
-            turn = await uow.bots.bump_turn(bot_id)
+            if steer:
+                assert locked is not None
+                await uow.bots.touch(bot_id)
+            else:
+                # A new instruction makes anything still waiting for approval moot; the
+                # bot will re-propose it if it still applies.
+                await uow.bots.expire_pending(bot_id)
+                await uow.vault.expire_requests(bot_id)
+                turn = await uow.bots.bump_turn(bot_id)
+                if steerable({"bot_id": str(bot_id), "turn": turn, **extra}):
+                    # Open from the start: a second message sent before the run's first
+                    # step joins it rather than superseding a run that never began.
+                    await uow.bots.set_steer_turn(bot_id, turn)
+        if steer:
+            assert locked is not None
+            log.info("bots.steered", bot_id=str(bot_id), turn=locked.turn)
+            return Sent(
+                message_id=message_id,
+                run_id=locked.last_run_id,
+                admitted=True,
+                refusal_reason=None,
+                steered=True,
+            )
         return await self._start(
             bot,
             turn,
             key=f"bot:{bot_id}:msg:{message_id}",
-            extra=dict(run_input or {}),
+            extra=extra,
             anchor=message_id,
         )
+
+    @staticmethod
+    async def _steerable(uow: UnitOfWork, bot: BotRow) -> bool:
+        """The bot's current turn is open for steering and its run is still working."""
+        if bot.stop_requested or bot.steer_turn != bot.turn or bot.last_run_id is None:
+            return False
+        run = await uow.runs.get(RunId(bot.last_run_id))
+        return run is not None and RunStatus(run.status) in LIVE_RUN_STATUSES
 
     async def decide(self, bot_id: uuid.UUID, pending_id: uuid.UUID, decision: str) -> Sent:
         """Allow once, always allow, or deny a parked action — then resume the bot.
@@ -805,10 +852,26 @@ class BotManager:
 
     async def start_wake(self, wake: WakeRow) -> Sent:
         """Start the turn a queued delivery asks for: a group's message that named this
-        bot, or a message another bot sent it (already in its conversation)."""
+        bot, a message another bot sent it (already in its conversation), or a check-in
+        the bot set itself, whose task rides on the run's input rather than into the
+        conversation — forty quiet looks at an inbox are not forty things anyone said."""
         bot = await self.get(wake.bot_id)
         async with self._uow.transaction() as uow:
             turn = await uow.bots.bump_turn(bot.id)
+        if wake.kind == "check":
+            return await self._start(
+                bot,
+                turn,
+                key=f"bot:{bot.id}:wake:{wake.id}",
+                extra={
+                    "wake_id": str(wake.id),
+                    "check_task": wake.task,
+                    "check_count": wake.hops,
+                    "check_set_at": wake.created_at.isoformat(),
+                },
+                anchor=wake.id,
+                priority=ROUTINE_PRIORITY,
+            )
         return await self._start(
             bot,
             turn,

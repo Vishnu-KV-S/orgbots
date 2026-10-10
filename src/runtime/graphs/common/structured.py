@@ -24,6 +24,7 @@ what makes T25 true by construction rather than by audit.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -46,7 +47,7 @@ RETRY_PREAMBLE = (
     "Your previous response did not satisfy the required output schema. "
     "The validator reported these problems:\n\n{errors}\n\n"
     "Produce the same output again, corrected. Do not explain the correction; "
-    "return only the conforming object."
+    "return only the conforming object, as JSON."
 )
 
 
@@ -73,6 +74,7 @@ async def call_structured(
     work_class: WorkClass,
     call_site: str,
     max_output_tokens: int | None = None,
+    tier: str | None = None,
 ) -> StructuredResult:
     """One structured model call, with one corrective retry.
 
@@ -104,6 +106,7 @@ async def call_structured(
                 prompt=prompt,
                 system=context.system,
                 max_output_tokens=max_output_tokens,
+                tier=tier,
                 metadata={"json_schema": schema.json_schema, "schema_ref": schema_ref},
             ),
             work_class=work_class,
@@ -230,5 +233,33 @@ def _as_object(text: str) -> dict[str, Any] | None:
     try:
         loaded = json.loads(stripped)
     except json.JSONDecodeError:
-        return None
+        return _from_tags(stripped)
     return loaded if isinstance(loaded, dict) else None
+
+
+_TAG = re.compile(r"<([a-z][a-z0-9_]*)>(.*?)</\1>", re.S)
+
+
+def _from_tags(text: str) -> dict[str, Any] | None:
+    """The object, when a model wrote its fields as tags: `<action>wait</action>`.
+
+    DeepSeek, asked for JSON in the system prompt only (it enforces no schema), drifts
+    into this shape at the end of a long prompt — a bot's step, every try. The answer
+    is all there, field by field, so it is read rather than thrown away. Only text that
+    is tags and nothing else: anything between them, and this is prose, not an answer.
+    Each value is read as JSON where it parses (`30`, `true`, a list) and kept as text
+    where it does not; the schema check after this still decides whether it is right.
+    """
+    import json
+
+    fields = list(_TAG.finditer(text))
+    if not fields or _TAG.sub("", text).strip():
+        return None
+    out: dict[str, Any] = {}
+    for match in fields:
+        value = match.group(2).strip()
+        try:
+            out[match.group(1)] = json.loads(value)
+        except json.JSONDecodeError:
+            out[match.group(1)] = value
+    return out

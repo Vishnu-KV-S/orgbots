@@ -28,7 +28,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from runtime.domain.bots import host_of
+from runtime.domain.bots import LOG_KEEP, host_of
 from runtime.domain.vault import (
     CredentialField,
     FillPlan,
@@ -111,7 +111,7 @@ async def _fill(
             "showing with its fields (filled), click its submit button.",
         )
     )
-    return {"n": n + 1, "log": steps[-12:], "tried": tried, "done": False}
+    return {"n": n + 1, "log": steps[-LOG_KEEP:], "tried": tried, "done": False}
 
 
 async def sign_in(
@@ -137,7 +137,7 @@ async def sign_in(
     host = site_of(host_of(url))
     if not host or not url.startswith(("https://", "http://")):
         steps.append(line(n, "sign_in: this is not a web page with a sign-in form"))
-        return {"n": n + 1, "log": steps[-12:], "tried": tried, "done": False}
+        return {"n": n + 1, "log": steps[-LOG_KEEP:], "tried": tried, "done": False}
     fields = form_fields(list(page.get("elements", [])), anchor)
     if not fields:
         steps.append(
@@ -147,7 +147,7 @@ async def sign_in(
                 "sign-in page first, then sign_in.",
             )
         )
-        return {"n": n + 1, "log": steps[-12:], "tried": tried, "done": False}
+        return {"n": n + 1, "log": steps[-LOG_KEEP:], "tried": tried, "done": False}
 
     options = await bots.vault_options(bot, host)
     ask_first = _rule_says_ask(await bots.rules(bot.id), host)

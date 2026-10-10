@@ -14,6 +14,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from runtime.domain.bots import LOG_KEEP
 from runtime.domain.connectors import RESULT_IN_PROMPT
 from runtime.gateway.tools import ToolCall
 from runtime.graphs.common.state import whole
@@ -57,7 +58,7 @@ async def call_connector(
             "use_connector", "activity", thought, {"action": shown, "ok": False, "error": error}
         )
         steps.append(line(n, f"{call['connector']}.{call['tool']} failed: {error}"))
-        return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+        return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}
     text = str(got.get("text") or "")
     failed = bool(got.get("is_error"))
     await say(
@@ -77,4 +78,4 @@ async def call_connector(
     steps.append(
         line(n, f"called {call['connector']}.{call['tool']}" + (" → error" if failed else ""))
     )
-    return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+    return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}

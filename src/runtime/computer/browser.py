@@ -604,21 +604,38 @@ class Computer:
         page = screen.page
         with contextlib.suppress(PlaywrightTimeout):
             await page.wait_for_load_state("domcontentloaded", timeout=5_000)
+        snap = await self._snapshot(page)
+        # A single-page app (Instagram, X, most dashboards) is a blank shell at
+        # DOMContentLoaded and draws itself a moment later. Read too early and the bot
+        # sees "an empty page" and starts guessing.
+        for _ in range(EMPTY_PAGE_RETRIES):
+            if not _looks_empty(snap):
+                break
+            await asyncio.sleep(1.0)
+            snap = await self._snapshot(page)
+        # Most of Cloudflare's checks pass by themselves in a few seconds and then
+        # reload into the real page. Only one still there after that needs a person.
+        deadline = time.monotonic() + CHALLENGE_WAIT_S
+        while snap.get("challenge") and time.monotonic() < deadline:
+            await asyncio.sleep(1.0)
+            with contextlib.suppress(PlaywrightTimeout):
+                await page.wait_for_load_state("domcontentloaded", timeout=5_000)
+            snap = await self._snapshot(page)
+        snap["controller"] = screen.controller
+        return snap
+
+    async def _snapshot(self, page: Page) -> dict[str, Any]:
+        args = {"maxElements": MAX_ELEMENTS, "maxText": MAX_TEXT_CHARS}
         try:
-            snap: dict[str, Any] = await page.evaluate(
-                SNAPSHOT_JS, {"maxElements": MAX_ELEMENTS, "maxText": MAX_TEXT_CHARS}
-            )
+            snap: dict[str, Any] = await page.evaluate(SNAPSHOT_JS, args)
         except PlaywrightError as exc:
             # A navigation in flight destroys the execution context. One retry after
             # the page settles is the whole cure.
             await asyncio.sleep(0.8)
             try:
-                snap = await page.evaluate(
-                    SNAPSHOT_JS, {"maxElements": MAX_ELEMENTS, "maxText": MAX_TEXT_CHARS}
-                )
+                snap = await page.evaluate(SNAPSHOT_JS, args)
             except PlaywrightError:
                 raise ComputerError(f"could not read the page: {exc}") from exc
-        snap["controller"] = screen.controller
         return snap
 
     async def screenshot(self, screen: Screen, *, quality: int = 70) -> bytes:
@@ -1047,6 +1064,19 @@ async def _scroll(c: Computer, s: Screen, a: dict[str, Any]) -> None:
     direction = str(a.get("direction", "down"))
     amount = float(a.get("amount", 0) or s.size[1] * 0.8)
     dy = -amount if direction == "up" else amount
+    # The wheel scrolls whatever is under the pointer. A list in a dialog (followers,
+    # comments) scrolls only with the pointer over it, wherever the last click left it:
+    # over the element the bot named, else over the open dialog the listing showed.
+    target = (
+        await c._element(s, a)
+        if a.get("element") is not None
+        else await s.page.query_selector("[data-bid-dialog]")
+    )
+    box = await target.bounding_box() if target is not None else None
+    if box is not None:
+        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        await s.page.mouse.move(x, y, steps=random.randint(4, 10))  # noqa: S311
+        s.mouse = (x, y)
     # A few wheel ticks rather than one jump, the way a hand scrolls.
     for _ in range(4):
         await s.page.mouse.wheel(0, dy / 4)
@@ -1071,7 +1101,7 @@ async def _reload(c: Computer, s: Screen, a: dict[str, Any]) -> None:
 
 
 async def _wait(c: Computer, s: Screen, a: dict[str, Any]) -> None:
-    await asyncio.sleep(min(10.0, max(0.0, float(a.get("seconds", 1)))))
+    await asyncio.sleep(min(MAX_WAIT_S, max(0.0, float(a.get("seconds", 1)))))
 
 
 _ACTIONS = {
@@ -1092,9 +1122,44 @@ ACTION_TYPES = frozenset(_ACTIONS)
 
 
 async def _settle(page: Page) -> None:
+    """Wait for the page an action changed to stop changing — briefly.
+
+    A click that opens a dialog or loads a list is followed by a fetch and a re-render,
+    and a page read in the middle of that is a page that "did not change". The DOM's
+    size is sampled until two samples agree, for at most `SETTLE_MAX_S`."""
     with contextlib.suppress(PlaywrightTimeout):
         await page.wait_for_load_state("domcontentloaded", timeout=5_000)
     await asyncio.sleep(0.4)
+    last = None
+    deadline = time.monotonic() + SETTLE_MAX_S
+    while time.monotonic() < deadline:
+        try:
+            now = await page.evaluate(_DOM_SIZE_JS)
+        except PlaywrightError:
+            return
+        if now == last:
+            return
+        last = now
+        await asyncio.sleep(0.3)
+
+
+_DOM_SIZE_JS = (
+    "() => [document.getElementsByTagName('*').length, "
+    "document.body ? document.body.innerText.length : 0]"
+)
+
+SETTLE_MAX_S = 2.5
+EMPTY_PAGE_RETRIES = 3
+CHALLENGE_WAIT_S = 10.0
+"""How long a human-verification check is given to pass by itself before the bot is
+told it is there (and hands the screen to its person)."""
+MAX_WAIT_S = 30.0
+"""The longest one `wait` step sleeps — long enough to space out repeated actions on a
+site that limits how fast they may come, well inside the gateway's 60 s per call."""
+
+
+def _looks_empty(snap: dict[str, Any]) -> bool:
+    return len(snap.get("elements") or []) < 3 and len((snap.get("text") or "").strip()) < 40
 
 
 def _site(host: str) -> str:

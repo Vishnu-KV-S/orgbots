@@ -21,6 +21,7 @@ import base64
 from collections.abc import Callable
 from typing import Any
 
+from runtime.domain.bots import LOG_KEEP
 from runtime.domain.files import Editor, FileError, file_op_id, folder_of, name_of, team_of
 from runtime.gateway.tools import ToolCall
 from runtime.graphs.common.state import whole
@@ -71,7 +72,7 @@ async def run_command(
             "run_command", "activity", thought, {"action": shown, "ok": False, "error": error}
         )
         steps.append(line(n, f"could not run {command[:80]!r}: {error}"))
-        return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+        return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}
 
     code = ran.get("exit_code")
     output = "\n".join(
@@ -101,7 +102,7 @@ async def run_command(
         + "\nOUTPUT>>>"
     )
     steps.append(line(n, f"ran {command[:120]!r} {where} → {status}"))
-    return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+    return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}
 
 
 def _is_workspace(path: str) -> bool:
@@ -126,7 +127,7 @@ async def copy_file(
     async def fail(error: str) -> dict[str, Any]:
         await say("copy_file", "activity", thought, {"action": action, "ok": False, "error": error})
         steps.append(line(n, f"copy {source} → {target} failed: {error}"))
-        return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+        return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}
 
     if _is_workspace(source) == _is_workspace(target):
         return await fail(
@@ -177,7 +178,7 @@ async def copy_file(
         steps.append(line(n, f"copied {source} into the team drive as {stored.path}"))
         what = "its text is readable with read_file" if stored.chars else "read_file or look at it"
         answers.append(f"Copied {source} to {stored.path} in your team drive ({what}).")
-        return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+        return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}
 
     try:
         row, data = await node.org.files.blob_at(team, source)
@@ -202,4 +203,4 @@ async def copy_file(
     )
     steps.append(line(n, f"copied {row.path} to {done.get('path')}"))
     answers.append(f"Copied {row.path} to {done.get('path')} — run_command can use it there.")
-    return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+    return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}

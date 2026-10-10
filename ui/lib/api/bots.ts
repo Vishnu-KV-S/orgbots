@@ -163,6 +163,8 @@ export interface BotAction {
   paths?: string[];
   /** save_routine / delete_routine: the routine's name. */
   name?: string;
+  /** check_back: minutes until the bot looks again. */
+  in_minutes?: number;
   /** run_command: on the person's own computer rather than the sandbox. */
   local?: boolean;
   /** An Auto Review line: what the reviewer decided. */

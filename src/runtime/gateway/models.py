@@ -111,6 +111,10 @@ class ModelRequest(BaseModel):
     """Shown to the model before the prompt. Only a provider declaring `vision` takes
     them; any other refuses the call rather than silently dropping what it was asked
     to look at."""
+    tier: str | None = None
+    """A named `WORK` tier of the actor's spec (`ModelProfiles.work_tiers`) — "quick",
+    "think" — chosen for how hard this call is. A name, never a model: the spec says
+    which model each tier is, and a tier it does not declare means the usual one."""
     metadata: dict[str, Any] = {}
     """Provider hints that are not part of the contract: `json_schema` for a
     structured response, and `work_class`, which the gateway fills in itself so a
@@ -128,6 +132,10 @@ class ModelResponse:
     trust: TrustLevel = TrustLevel.UNTRUSTED
     """A completion is text from outside the runtime. It is never trusted input."""
     duration_ms: float = 0.0
+    server_searches: int = 0
+    """Searches the provider ran on its own server for this call (`web_search`). Zero
+    on a call that asked to search tells the caller its answer is the model's own
+    knowledge: the capability is off, or the actor may not search."""
 
 
 class Provider(Protocol):
@@ -260,7 +268,7 @@ class ModelGateway:
             )
         ctx.llm_calls += 1
 
-        profile = ctx.spec.spec.model_profiles.for_work_class(work_class)
+        profile = ctx.spec.spec.model_profiles.for_work_class(work_class, req.tier)
         provider = self._providers.get(profile.provider)
         if provider is None:
             raise ModelCallNotAllowed(f"provider {profile.provider!r} is not configured")
@@ -415,6 +423,7 @@ class ModelGateway:
             output_tokens=response.output_tokens,
             cost_cents=response.cost_cents,
             duration_ms=elapsed,
+            server_searches=response.server_searches,
         )
 
     async def complete_detached(

@@ -236,6 +236,9 @@ class FakeGroups:
     async def wake(self, wake_id: uuid.UUID) -> _Wake | None:
         return self.wakes.get(wake_id)
 
+    async def pending_check(self, bot_id: Any) -> None:
+        return None
+
     async def conversation(self, group_id: Any, *, thread_root: Any = None) -> list[Said]:
         return list(self.said)
 

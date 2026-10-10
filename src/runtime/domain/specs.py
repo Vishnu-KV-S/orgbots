@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from runtime.domain.authority import ResolvedAuthority
 from runtime.domain.delegation import DelegationLimits
@@ -96,11 +96,30 @@ class ModelProfile(Frozen):
 
 class ModelProfiles(Frozen):
     """Work class → model. A model call names its work class (I12) and the profile
-    follows from that; a call site never names a model directly."""
+    follows from that; a call site never names a model directly.
+
+    **Tiers** (`work_tiers`) are named alternatives for `WORK` — a quicker model for an
+    easy step, a thinking one for a hard one — so an actor whose work varies step to
+    step need not pay for its hardest step on every one. The spec still declares every
+    model the actor may use: a call asks for a tier by name, never for a model, and a
+    tier the spec does not have falls back to the work class's own profile (a run
+    admitted under an older spec keeps working). Left out of the stored form when
+    empty, so every actor without tiers keeps the spec hash it had.
+    """
 
     profiles: dict[WorkClass, ModelProfile] = Field(default_factory=dict)
+    work_tiers: dict[str, ModelProfile] = Field(default_factory=dict)
 
-    def for_work_class(self, work_class: WorkClass) -> ModelProfile:
+    @model_serializer(mode="wrap")
+    def _drop_empty_tiers(self, handler: Any) -> Any:
+        out = handler(self)
+        if isinstance(out, dict) and not out.get("work_tiers"):
+            out.pop("work_tiers", None)
+        return out
+
+    def for_work_class(self, work_class: WorkClass, tier: str | None = None) -> ModelProfile:
+        if tier and work_class is WorkClass.WORK and tier in self.work_tiers:
+            return self.work_tiers[tier]
         try:
             return self.profiles[work_class]
         except KeyError as exc:

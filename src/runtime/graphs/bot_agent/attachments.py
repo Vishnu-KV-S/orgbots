@@ -16,6 +16,7 @@ import base64
 from collections.abc import Callable
 from typing import Any
 
+from runtime.domain.bots import LOG_KEEP
 from runtime.domain.enums import WorkClass
 from runtime.domain.errors import (
     MissingCredentials,
@@ -57,7 +58,7 @@ async def look_at_file(
     async def failed(reason: str) -> dict[str, Any]:
         await say("look", "activity", thought, {"action": action, "ok": False, "error": reason})
         steps.append(line(n, f"look at {path} failed: {reason}"))
-        return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+        return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}
 
     try:
         row, data = await node.org.files.blob_at(team_of(bot), path)
@@ -109,4 +110,4 @@ async def look_at_file(
     await say("look", "activity", thought, {"action": action, "ok": True, "note": result.answer})
     answers.append(f"You looked at {row.path} and asked: {question[:200]}\n{result.answer}")
     steps.append(line(n, f"looked at {row.path}: {question[:100]}"))
-    return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+    return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}

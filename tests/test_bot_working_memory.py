@@ -16,10 +16,7 @@ import json
 import uuid
 from typing import Any
 
-import pytest
-from pydantic import ValidationError
-
-from runtime.domain.bots import MAX_PLAN_ITEMS, NOTES_CHARS, BotStep
+from runtime.domain.bots import MAX_PLAN_ITEMS, NOTES_CHARS, PLAN_ITEM_CHARS, BotStep
 from tests.test_bots import (
     FakeBots,
     FakePageGateway,
@@ -151,8 +148,69 @@ async def test_a_page_over_the_inline_limit_is_read_in_full() -> None:
     assert "→ ok" in model.prompts[1]
 
 
-def test_working_memory_is_bounded() -> None:
-    with pytest.raises(ValidationError):
-        BotStep(thought="t", action="observe", plan=["[ ] x"] * (MAX_PLAN_ITEMS + 1))
-    with pytest.raises(ValidationError):
-        BotStep(thought="t", action="observe", notes="x" * (NOTES_CHARS + 1))
+def test_working_memory_is_bounded_by_cutting_not_refusing() -> None:
+    step = BotStep(
+        thought="t" * 5_000,
+        action="observe",
+        plan=["[ ] " + "x" * 500] * (MAX_PLAN_ITEMS + 1),
+        notes="n" * (NOTES_CHARS + 1),
+    )
+    assert len(step.plan) == MAX_PLAN_ITEMS
+    assert all(len(item) <= PLAN_ITEM_CHARS for item in step.plan)
+    assert len(step.notes or "") == NOTES_CHARS and (step.notes or "").endswith("…")
+    assert len(step.thought) <= 1_200
+
+
+async def test_one_unreadable_decision_is_retried_not_the_end_of_the_turn() -> None:
+    bot = _Bot(id=uuid.uuid4())
+    bots = FakeBots(bot)
+    malformed = {"thought": "Click it", "action": "click"}  # no element
+    model = ScriptedModel(
+        [
+            malformed,
+            malformed,  # the corrective retry fails too
+            {"thought": "Done", "action": "reply", "text": "All done."},
+        ]
+    )
+    out = await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), bot.id)
+
+    assert out["status"] == "replied"
+    assert "your decision could not be read" in model.prompts[2]
+    assert not bots.said("error")
+
+
+async def test_three_unreadable_decisions_in_a_row_end_the_turn() -> None:
+    """Two are retried on plainer models (`tiers.place`); a third ends it."""
+    bot = _Bot(id=uuid.uuid4())
+    bots = FakeBots(bot)
+    malformed = {"thought": "Click it", "action": "click"}
+    model = ScriptedModel([malformed] * 6)
+    out = await _turn(_Node(_Ctx(), FakePageGateway(), model, _Org(bots)), bot.id)
+
+    assert out["status"] == "schema_failure"
+    assert len(model.prompts) == 6, "each of the three decisions had its corrective retry"
+    (error,) = bots.said("error")
+    assert "continue" in error.content
+
+
+def test_going_round_in_circles_is_called_out_even_with_other_steps_between() -> None:
+    from runtime.graphs.bot_agent.graph import _repeated
+
+    effort = "click [92] 'Effort Medium' → ok, but nothing on the page changed (now at x)"
+    steps = [
+        f"{i + 1}. {line}"
+        for i, line in enumerate(
+            [
+                effort,
+                "looked at the screen: where is Max?",
+                "looked at the page again",
+                effort.replace("[92]", "[95]"),  # renumbered, the same click
+                "looked at the page again",
+                effort,
+            ]
+        )
+    ]
+    warning = _repeated(steps)
+    assert "going round in circles" in warning
+    assert "'Effort Medium'" in warning and "3 times" in warning
+    assert _repeated(steps[:3]) == ""

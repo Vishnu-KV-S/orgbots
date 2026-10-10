@@ -95,6 +95,9 @@ class BrowserResult(BaseModel):
     rendered: str = ""
     """The page as the model reads it — see `runtime.computer.snapshot.render`."""
     elements: list[dict[str, Any]] = Field(default_factory=list)
+    challenge: str = ""
+    """The human-verification check in front of the page (`cloudflare`, `recaptcha`…),
+    if one is: the bot hands the screen to its person rather than act on it."""
     screenshot: str = Field(default="", repr=False)
     """Base64 JPEG of the viewport, masked, when one was asked for."""
 
@@ -113,6 +116,7 @@ def _result(body: dict[str, Any], *, ok: bool = True, error: str | None = None) 
         controller=str(body.get("controller", "bot")),
         rendered=str(body.get("rendered", "")),
         elements=list(snap.get("elements", [])),
+        challenge=str(snap.get("challenge") or ""),
         screenshot=str(body.get("screenshot", "")),
     )
 

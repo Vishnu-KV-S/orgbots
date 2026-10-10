@@ -19,7 +19,7 @@ _BOT_COLUMNS = """
     id, organization_id, actor_name, name, label, description, avatar, brief, brief_locked,
     brief_rev, pinned, hidden, unread, needs_attention, stop_requested, turn, last_run_id,
     duplicated_from, parent_bot_id, team_id, created_by, appearance, created_at, updated_at,
-    auto_review, owner_member_id, visibility
+    auto_review, owner_member_id, visibility, steer_turn
 """
 
 EDITABLE = frozenset(
@@ -75,6 +75,9 @@ class BotRow:
     is everyone's. A helper has its team's owner."""
     visibility: str = "private"
     """`private` to its owner, or shared with the `team` — the same for a whole team."""
+    steer_turn: int | None = None
+    """The turn that takes the person's new messages into its work while it runs
+    (migration 057); None when no turn does, and a new message starts one."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +213,7 @@ def _bot(row: Any) -> BotRow:
         auto_review=bool(row.auto_review),
         owner_member_id=row.owner_member_id,
         visibility=row.visibility,
+        steer_turn=row.steer_turn,
     )
 
 
@@ -500,6 +504,32 @@ class BotRepository:
             )
         ).one()
         return int(row.turn)
+
+    async def lock(self, bot_id: uuid.UUID) -> BotRow | None:
+        """The bot, its row locked until the transaction ends — so whether a turn is
+        open for steering, and the message that steers it, are decided together."""
+        row = (
+            await self._s.execute(
+                text(
+                    f"SELECT {_BOT_COLUMNS} FROM bots WHERE id = :id AND deleted_at IS NULL "
+                    "FOR UPDATE"
+                ),
+                {"id": bot_id},
+            )
+        ).one_or_none()
+        return None if row is None else _bot(row)
+
+    async def set_steer_turn(
+        self, bot_id: uuid.UUID, turn: int | None, *, if_turn: int | None = None
+    ) -> bool:
+        """Open a turn for steering (`turn`) or close it (None). `if_turn` changes it only
+        while that is still the bot's turn — a superseded run opens nothing."""
+        guard = " AND turn = :if_turn" if if_turn is not None else ""
+        result = await self._s.execute(
+            text(f"UPDATE bots SET steer_turn = :turn WHERE id = :id{guard}"),
+            {"turn": turn, "id": bot_id, "if_turn": if_turn},
+        )
+        return bool(getattr(result, "rowcount", 0))
 
     async def soft_delete(self, bot_id: uuid.UUID) -> None:
         """Free the bot's name and stop its actor admitting runs. The actor row stays —
@@ -847,6 +877,23 @@ class BotRepository:
                     """
                 ),
                 {"bot": bot_id, "limit": limit},
+            )
+        ).all()
+        return [_message(r) for r in rows]
+
+    async def person_messages_after(self, bot_id: uuid.UUID, seq: int) -> list[BotMessageRow]:
+        """The person's messages after `seq`, oldest first."""
+        rows = (
+            await self._s.execute(
+                text(
+                    """
+                    SELECT id, seq, bot_id, role, content, payload, run_id, reply_to, created_at
+                      FROM bot_messages
+                     WHERE bot_id = :bot AND role = 'user' AND seq > :seq
+                     ORDER BY seq ASC
+                    """
+                ),
+                {"bot": bot_id, "seq": seq},
             )
         ).all()
         return [_message(r) for r in rows]

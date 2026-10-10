@@ -166,6 +166,8 @@ export function describeAction(action: BotAction | undefined): string {
       return "Look at the page";
     case "plan":
       return "Plan";
+    case "request":
+      return "Your request, as I read it";
     case "look":
       return `Look at the screen: “${action.text ?? ""}”`;
     case "sign_in":
@@ -208,6 +210,10 @@ export function describeAction(action: BotAction | undefined): string {
       return `Save routine “${action.name ?? ""}”`;
     case "delete_routine":
       return `Delete routine “${action.name ?? ""}”`;
+    case "check_back":
+      return `Check back in ${minutes(action.in_minutes ?? 0)}`;
+    case "cancel_check":
+      return "Stop checking back";
     default:
       return action.type;
   }
@@ -254,7 +260,15 @@ export const ACTION_ICON: Record<string, Icon> = {
   use_skill: SparklesIcon,
   save_routine: ClockIcon,
   delete_routine: ClockIcon,
+  check_back: ClockIcon,
+  cancel_check: ClockIcon,
 };
+
+function minutes(n: number): string {
+  if (n < 90) return `${n} minute${n === 1 ? "" : "s"}`;
+  const hours = Math.round(n / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
 
 /** File steps a person can follow into the Files pane (a deleted file is in the trash). */
 export const OPENS_FILE = new Set([

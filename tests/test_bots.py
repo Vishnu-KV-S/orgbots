@@ -46,6 +46,7 @@ from runtime.graphs.registry import GRAPH_KEY, get_graph
 from runtime.org.bots import (
     BROWSER_TOOLS,
     CONNECTOR_TOOLS,
+    SEARCH_TOOLS,
     TERMINAL_TOOLS,
     BriefChange,
     BriefLockedError,
@@ -108,8 +109,9 @@ def test_actor_spec_is_narrow() -> None:
     name = actor_name_for("Sales Scout!", "3f9a")
     assert name == "bot-sales-scout-3f9a"
     spec = bot_actor_spec(name)
-    # The browser's two tools, the terminal's three, connector calls, and nothing else.
-    assert spec.allowed_tools == BROWSER_TOOLS | TERMINAL_TOOLS | CONNECTOR_TOOLS
+    # The browser's two tools, the terminal's three, connector calls, web search, and
+    # nothing else.
+    assert spec.allowed_tools == BROWSER_TOOLS | TERMINAL_TOOLS | CONNECTOR_TOOLS | SEARCH_TOOLS
     assert spec.graph_ref == "bot_agent@1"
     assert all(p.provider == "deepseek" for p in spec.model_profiles.profiles.values())
 
@@ -143,6 +145,7 @@ class _Message:
     role: str
     content: str
     payload: dict[str, Any] = field(default_factory=dict)
+    seq: int = 0
 
 
 @dataclass
@@ -154,6 +157,9 @@ class _Pending:
 
 class FakeBots:
     """The slice of `BotService` the graph uses, in memory."""
+
+    max_chunks = 1
+    """As `BotService` without an inbox: no carrying on unasked."""
 
     def __init__(self, bot: _Bot, rules: tuple[BotRule, ...] = ()) -> None:
         self.bot = bot
@@ -169,14 +175,54 @@ class FakeBots:
         self.brief_edits: list[tuple[str, str, str, str]] = []
         self.notified: list[tuple[str, str, str]] = []
         self.screenshots: dict[uuid.UUID, tuple[str, bytes]] = {}
+        self.quiet_ends = 0
+        self.steer_turn: int | None = None
+        self.follow_ups: list[dict[str, Any]] = []
+        self._seq = 0
 
     async def get(self, bot_id: uuid.UUID) -> _Bot:
         return self._who(bot_id)
 
     async def record(self, bot_id, *, run_id, step, kind, role, content, payload=None):  # type: ignore[no-untyped-def]
         mid = message_id(run_id, step, kind)
-        self.log.setdefault(mid, _Message(role, content, payload or {}))
+        if mid not in self.log:
+            self._seq += 1
+            self.log[mid] = _Message(role, content, payload or {}, self._seq)
         return mid
+
+    def person_says(self, text: str) -> _Message:
+        """A message from the person, as `BotManager.send` records it."""
+        self._seq += 1
+        message = _Message("user", text, {}, self._seq)
+        self.log[uuid.uuid4()] = message
+        return message
+
+    # Steering: `BotService`'s semantics over the fake's turn and log.
+
+    async def open_steering(self, bot_id: uuid.UUID, turn: int) -> None:
+        if self._who(bot_id).turn == turn:
+            self.steer_turn = turn
+
+    async def close_steering(self, bot_id: uuid.UUID) -> None:
+        self.steer_turn = None
+
+    async def claim_run(self, bot_id: uuid.UUID, run_id: Any) -> None:
+        pass
+
+    async def settle_turn(self, bot, *, run_id, turn, seen, carried):  # type: ignore[no-untyped-def]
+        if self.bot.turn != turn:
+            return []
+        unseen = (
+            [m for m in self.log.values() if m.role == "user" and m.seq > seen]
+            if seen is not None
+            else []
+        )
+        self.steer_turn = None
+        if unseen:
+            self.bot.turn += 1
+            self.steer_turn = self.bot.turn
+            self.follow_ups.append({"turn": self.bot.turn, "carried": {**carried, "seen": seen}})
+        return unseen
 
     async def conversation(self, bot_id: uuid.UUID) -> list[_Message]:
         return [m for m in self.log.values() if m.role in ("user", "bot")]
@@ -295,8 +341,11 @@ class FakeBots:
     async def pending(self, pid: uuid.UUID) -> _Pending | None:
         return self.pendings.get(pid)
 
-    async def end_turn(self, bot_id: uuid.UUID, *, needs_attention: bool = False) -> None:
+    async def end_turn(
+        self, bot_id: uuid.UUID, *, needs_attention: bool = False, unread: bool = True
+    ) -> None:
         self.turns_ended += 1
+        self.quiet_ends += 0 if unread else 1
 
     async def notify(self, bot, kind, body, *, run_id, step, url=""):  # type: ignore[no-untyped-def]
         self.notified.append((kind, body, url))
@@ -415,6 +464,9 @@ class NoGroups:
         return []
 
     async def wake(self, wake_id: Any) -> None:
+        return None
+
+    async def pending_check(self, bot_id: Any) -> None:
         return None
 
 

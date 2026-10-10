@@ -26,7 +26,11 @@ from runtime.domain.ids import OrganizationId
 from runtime.domain.specs import ModelProfile
 from runtime.gateway.models import SERVER_TOOL_GRANTS, ModelGateway, ModelRequest
 from runtime.gateway.providers import build_providers
-from runtime.gateway.providers.anthropic_provider import AnthropicProvider, ProviderCapabilities
+from runtime.gateway.providers.anthropic_provider import (
+    SCHEMA_REMINDER,
+    AnthropicProvider,
+    ProviderCapabilities,
+)
 from runtime.gateway.providers.deepseek_provider import DeepSeekProvider
 from runtime.settings import Settings
 from tests.conftest_m2 import make_authority, make_ctx
@@ -119,13 +123,24 @@ async def test_schema_goes_into_the_prompt_when_the_endpoint_cannot_enforce_it()
 
 
 async def test_the_schema_instruction_rides_on_the_system_block_not_the_user_turn() -> None:
-    """The user turn varies per call. A fixed instruction there would move the cache
-    boundary on every request for the endpoints that do cache."""
+    """The user turn varies per call. The schema there would move the cache boundary on
+    every request for the endpoints that do cache — so only a short, fixed reminder
+    goes at its end, after everything that varies."""
     provider = _provider()
     await provider.complete(PROFILE, _request(json_schema=SCHEMA))
 
     params = provider.client.messages.params
-    assert params["messages"] == [{"role": "user", "content": "draft it"}]
+    assert params["messages"] == [
+        {"role": "user", "content": "draft it" + SCHEMA_REMINDER.format()}
+    ]
+    assert json.dumps(SCHEMA) not in params["messages"][0]["content"]
+
+
+async def test_no_reminder_without_a_schema() -> None:
+    provider = _provider()
+    await provider.complete(PROFILE, _request())
+
+    assert provider.client.messages.params["messages"][0]["content"] == "draft it"
 
 
 async def test_no_cache_breakpoint_where_cache_control_is_ignored() -> None:

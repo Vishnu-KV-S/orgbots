@@ -747,6 +747,8 @@ async def send(bot_id: UUID, body: MessageBody, request: Request) -> dict[str, A
         "run_id": str(sent.run_id) if sent.run_id else None,
         "admitted": sent.admitted,
         "refusal_reason": sent.refusal_reason,
+        # Joined the turn already working on the person's last message (`run_id`).
+        "steered": sent.steered,
     }
 
 

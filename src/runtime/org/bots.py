@@ -3,8 +3,8 @@
 Two things live here.
 
 **`bot_actor_spec`** — what a bot *is* to the runtime: an `LLM_AGENT` running
-`bot_agent@1`, allowed the two browser tools, the terminal's three and connector calls,
-and nothing else, on DeepSeek. The spec is
+`bot_agent@1`, allowed the two browser tools, the terminal's three, connector calls and
+web search, and nothing else, on DeepSeek. The spec is
 the same for every bot; what differs between them (name, instructions, memory) is
 conversation state read at run time, not authority. So editing a bot's instructions
 never republishes its actor, and "what was this run allowed to do" has the same answer
@@ -79,24 +79,74 @@ TERMINAL_TOOLS = frozenset({"terminal.run@1", "workspace.read@1", "workspace.wri
 """The shell and the shared workspace on the computer (`gateway.builtin.terminal`)."""
 CONNECTOR_TOOLS = frozenset({"connector.call@1"})
 """Tools on MCP servers the organization connected (`gateway.builtin.connectors`)."""
+SEARCH_TOOLS = frozenset({"web.search@1"})
+"""A bot's `web_search` (`graphs.bot_agent.search`): DeepSeek searches on its own
+server, which the model gateway offers only to an actor whose spec holds this."""
 
 _STEP_PROFILE = ModelProfile(
     provider="deepseek",
     model=PRO,
-    max_output_tokens=2_000,
+    # A reply can be a whole report, and a step carries its plan and notes besides;
+    # cut off at 2,000 tokens it was half a JSON object, malformed twice, and the turn
+    # ended. The cap is a ceiling, not a target: only the tokens written are billed
+    # (and the reservation for the rest is returned when the call ends).
+    max_output_tokens=32_000,
     temperature=0.0,
     input_cents_per_mtok=66,
     output_cents_per_mtok=198,
-    # A step is a short structured decision made many times a turn. Thinking would
-    # multiply the latency a person watching the screen feels on every click.
+    # The usual step: a structured decision made many times a turn, answered straight
+    # off. Thinking is the `think` tier's, for the steps that need it.
     thinking=False,
     effort="high",
 )
+"""The `normal` tier — most steps. Which tier a step gets is the graph's call
+(`graphs.bot_agent.tiers`), from how the turn is going."""
+
+_QUICK_PROFILE = ModelProfile(
+    provider="deepseek",
+    model=FLASH,
+    max_output_tokens=16_000,
+    temperature=0.0,
+    input_cents_per_mtok=22,
+    output_cents_per_mtok=66,
+    thinking=False,
+    effort="high",
+)
+"""The `quick` tier: a third of the price and faster, for a step with little to decide —
+a "hi", waiting on a slow page, reading on down one."""
+
+_THINK_PROFILE = ModelProfile(
+    provider="deepseek",
+    model=PRO,
+    # Room for the reasoning and the answer: thinking tokens count against the cap.
+    max_output_tokens=64_000,
+    temperature=0.0,
+    input_cents_per_mtok=66,
+    output_cents_per_mtok=198,
+    thinking=True,
+    effort="max",
+)
+"""The `think` tier: the bot is stuck — going round in circles, an action failing, its
+last decision unreadable — or planning a task its person had to ask for twice."""
+
+_SEARCH_PROFILE = _STEP_PROFILE.model_copy(
+    update={
+        "max_output_tokens": 8_000,
+        # Thinking off, for the reason `org.department._pro` gives: a search pauses the
+        # turn, and a thinking block handed back on the resume is refused.
+        "thinking": False,
+        "web_search": True,
+    }
+)
+"""The `search` tier: one call that searches the web and answers a how-to question —
+the bot's `web_search`, never a step's decision."""
+
+BOT_TIERS = {"quick": _QUICK_PROFILE, "think": _THINK_PROFILE, "search": _SEARCH_PROFILE}
 
 _SUMMARY_PROFILE = ModelProfile(
     provider="deepseek",
     model=FLASH,
-    max_output_tokens=2_000,
+    max_output_tokens=8_000,
     temperature=0.0,
     input_cents_per_mtok=22,
     output_cents_per_mtok=66,
@@ -111,7 +161,7 @@ VISION_MODEL = "deepseek-flash"
 _LOOK_PROFILE = ModelProfile(
     provider="deepseek",
     model=VISION_MODEL,
-    max_output_tokens=1_500,
+    max_output_tokens=4_000,
     temperature=0.0,
     # Peak-hour list prices, so the ledger never under-counts: $0.30 in, $1.20 out per
     # million tokens. An image is at most 1,024 tokens — a look is a few hundredths of
@@ -133,7 +183,7 @@ def bot_actor_spec(actor_name: str) -> ActorSpec:
         name=actor_name,
         kind=ActorKind.LLM_AGENT,
         graph_ref=BOT_GRAPH,
-        allowed_tools=BROWSER_TOOLS | TERMINAL_TOOLS | CONNECTOR_TOOLS,
+        allowed_tools=BROWSER_TOOLS | TERMINAL_TOOLS | CONNECTOR_TOOLS | SEARCH_TOOLS,
         ceilings=Ceilings(
             # Derived from MAX_STEPS, because the step budget is what a turn is meant
             # to stop on: it ends with a progress report and carries on. A ceiling
@@ -142,10 +192,12 @@ def bot_actor_spec(actor_name: str) -> ActorSpec:
             # may need one corrective retry; the slack covers a resumed turn's parked
             # action and a fill. (It was 40 tool calls, which a busy turn hit at about
             # step 20.)
-            # Three a step at most: the decision, a corrective retry, and Auto Review's
-            # check of a risky step (`domain.review`) when the person has it on.
-            max_llm_calls=3 * MAX_STEPS + 12,
-            max_tool_calls=2 * MAX_STEPS + 12,
+            # Four a step at most: the decision, a corrective retry, Auto Review's
+            # check of a risky step (`domain.review`) when the person has it on, and a
+            # glance — the screen described for a stuck step (`look.glance`), which
+            # also reads the screen once more.
+            max_llm_calls=4 * MAX_STEPS + 12,
+            max_tool_calls=3 * MAX_STEPS + 12,
             max_wall_clock_s=1_800.0,
             max_cost_cents=300,
         ),
@@ -154,7 +206,8 @@ def bot_actor_spec(actor_name: str) -> ActorSpec:
                 WorkClass.WORK: _STEP_PROFILE,
                 WorkClass.SUMMARIZATION: _SUMMARY_PROFILE,
                 WorkClass.PERCEPTION: _LOOK_PROFILE,
-            }
+            },
+            work_tiers=BOT_TIERS,
         ),
     )
 
@@ -377,7 +430,7 @@ class BotService:
                 role="system",
                 content=(
                     f"Still working — this is a long task, so I'm carrying on "
-                    f"(part {chunk + 1} of up to {self._max_chunks})."
+                    f"(part {chunk + 1})."
                 ),
                 payload={"chunk": chunk + 1, "max_chunks": self._max_chunks},
                 run_id=uuid.UUID(str(run_id)),
@@ -426,6 +479,69 @@ class BotService:
             )
             await uow.screenshots.prune(bot_id, keep=KEEP_SCREENSHOTS)
         return sid
+
+    async def open_steering(self, bot_id: uuid.UUID, turn: int) -> None:
+        """Let the person's new messages join this turn while it runs (migration 057).
+        A no-op once a newer turn has started."""
+        async with self._uow.transaction() as uow:
+            await uow.bots.set_steer_turn(bot_id, turn, if_turn=turn)
+
+    async def close_steering(self, bot_id: uuid.UUID) -> None:
+        """No turn takes new messages: the next one starts a turn of its own."""
+        async with self._uow.transaction() as uow:
+            await uow.bots.set_steer_turn(bot_id, None)
+
+    async def settle_turn(
+        self,
+        bot: BotRow,
+        *,
+        run_id: Any,
+        turn: int,
+        seen: int | None,
+        carried: dict[str, Any],
+    ) -> list[BotMessageRow]:
+        """End a steerable turn: close it, or carry it on if the person said more.
+
+        Under the bot row's lock, the lock `BotManager.send` takes to decide whether to
+        steer — so a message either reached this turn before it closed, and is found
+        here, or finds it closed and starts a turn of its own. A message found here
+        (sent after the turn last read the conversation) starts a follow-up run, as a
+        new message would, carrying the turn's working memory: the answer to "no, on
+        Claude" needs to know what the bot was doing. Returns those messages. `seen`
+        None closes the turn whatever was sent (Stop, or a turn that never read the
+        conversation).
+        """
+        async with self._uow.transaction() as uow:
+            locked = await uow.bots.lock(bot.id)
+            if locked is None or locked.turn != turn:
+                return []
+            unseen = await uow.bots.person_messages_after(bot.id, seen) if seen is not None else []
+            if not unseen or self._inbox is None:
+                await uow.bots.set_steer_turn(bot.id, None)
+                return []
+            await uow.bots.expire_pending(bot.id)
+            await uow.vault.expire_requests(bot.id)
+            follow = await uow.bots.bump_turn(bot.id)
+            await uow.bots.set_steer_turn(bot.id, follow)
+            await self._inbox.send(
+                organization_id=bot.organization_id,
+                kind=KIND_BOT_CONTINUE,
+                recipient=bot.actor_name,
+                correlation_id=CorrelationId(
+                    uuid.uuid5(uuid.NAMESPACE_URL, f"botturn:{bot.id}:{follow}")
+                ),
+                key=dedupe_key("bot.follow_up", run_id),
+                subject=f"{bot.name}: your new message",
+                body={
+                    "bot_id": str(bot.id),
+                    "turn": follow,
+                    "follow_up": True,
+                    "carried": {**carried, "seen": seen},
+                },
+                sender=bot.actor_name,
+                uow=uow,
+            )
+        return unseen
 
     async def claim_run(self, bot_id: uuid.UUID, run_id: Any) -> None:
         """Make this run the bot's current one. A chunk the dispatcher started is not
@@ -792,8 +908,17 @@ class BotService:
                 member_id=await _audience(uow, bot),
             )
 
-    async def end_turn(self, bot_id: uuid.UUID, *, needs_attention: bool = False) -> None:
+    async def end_turn(
+        self, bot_id: uuid.UUID, *, needs_attention: bool = False, unread: bool = True
+    ) -> None:
+        """`unread=False` for a turn with nothing to tell — a check-in that found nothing
+        new should not light the bot up in the sidebar every few minutes."""
         async with self._uow.transaction() as uow:
+            if not unread:
+                await uow.bots.set_flags(
+                    bot_id, needs_attention=needs_attention, stop_requested=False
+                )
+                return
             await uow.bots.set_flags(
                 bot_id, unread=True, needs_attention=needs_attention, stop_requested=False
             )

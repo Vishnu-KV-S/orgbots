@@ -14,6 +14,7 @@ a reply never asks for a reply back.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -343,6 +344,41 @@ class GroupService:
     async def wake(self, wake_id_: uuid.UUID) -> WakeRow | None:
         async with self._uow() as uow:
             return await uow.groups.get_wake(wake_id_)
+
+    # --- check-ins ---------------------------------------------------------------------
+
+    async def check_back(
+        self, bot: Any, *, run_id: Any, step: int, minutes: int, task: str, count: int
+    ) -> WakeRow:
+        """Queue the bot a wake of itself in `minutes`, to do `task` — its `check_back`.
+
+        A bot has one check-in to come at most: a new one replaces the old, the way a
+        rescheduled reminder does, so a watch never forks into two. Keyed by the step
+        that asked, so a replayed step queues nothing new. `count` is which check-in in
+        a row this is (kept in `hops`, which a check otherwise has no use for).
+        """
+        wid = wake_id("check", run_id, step)
+        async with self._uow.transaction() as uow:
+            await uow.groups.add_wake(
+                wid,
+                bot.id,
+                kind="check",
+                hops=count,
+                due_at=dt.datetime.now(dt.UTC) + dt.timedelta(minutes=minutes),
+                task=task,
+            )
+            await uow.groups.cancel_checks(bot.id, "replaced by a newer check-in", keep=wid)
+            row = await uow.groups.get_wake(wid)
+        assert row is not None
+        return row
+
+    async def pending_check(self, bot_id: uuid.UUID) -> WakeRow | None:
+        async with self._uow() as uow:
+            return await uow.groups.queued_check(bot_id)
+
+    async def cancel_checks(self, bot_id: uuid.UUID, reason: str) -> int:
+        async with self._uow.transaction() as uow:
+            return await uow.groups.cancel_checks(bot_id, reason)
 
     async def message(self, message_id_: uuid.UUID) -> GroupMessageRow | None:
         async with self._uow() as uow:

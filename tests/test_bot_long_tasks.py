@@ -21,6 +21,7 @@ from typing import Any
 from sqlalchemy import text
 
 from runtime.domain.bots import BOT_TURN_PRIORITY, MAX_STEPS
+from runtime.graphs.bot_agent.graph import _mark
 from runtime.graphs.registry import GRAPH_KEY, get_graph
 from runtime.org.bots import BotService, bot_actor_spec, refresh_bot_actor
 from tests.test_bots import FakeBots, FakePageGateway, ScriptedModel, _Bot, _Ctx, _Node, _Org
@@ -103,6 +104,68 @@ async def test_the_last_chunk_stops_and_asks_for_continue() -> None:
     assert 'Say "continue"' in bots.said("bot")[-1].content
 
 
+def _later_part(bot: _Bot, *, log: list[str], stalled: int, moved: bool) -> dict[str, Any]:
+    """A turn at the end of part 3, whose plan and notes did or did not move."""
+    state = _at_budget(bot, chunk=3)
+    mark = _mark(state["plan"], state["notes"], {})
+    state["input"]["carried"] = {"mark": "elsewhere" if moved else mark, "stalled": stalled}
+    state["log"] = log
+    return state
+
+
+async def test_parts_that_get_nowhere_stop_the_task_and_say_why() -> None:
+    """Not a count of parts: three in a row whose plan and notes did not move."""
+    bot = _Bot(id=uuid.uuid4())
+    bots = ChunkBots(bot, max_chunks=20)
+    clicks = [f"{i + 1}. click 'Manual' → ok" for i in range(20)]
+    state = _later_part(bot, log=clicks, stalled=2, moved=False)
+    out = await _invoke(_Node(_Ctx(), FakePageGateway(), ScriptedModel([]), _Org(bots)), state)
+
+    assert out["status"] == "blocked" and not bots.continued
+    assert "the last 3 got nowhere" in bots.said("bot")[-1].content
+    assert bots.turns_ended == 1
+
+
+async def test_a_part_that_moved_on_or_waited_carries_on_with_the_count_reset() -> None:
+    bot = _Bot(id=uuid.uuid4())
+    clicks = [f"{i + 1}. click 'Next page' → ok" for i in range(20)]
+    waits = [f"{i + 1}. wait 30s → ok (now at x)" for i in range(20)]
+    for log, moved, waited in ((clicks, True, False), (waits, False, True)):
+        bots = ChunkBots(bot, max_chunks=20)
+        state = _later_part(bot, log=log, stalled=2, moved=moved)
+        out = await _invoke(_Node(_Ctx(), FakePageGateway(), ScriptedModel([]), _Org(bots)), state)
+        assert out["status"] == "continuing"
+        (sent,) = bots.continued
+        assert sent["carried"]["stalled"] == 0
+        assert sent["carried"]["waited"] is waited
+
+
+async def test_the_next_part_hears_it_made_no_progress_or_only_waited() -> None:
+    bot = _Bot(id=uuid.uuid4(), turn=3)
+    model = ScriptedModel([{"thought": "Done", "action": "reply", "text": "Done."}])
+    carried = {"log": ["24. wait 30s → ok"], "plan": ["[>] x"], "stalled": 1, "waited": True}
+    state = {"input": {"bot_id": str(bot.id), "turn": 3, "chunk": 4, "carried": carried}}
+    await _invoke(
+        _Node(_Ctx(), FakePageGateway(), model, _Org(ChunkBots(bot, max_chunks=20))), state
+    )
+
+    assert "the last 1 part(s) made no progress" in model.prompts[0]
+    assert "check_back instead of waiting here" in model.prompts[0]
+
+
+async def test_near_the_runaway_guard_the_bot_is_told_to_wrap_up() -> None:
+    bot = _Bot(id=uuid.uuid4(), turn=3)
+    model = ScriptedModel([{"thought": "Done", "action": "reply", "text": "Done."}])
+    state = {
+        "input": {"bot_id": str(bot.id), "turn": 3, "chunk": 20, "carried": {}},
+        "n": MAX_STEPS - 2,
+    }
+    await _invoke(
+        _Node(_Ctx(), FakePageGateway(), model, _Org(ChunkBots(bot, max_chunks=20))), state
+    )
+    assert "near its limit for this request" in model.prompts[0]
+
+
 async def test_a_task_from_another_bot_does_not_carry_on_behind_its_back() -> None:
     """The asking bot waits for *this* run's output; a later chunk's would go nowhere."""
     bot = _Bot(id=uuid.uuid4())
@@ -177,7 +240,7 @@ async def test_a_stale_bot_is_republished_to_the_new_ceilings(
         assert await refresh_bot_actor(uow, organization_id, bot.actor_name) is None
         active = await uow.actors.resolve_active(organization_id, bot.actor_name)
     assert active.version == 2
-    assert active.spec["ceilings"]["max_tool_calls"] == 2 * MAX_STEPS + 12
+    assert active.spec["ceilings"]["max_tool_calls"] == 3 * MAX_STEPS + 12
 
     # And the API's once-per-organization pass is a no-op on a current bot.
     await manager.ensure_organization(organization_id, "long tasks")
@@ -227,7 +290,7 @@ async def test_the_dispatcher_starts_the_next_chunk_at_bot_priority(
     run_input = row.spec["input"]
     assert run_input["bot_id"] == str(bot.id) and run_input["turn"] == 7
     assert run_input["chunk"] == 2 and run_input["carried"]["plan"] == ["[>] go on"]
-    assert row.spec["spec"]["ceilings"]["max_tool_calls"] == 2 * MAX_STEPS + 12
+    assert row.spec["spec"]["ceilings"]["max_tool_calls"] == 3 * MAX_STEPS + 12
     assert [m.content for m in said if m.role == "system"] == [
-        "Still working — this is a long task, so I'm carrying on (part 2 of up to 3)."
+        "Still working — this is a long task, so I'm carrying on (part 2)."
     ]

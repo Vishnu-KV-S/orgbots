@@ -28,6 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from runtime.domain.bots import LOG_KEEP
 from runtime.domain.enums import WorkClass
 from runtime.domain.errors import (
     MissingCredentials,
@@ -43,7 +44,13 @@ from runtime.graphs.bot_agent.shots import keep
 from runtime.graphs.common.state import whole
 from runtime.graphs.common.structured import _as_object
 
-LOOK_MAX_OUTPUT_TOKENS = 2_000
+LOOK_MAX_OUTPUT_TOKENS = 4_000
+
+CAPTCHA_HANDOFF = (
+    "This page wants a CAPTCHA, which I don't solve. Take control of my screen "
+    "(🖥 Computer), complete it, hand the screen back and tell me to continue."
+)
+"""Said when a look sees a CAPTCHA, and when the page listing names one (`graph`)."""
 
 UNAVAILABLE = (
     "look is not available (vision is not set up: {reason}). Work from the page "
@@ -79,7 +86,7 @@ async def look(
     async def failed(reason: str) -> dict[str, Any]:
         await say("look", "activity", thought, {"action": action, "ok": False, "error": reason})
         steps.append(line(n, f"look failed: {reason}"))
-        return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+        return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}
 
     if not page.get("ok", True) or not shot:
         return await failed(str(page.get("error") or "the computer returned no screenshot"))
@@ -118,13 +125,7 @@ async def look(
             thought,
             {"action": action, "ok": True, "note": "The screen shows a CAPTCHA.", **pictured},
         )
-        await say(
-            "captcha",
-            "system",
-            "This page wants a CAPTCHA, which I don't solve. Take control of my screen "
-            "(🖥 Computer), complete it, hand the screen back and tell me to continue.",
-            {"captcha": True, **pictured},
-        )
+        await say("captcha", "system", CAPTCHA_HANDOFF, {"captcha": True, **pictured})
         await node.org.bots.end_turn(bot.id, needs_attention=True)
         return end({"status": "human_needed", "steps": n, "reason": "captcha"})
 
@@ -143,4 +144,60 @@ async def look(
     )
     answers.append(f"You looked at the screen and asked: {question[:200]}\n{result.answer}{where}")
     steps.append(line(n, f"looked at the screen: {question[:100]}"))
-    return {"n": n + 1, "log": steps[-12:], "answers": answers[-3:], "done": False}
+    return {"n": n + 1, "log": steps[-LOG_KEEP:], "answers": answers[-3:], "done": False}
+
+
+GLANCE_QUESTION = (
+    "Describe this screen for an agent deciding its next step. Say: what app or page it "
+    "is; what is open on top (a menu, submenu, dialog or popup — list its items and which "
+    "is selected or ticked); the main controls and their state (toggles on or off, the "
+    "options chosen); any progress indicator, error or message; and anything that is "
+    "waiting for the user to answer it. Give the [numbers] from the listing for the "
+    "controls you mention, and say which visible controls have no number."
+)
+
+
+async def glance(node: Any, bot: Any) -> str | None:
+    """The screen, described by the vision model, for the step about to be decided.
+
+    The model that decides reads text only (`deepseek-v4-pro` takes no images), so on
+    its own it never sees what the listing leaves out: a menu row with no number, a
+    canvas, a toggle drawn as a picture, a progress bar. A stuck step gets this before it
+    decides (`graph`), unasked — a look the bot did not have to think of. Quiet: nothing
+    is said in the chat, and no step is spent. None when vision is not available, or
+    the answer could not be read; the step then decides from the listing alone.
+    """
+    try:
+        seen = await node.gateway.execute(
+            node.ctx,
+            ToolCall(
+                tool="browser.observe@1",
+                args={"screen_id": str(bot.id), "label": bot.name, "screenshot": True},
+            ),
+        )
+        page = await whole(seen.value, node.artifacts)
+        shot = str(page.get("screenshot") or "")
+        if not page.get("ok", True) or not shot:
+            return None
+        schema = SCHEMAS.get(BOT_LOOK)
+        response = await node.models.complete(
+            node.ctx,
+            ModelRequest(
+                prompt=look_prompt(GLANCE_QUESTION, str(page.get("rendered", ""))),
+                system=LOOK_SYSTEM,
+                images=(ImageInput(media_type="image/jpeg", data=shot),),
+                max_output_tokens=LOOK_MAX_OUTPUT_TOKENS,
+                metadata={"json_schema": schema.json_schema, "schema_ref": BOT_LOOK},
+            ),
+            work_class=WorkClass.PERCEPTION,
+            call_site="bot_agent.glance",
+        )
+    except (ModelCallNotAllowed, ProviderUnavailable, MissingCredentials, SpecError):
+        return None
+    payload = _as_object(response.text)
+    if payload is None or schema.check(payload):
+        return None
+    result = LookResult.model_validate(payload)
+    if result.captcha:
+        return "The screen shows a CAPTCHA or human-verification check: your person answers it."
+    return result.answer

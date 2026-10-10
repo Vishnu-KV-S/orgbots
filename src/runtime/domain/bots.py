@@ -35,9 +35,11 @@ from runtime.domain.schemas import SCHEMAS
 from runtime.domain.skills import SkillDraft
 
 MAX_STEPS = 24
-"""Steps per run — one chunk of a turn. A task that needs more carries on in a new run
-(`bot.continue`, up to `Settings.bot_auto_continue_chunks` chunks), or, past that or
-with auto-continue off, reports progress and waits for "continue"."""
+"""Steps per run — one chunk of a turn, and a checkpoint, not where a task ends. A task
+that needs more carries on in a new run (`bot.continue`) for as long as it is getting
+somewhere; three chunks in a row that are not stop it (`graphs.bot_agent.graph`), and
+`Settings.bot_auto_continue_chunks` is the runaway guard. With auto-continue off it
+reports progress and waits for "continue"."""
 
 BOT_TURN_PRIORITY = 80
 """Queue order, not admission. A bot turn is someone waiting at the chat box, so it is
@@ -45,6 +47,11 @@ claimed ahead of background work (cron firings, the department loop: the default
 Without it a scheduler catching up after downtime puts a "hi" behind every backlogged
 research run, and with one worker slot that is hours. A long task's next chunk is the
 same person's same turn, so it gets the same priority."""
+
+LOG_KEEP = 20
+"""Step-log lines carried in a turn's state and shown to the model. Long enough to hold
+a whole round of trying menus: with 12, the first tries had scrolled out by the time the
+bot came back round to them, and it tried them again."""
 
 MAX_HISTORY_MESSAGES = 24
 """Conversation messages (person and bot, not activity) carried into a run's input."""
@@ -63,10 +70,39 @@ HELPER_REPLY_CHARS = 2_000
 
 MAX_PLAN_ITEMS = 10
 PLAN_ITEM_CHARS = 200
-NOTES_CHARS = 1_500
+NOTES_CHARS = 3_000
 """Working memory — a turn's plan and notes, rewritten by the model as it goes. Small on
 purpose: it rides in every step's output, and a step that overflows `max_output_tokens`
-is a malformed step."""
+is a malformed step. Past these the text is cut (`BotStep._clip`), not refused."""
+
+THOUGHT_CHARS = 1_200
+DIARY_CHARS = 600
+
+ASK_CHARS = 300
+MAX_ASK_ITEMS = 6
+"""The request as the bot read it (`Ask`): a goal, where it is to be done, and what it
+must meet — each line short, because it rides in every step's prompt."""
+
+STEER_INPUT_KEYS = frozenset(
+    {
+        "bot_id",
+        "turn",
+        "member_id",
+        "voice",
+        "resume_pending_id",
+        "resume_credentials_id",
+        "chunk",
+        "carried",
+        "follow_up",
+        "mode",
+        "message_id",
+        "task_id",
+    }
+)
+"""A run whose input holds only these is a turn of the bot's own conversation with its
+person, which a new message from that person can steer (`steerable`). A group's turn, a
+teammate's message, a routine, a check-in or a task from another bot holds more, and a
+message still supersedes it."""
 
 BOT_DELEGATION = {
     "enabled": True,
@@ -105,7 +141,16 @@ files' bytes (`gateway.builtin.browser`)."""
 
 MAX_UPLOAD_FILES = 10
 
-TURN_ENDING = frozenset({"reply", "ask_user"})
+TURN_ENDING = frozenset({"reply", "ask_user", "check_back"})
+
+MIN_CHECK_MINUTES = 1
+MAX_CHECK_MINUTES = 24 * 60
+MAX_CHECKS = 48
+"""Check-ins in a row (`check_back` on a check-in's own turn). A watch that has looked
+this many times with nobody stepping in ends and tells its person, rather than polling a
+quiet page for ever on their budget; their next message starts the count again."""
+
+TASK_CHARS = 2_000
 
 ROUTINE_ACTIONS = frozenset({"save_routine", "delete_routine"})
 """Steps on the bot's own routines (`domain.routines`) — runtime state, like memory."""
@@ -164,6 +209,7 @@ StepAction = Literal[
     "move_file",
     "delete_file",
     "look",
+    "web_search",
     "save_routine",
     "delete_routine",
     "save_skill",
@@ -172,7 +218,55 @@ StepAction = Literal[
     "copy_file",
     "message_bot",
     "use_connector",
+    "check_back",
+    "cancel_check",
 ]
+
+
+def steerable(run_input: dict[str, Any]) -> bool:
+    """Whether a turn started with this input takes its person's new messages into its
+    work while it runs (migration 057), rather than being superseded by them."""
+    return run_input.get("turn") is not None and set(run_input) <= STEER_INPUT_KEYS
+
+
+class Ask(BaseModel):
+    """The latest request, as the bot read it — written once, kept all turn, checked
+    against at every step and before the reply.
+
+    Its point is the parts of a request that are not its topic. "On Claude, do a deep
+    research on X" is about X, but *on Claude* and *deep research* are how it must be
+    done, and a bot that kept only the topic in mind did its own Google search. Written
+    down in the person's words, with nothing to say what kinds of thing count, it holds
+    for an app, a site, a file, a tool, a format or a limit alike.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = Field(
+        max_length=ASK_CHARS, description="What your person wants as the outcome, in a line."
+    )
+    where: str | None = Field(
+        default=None,
+        max_length=ASK_CHARS,
+        description="Where or with what they said to do it, in their words — a site, an "
+        "app, another AI assistant, a connected app, a tool, a file, an account, a mode or "
+        'feature ("on Claude, with deep research"). Omit if they left it to you.',
+    )
+    must: list[Annotated[str, Field(max_length=ASK_CHARS)]] = Field(
+        default_factory=list,
+        max_length=MAX_ASK_ITEMS,
+        description="Every other requirement in their words: what to include or leave "
+        "out, sources, format, length, limits, deadlines, who it is for.",
+    )
+
+
+def render_ask(ask: dict[str, Any]) -> list[str]:
+    """The request, for the prompt and the chat."""
+    lines = [f"Goal: {ask.get('goal', '')}"]
+    if ask.get("where"):
+        lines.append(f"Where / with what: {ask['where']}")
+    lines += [f"Must: {item}" for item in ask.get("must") or []]
+    return lines
 
 
 class BotStep(BaseModel):
@@ -181,7 +275,7 @@ class BotStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     thought: str = Field(
-        max_length=1_200,
+        max_length=THOUGHT_CHARS,
         description="Brief reasoning: what you see, what you are trying to do, and why "
         "this action is the next one. Shown to the person as your activity.",
     )
@@ -199,7 +293,14 @@ class BotStep(BaseModel):
         description="Your working notes for this task — what you have found so far (names, "
         "numbers, prices, links) and what you still need. Pages are gone once you leave "
         "them, so anything you will need later goes here. Replaces your previous notes: "
-        "carry forward what still matters, concisely. Omit to keep the notes you have.",
+        "carry forward what still matters, concisely (at most 3,000 characters — a long "
+        "finding goes in a file, with append_file). Omit to keep the notes you have.",
+    )
+    request: Ask | None = Field(
+        default=None,
+        description="The latest request, as you read it. Write it on the first step of "
+        "every task, and again when a new message from your person changes it; omit it to "
+        "keep the one you have. Leave it out for small talk.",
     )
     action: StepAction = Field(
         description="navigate/click/type/press/select/scroll/hover/back/forward/reload/"
@@ -229,7 +330,12 @@ class BotStep(BaseModel):
         "right now (text = your question) — for images, charts, maps, colours and layout, "
         "or whenever the page listing does not explain what you see; with path = an image "
         "file in your team drive (an attachment, say) it looks at that instead. The answer "
-        "comes back to you. ROUTINES (recurring work, only when your person asks for it): "
+        "comes back to you. WEB: web_search asks the web how something is done and "
+        "continues, without leaving your page (text = the question, naming the site or app "
+        'and what you want, e.g. "How do I turn on Research mode on claude.ai?") — for '
+        "where a feature lives on a site, what a setting is called now, or how a site does "
+        "something you have not done before. The answer, with its sources, comes back to "
+        "you. ROUTINES (recurring work, only when your person asks for it): "
         "save_routine creates or changes one of your routines by name (routine = name, "
         "instruction, cron, timezone, output; active=false pauses it). delete_routine "
         "removes one (routine = its name). SKILLS (your organization's shared how-tos): "
@@ -252,12 +358,16 @@ class BotStep(BaseModel):
         "field or an upload button such as 'Select from computer' (element = that field or "
         "button; path = the file: a path in your team drive, like an attachment's, or "
         "/workspace/...; paths = several files at once). It sends your person's file to the "
-        "site, so they are asked first unless they allowed uploads there."
+        "site, so they are asked first unless they allowed uploads there. LATER: check_back "
+        "ends your turn and wakes you again in in_minutes to do task — for anything you "
+        "are waiting on (a reply, an email, a page that updates); text = what to tell your "
+        "person now, or empty to end quietly. cancel_check drops your scheduled check-in."
     )
     element: int | None = Field(
         default=None,
         description="The [number] of the element, from the LATEST page listing only. "
-        "Required for click, type, select and hover.",
+        "Required for click, type, select and hover. For scroll, optional: scrolls the "
+        "list or panel that element is in (a dialog's list scrolls by itself).",
     )
     url: str | None = Field(default=None, description="For navigate.")
     bot: str | None = Field(
@@ -341,14 +451,20 @@ class BotStep(BaseModel):
     )
     diary: str | None = Field(
         default=None,
-        max_length=600,
+        max_length=DIARY_CHARS,
         description="For reply and ask_user: one line for your diary — what this turn was "
         "about and how it ended, with names, numbers and links worth remembering.",
     )
     key: str | None = Field(default=None, description="For press, e.g. Enter, Tab, Escape.")
     option: str | None = Field(default=None, description="For select: the option's label.")
     direction: Literal["up", "down"] | None = Field(default=None, description="For scroll.")
-    seconds: float | None = Field(default=None, ge=0, le=10, description="For wait.")
+    seconds: float | None = Field(
+        default=None,
+        ge=0,
+        le=30,
+        description="For wait, up to 30: let a page finish loading, or space out repeated "
+        "actions on a site that limits how fast they may come.",
+    )
     timeout: int | None = Field(
         default=None, ge=1, le=300, description="For run_command: seconds before it is stopped."
     )
@@ -372,6 +488,20 @@ class BotStep(BaseModel):
         description="For run_command: run on your person's own machine instead of the "
         "sandbox. Only when the sandbox cannot do it; they approve each one.",
     )
+    in_minutes: int | None = Field(
+        default=None,
+        ge=MIN_CHECK_MINUTES,
+        le=MAX_CHECK_MINUTES,
+        description="For check_back: how many minutes until you look again — matched to how "
+        "fast the thing you wait on changes, and longer each time nothing has.",
+    )
+    task: str | None = Field(
+        default=None,
+        max_length=TASK_CHARS,
+        description="For check_back: what to do when you wake, as a complete task for "
+        "yourself — where to look (the link), what you are waiting for, what was last said, "
+        "and what to do when it comes. You will not remember this turn's steps.",
+    )
     submit: bool = Field(default=False, description="For type: press Enter afterwards.")
     sensitive: bool = Field(
         default=False,
@@ -380,12 +510,68 @@ class BotStep(BaseModel):
         "publicly, deleting something, accepting terms, changing account settings, or "
         "entering a password or other secret.",
     )
+    next_step: Literal["easy", "normal", "hard"] | None = Field(
+        default=None,
+        description="How hard you expect your NEXT decision to be — it sets how much "
+        "thought it gets. easy: nothing to work out (waiting for a page, reading on, a "
+        "click you already know is next). hard: you are unsure what to do, the page is "
+        "confusing, or what you tried is not working. normal otherwise. Omit when this "
+        "step ends your turn.",
+    )
     screenshot: bool = Field(
         default=False,
         description="For reply and ask_user: attach a picture of your screen to the "
         "message, when seeing it helps the person — a result page, something to check or "
         "choose, a form, an error. Not for small talk or when the screen is not relevant.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _clip(cls, data: Any) -> Any:
+        """Working memory that runs long is cut, not refused.
+
+        A model that is not held to the schema by its provider (DeepSeek) writes a
+        2,000-character thought or a plan of twelve lines now and then — most often
+        just as it reads a long result. Refusing the step for that threw away a sound
+        decision, and twice in a row ended the turn on "I got confused". The cut keeps
+        the start, which is where the model puts what matters.
+        """
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        for name, limit in (
+            ("thought", THOUGHT_CHARS),
+            ("notes", NOTES_CHARS),
+            ("diary", DIARY_CHARS),
+        ):
+            value = out.get(name)
+            if isinstance(value, str) and len(value) > limit:
+                out[name] = value[: limit - 1] + "…"
+        ask = out.get("request")
+        if isinstance(ask, dict):
+            ask = dict(ask)
+            for name in ("goal", "where"):
+                value = ask.get(name)
+                if isinstance(value, str) and len(value) > ASK_CHARS:
+                    ask[name] = value[: ASK_CHARS - 1] + "…"
+            must = ask.get("must")
+            if isinstance(must, list):
+                ask["must"] = [
+                    item[: ASK_CHARS - 1] + "…"
+                    if isinstance(item, str) and len(item) > ASK_CHARS
+                    else item
+                    for item in must[:MAX_ASK_ITEMS]
+                ]
+            out["request"] = ask
+        plan = out.get("plan")
+        if isinstance(plan, list):
+            out["plan"] = [
+                item[: PLAN_ITEM_CHARS - 1] + "…"
+                if isinstance(item, str) and len(item) > PLAN_ITEM_CHARS
+                else item
+                for item in plan[:MAX_PLAN_ITEMS]
+            ]
+        return out
 
     @model_validator(mode="after")
     def _check_fields(self) -> BotStep:
@@ -398,7 +584,7 @@ class BotStep(BaseModel):
         if self.action == "press" and not (self.key or "").strip():
             raise ValueError("press needs `key`")
         if (
-            self.action in ("reply", "ask_user", "remember", "recall", "look")
+            self.action in ("reply", "ask_user", "remember", "recall", "look", "web_search")
             and not (self.text or "").strip()
         ):
             raise ValueError(f"{self.action} needs `text`")
@@ -435,6 +621,11 @@ class BotStep(BaseModel):
                 "upload needs `path` — the file to give the site (a team drive path, e.g. an "
                 "attachment's, or /workspace/...) — or `paths` for several"
             )
+        if self.action == "check_back":
+            if self.in_minutes is None:
+                raise ValueError("check_back needs `in_minutes` — when to look again")
+            if not (self.task or "").strip():
+                raise ValueError("check_back needs `task` — what to do when you wake")
         if self.action in SKILL_ACTIONS and self.skill is None:
             raise ValueError(f"{self.action} needs `skill` — at least its name")
         if self.action == "use_connector" and not (
@@ -482,8 +673,15 @@ class BotStep(BaseModel):
         return out
 
 
-BOT_STEP = SCHEMAS.register(BotStep, version=12)
-"""Version 12 added `screenshot` (a picture of the screen on a reply or a question).
+BOT_STEP = SCHEMAS.register(BotStep, version=16)
+"""Version 16 added `web_search`: the bot asks the web how a site does something, without
+leaving its page (`graphs.bot_agent.search`). Version 15 added `request`: the bot writes
+down what was asked — the goal, where or with what, and every requirement — and is held
+to it all turn (`Ask`). Version 14
+added `next_step`: the bot rates its next decision, which picks the model tier that
+makes it (`graphs.bot_agent.tiers`). Version 13 added check-ins (`check_back`
+with `in_minutes` and `task`, and `cancel_check`): the bot wakes itself later to look
+again. Version 12 added `screenshot` (a picture of the screen on a reply or a question).
 Version 11 added `upload` (with `paths`): files from the team drive or /workspace, given
 to a website's file field. Version 10 added `use_connector` (with `connector`, `tool`
 and `args`). Version 9 added `message_bot` (with `handoff`). Version 8 added the

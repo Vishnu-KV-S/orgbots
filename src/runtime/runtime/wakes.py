@@ -1,7 +1,8 @@
 """The wake runner — queued deliveries become bot turns when their bot is free.
 
-A message from one bot to another, and a group message that named a bot, are queued
-(`bot_wakes`) rather than started: a bot running two turns at once would fight itself
+A message from one bot to another, a group message that named a bot, and a check-in a
+bot set itself (`check_back`, held until its `due_at`) are queued (`bot_wakes`) rather
+than started: a bot running two turns at once would fight itself
 for its screen, and a teammate's message must not supersede the work the person gave
 it. So the oldest delivery of each free bot starts (`BotManager.start_wake`), busy
 bots keep theirs — "free" is `BotManager.busy`, the same test a routine waits on — and
@@ -73,7 +74,8 @@ class WakeRunner:
             return
         reason = await self._bots.busy(bot)
         if reason is not None:
-            if now - wake.created_at > dt.timedelta(hours=MAX_WAIT_HOURS):
+            # A check-in has waited only since it fell due, not since it was set.
+            if now - (wake.due_at or wake.created_at) > dt.timedelta(hours=MAX_WAIT_HOURS):
                 await self._skip(wake, f"{bot.name} was {reason} for {MAX_WAIT_HOURS} hours", out)
             else:
                 out.waiting.append(f"{bot.name}: {reason}")

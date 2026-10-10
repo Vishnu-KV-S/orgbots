@@ -55,6 +55,8 @@ String describeAction(Json action) {
       return 'Look at the page';
     case 'plan':
       return 'Plan';
+    case 'request':
+      return 'Your request, as I read it';
     case 'look':
       return 'Look at the screen: “${s('text')}”';
     case 'sign_in':
@@ -96,6 +98,13 @@ String describeAction(Json action) {
       return 'Save routine “${s('name')}”';
     case 'delete_routine':
       return 'Delete routine “${s('name')}”';
+    case 'check_back':
+      final n = action['in_minutes'] is num ? (action['in_minutes'] as num).round() : 0;
+      if (n < 90) return 'Check back in $n minute${n == 1 ? '' : 's'}';
+      final h = (n / 60).round();
+      return 'Check back in $h hour${h == 1 ? '' : 's'}';
+    case 'cancel_check':
+      return 'Stop checking back';
     default:
       return s('type');
   }
@@ -123,6 +132,7 @@ const actionIcons = <String, IconData>{
   'bot_answer': Icons.chat_bubble_outline,
   'observe': Icons.center_focus_weak,
   'plan': Icons.format_list_bulleted,
+  'request': Icons.assignment_turned_in_outlined,
   'look': Icons.visibility_outlined,
   'sign_in': Icons.key_outlined,
   'list_files': Icons.folder_open_outlined,
@@ -140,6 +150,8 @@ const actionIcons = <String, IconData>{
   'use_skill': Icons.auto_awesome_outlined,
   'save_routine': Icons.schedule,
   'delete_routine': Icons.schedule,
+  'check_back': Icons.update,
+  'cancel_check': Icons.alarm_off,
 };
 
 String timeAgo(DateTime when) {

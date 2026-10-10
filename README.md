@@ -223,8 +223,16 @@ journaled and audited exactly like the marketing department.
 Each bot has its own **screen** on one shared **cloud computer**: a Linux desktop with
 Google Chrome on it, a persistent profile (sign-ins are shared by every bot) and one
 window per bot. Bots see a page as a numbered list of its interactive elements plus its
-text, DeepSeek picks one action per step (`BotStep@2`), and the action reaches the
+text, DeepSeek picks one action per step (`BotStep@14`), and the action reaches the
 browser only through `browser.observe@1` / `browser.act@1` in the tool gateway.
+
+Each step goes to the model its difficulty calls for (`graphs/bot_agent/tiers.py`):
+`deepseek-v4-flash` for a step with nothing to work out (small talk, waiting on a page),
+`deepseek-v4-pro` for the usual one, and Pro with thinking on when the bot is stuck — an
+action failing, going round in circles, or redoing what its person corrected. The step
+before also says how hard it expects the next to be. A stuck step is decided with the
+screen in view: the vision model
+(`deepseek-flash`) describes it into the deciding model's prompt, since Pro reads only text.
 
 ```bash
 uv pip install -e ".[dev,computer]"

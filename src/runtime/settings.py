@@ -353,17 +353,23 @@ class Settings(BaseSettings):
 
     bots_organization_name: str = "Personal"
 
-    bot_auto_continue_chunks: int = Field(default=5, ge=1, le=20)
-    """How many runs ("chunks") one instruction to a bot may take before it stops and
-    asks for "continue". A run is `MAX_STEPS` (24) steps; past that, a long task posts
+    bot_auto_continue_chunks: int = Field(default=20, ge=1, le=100)
+    """A runaway guard on how many runs ("chunks") one instruction to a bot may take — not
+    what ends a long task. A run is `MAX_STEPS` (24) steps; past that, a long task posts
     itself a `bot.continue` message and the dispatcher starts the next chunk with the
     same turn, so Stop and a new message still interrupt it. 1 means never carry on
     unasked.
 
+    **What ends a task is whether it is getting anywhere** (`graphs.bot_agent.graph`):
+    three chunks in a row whose plan and notes did not move stop it, and it says what is
+    in the way; a chunk spent waiting on something slow is not counted against it. The
+    default, 20 chunks — 480 steps — is about where browser-use puts its own guard
+    (500), and near it the bot is told to wrap up rather than be cut off.
+
     **The dispatcher does this**, so it only happens where the conductor runs
     (`conductor_enabled`); with the conductor off, every chunk ends with "say continue",
-    as it did before. **Worst case it is this many times a run's ceiling** — 5 x 300
-    cents, $15, for one instruction — though a step costs about a cent."""
+    as it did before. **Worst case it is this many times a run's ceiling**, though a
+    step costs about a cent and a stuck task stops after three chunks."""
 
     public_url: str = ""
     """Where this API is reachable from outside, e.g. a tunnel's https URL. Used only to
